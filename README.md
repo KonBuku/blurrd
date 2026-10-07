@@ -23,6 +23,12 @@ resolution, frame rate, timestamps and audio as the source.
 The first supported game is VALORANT (recordings at 1080p and similar
 16:9 resolutions).
 
+## Contributing
+
+Contributions are welcome; please read the [contributing guide](CONTRIBUTING.md)
+and the [Code of Conduct](CODE_OF_CONDUCT.md) first. Report security problems
+as described in the [security policy](SECURITY.md).
+
 ## License
 
 blurrd is licensed under the [GNU General Public License 3.0 only](LICENSE). See
