@@ -16,10 +16,13 @@ use crate::frame::{Plane, SampleFormat, sample};
 /// Calibrated once in milestone M5 and frozen. On 2,280 kill-feed name boxes
 /// with detail (see [`MIN_DETAIL_VARIANCE`]) from 525 frames of 21 real
 /// 1080p recordings, the residual at every strength, with and without
-/// noise, was at most 0.0046 (99th percentile 0.0017, median 0.0003). The
-/// gate keeps a margin of about 2× above that and stays well below the 5 %
-/// ceiling of the plan. What remains is mostly the rounding of the output
-/// to whole code values.
+/// noise, was at most 0.0046 (99th percentile 0.0017, median 0.0003). That
+/// calibration covered name boxes only; the M5 review measured at most
+/// 0.006 on about 6,900 kill-feed and random 160×30 boxes of 16 real 1080p
+/// frames (every strength, with and without noise, 8 and 10 bit). The gate
+/// keeps a margin of about 1.7× above everything measured so far and stays
+/// well below the 5 % ceiling of the plan. What remains is mostly the
+/// rounding of the output to whole code values.
 ///
 /// [`blurrd_core::BlurStyle::Pixelate`] is not gated: its hard block edges
 /// are high-frequency by design (residuals up to 0.8 on the same boxes)
