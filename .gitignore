@@ -33,6 +33,7 @@ bench-baselines/
 /models/
 *.onnx
 third_party/ffmpeg/
+third_party/ffmpeg.partial/
 third_party/ort/
 /tests/fonts/noto/
 

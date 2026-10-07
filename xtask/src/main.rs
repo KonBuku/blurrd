@@ -3,10 +3,11 @@
 //! Run `cargo xtask <task>` from anywhere inside the repository (the alias is
 //! defined in `.cargo/config.toml`); `cargo xtask help` lists the tasks.
 //! Tasks are added by the milestones that need them: generating TypeScript
-//! bindings and JSON schemas, fetching the pinned FFmpeg and ONNX Runtime
-//! builds, staging runtime DLLs, and more.
+//! bindings and JSON schemas, fetching the pinned FFmpeg build and staging
+//! its DLLs so far.
 
 mod codegen;
+mod ffmpeg;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -31,25 +32,47 @@ enum Task {
     /// Regenerate the JSON Schemas of the persisted documents in
     /// `docs/schema/`.
     Schema,
+    /// Install the FFmpeg build pinned in `third_party/ffmpeg.toml` into
+    /// `third_party/ffmpeg/` and stage its DLLs.
+    ///
+    /// Downloads the release asset (with `GH_TOKEN`, `GITHUB_TOKEN` or the
+    /// GitHub CLI login while the repository is private), verifies its
+    /// SHA-256 and unpacks it. Does nothing but staging when the pinned
+    /// build is already installed.
+    FetchFfmpeg {
+        /// Use this local copy of the pinned archive instead of downloading
+        /// it; it must still match the pinned SHA-256.
+        #[arg(long, value_name = "ZIP")]
+        archive: Option<PathBuf>,
+    },
+    /// Copy the FFmpeg DLLs next to the binaries in `target/` (every build
+    /// profile, including the test binaries in `deps/`).
+    StageDlls,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let root = workspace_root();
     let result = match cli.task {
-        Task::Bindings => codegen::bindings(&codegen::bindings_dir(&root)),
-        Task::Schema => codegen::schemas(&root.join("docs").join("schema")),
+        Task::Bindings => codegen::bindings(&codegen::bindings_dir(&root)).map(report_written),
+        Task::Schema => codegen::schemas(&root.join("docs").join("schema")).map(report_written),
+        Task::FetchFfmpeg { archive } => {
+            let source = archive.map_or(ffmpeg::Source::Release, ffmpeg::Source::Archive);
+            ffmpeg::fetch(&root, &source)
+        }
+        Task::StageDlls => ffmpeg::stage_dlls(&root),
     };
     match result {
-        Ok(written) => {
-            eprintln!("wrote {written} files");
-            ExitCode::SUCCESS
-        }
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error:#}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn report_written(count: usize) {
+    eprintln!("wrote {count} files");
 }
 
 /// The repository root (the parent of the `xtask` package).

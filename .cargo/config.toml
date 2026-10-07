@@ -8,3 +8,6 @@ xtask = "run --quiet --package xtask --"
 TS_RS_EXPORT_DIR = { value = "crates/blurrd-core/bindings", relative = true }
 # u64/i64 fields (sizes, revisions, milliseconds) arrive as JSON numbers.
 TS_RS_LARGE_INT = "number"
+# FFmpeg headers and import libraries for ffmpeg-sys-the-third, installed by
+# `cargo xtask fetch-ffmpeg` from the build pinned in third_party/ffmpeg.toml.
+FFMPEG_DIR = { value = "third_party/ffmpeg", relative = true }

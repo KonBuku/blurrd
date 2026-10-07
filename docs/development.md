@@ -127,7 +127,7 @@ change is merged.
 | Job              | Runner  | Checks                                                                                                             |
 | ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
 | `lint`           | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history |
-| `rust (windows)` | Windows | clippy with `-D warnings`, cargo-nextest, doctests with `RUSTDOCFLAGS=-D warnings`                                 |
+| `rust (windows)` | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), clippy with `-D warnings`, cargo-nextest, doctests             |
 | `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                         |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
@@ -218,7 +218,36 @@ pwsh third_party/ffmpeg-build/build.ps1 -VcpkgRoot C:\vcpkg-blurrd -OutDir C:\ff
 ```
 
 To change the build (another FFmpeg version, a feature), edit the manifest
-or move the baseline, let the workflow build it and publish a new revision.
+or move the baseline, let the workflow build it, publish a new revision and
+pin it.
+
+### Installing the pinned build
+
+`third_party/ffmpeg.toml` pins the release tag, the binary archive and its
+SHA-256 (and the matching source archive). Install it once after cloning
+and again whenever the pin changes:
+
+```sh
+cargo xtask fetch-ffmpeg                       # download, verify, unpack, stage DLLs
+cargo xtask fetch-ffmpeg --archive <file.zip>  # install a local copy of the pinned archive
+cargo xtask stage-dlls                         # copy the DLLs into target/ again
+```
+
+`fetch-ffmpeg` unpacks the archive into `third_party/ffmpeg/` (gitignored),
+which `.cargo/config.toml` passes to the bindings as `FFMPEG_DIR`. Any
+archive whose checksum differs from the pin is rejected. While the
+repository is private, the download authenticates with `GH_TOKEN` or
+`GITHUB_TOKEN` if set, otherwise with the login of the
+[GitHub CLI](https://cli.github.com) (`gh auth login`); the token is passed
+to curl on standard input, never on the command line.
+
+Windows loads the FFmpeg DLLs from the folder of the executable, so
+`fetch-ffmpeg` also copies them into `target/<profile>/` and
+`target/<profile>/deps/` (where the test binaries live) for `debug`,
+`release` and every other profile folder that exists. Run
+`cargo xtask stage-dlls` after `cargo clean` or after building a new
+profile; a test binary that exits with `STATUS_DLL_NOT_FOUND`
+(`0xc0000135`) is missing them.
 
 ## Changelog and releases
 

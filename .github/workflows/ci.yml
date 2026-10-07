@@ -93,9 +93,25 @@ jobs:
         # rust-toolchain.toml with the rustup that ships on the runner.
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Native dependencies are pinned outside Cargo.lock.
+          key: ${{ hashFiles('third_party/*.toml') }}
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
+      - name: ffmpeg cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: third_party/ffmpeg
+          key: ffmpeg-${{ hashFiles('third_party/ffmpeg.toml') }}
+      - name: ffmpeg
+        # Installs the FFmpeg build pinned in third_party/ffmpeg.toml (headers
+        # and import libraries for the bindings) after checking its SHA-256,
+        # and copies its DLLs next to the test binaries. The token reads the
+        # release while the repository is private.
+        run: cargo xtask fetch-ffmpeg
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: tests

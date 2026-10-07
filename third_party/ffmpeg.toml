@@ -1,0 +1,15 @@
+# The FFmpeg build blurrd compiles against and ships: one archive of a
+# `deps-ffmpeg-*` release made by .github/workflows/ffmpeg.yml from
+# third_party/ffmpeg-build/. `cargo xtask fetch-ffmpeg` downloads it,
+# checks the SHA-256 and unpacks it into third_party/ffmpeg/ (FFMPEG_DIR).
+# See docs/development.md ("FFmpeg").
+
+version = "9.0.2"
+revision = 1
+repository = "KonBuku/blurrd"
+tag = "deps-ffmpeg-9.0.2-r1"
+asset = "ffmpeg-9.0.2-r1-win64-lgpl-shared.zip"
+sha256 = "107d3a9452c7216613a1c003c09f87b6a7036e324700b5a2d2e770f77d4362ea"
+# The corresponding source (LGPL), published in the same release.
+source_asset = "ffmpeg-9.0.2-r1-source.zip"
+source_sha256 = "234dc2f8aacf8bd19a03d2d7075ca116c4e99e2fc6316f718a7d22a04c4a4af6"
