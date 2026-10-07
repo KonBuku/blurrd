@@ -17,7 +17,7 @@ pub struct PreparedBox {
     core: RectI,
     /// Left, top, right and bottom edge of the padded rounded rectangle
     /// before alignment and clamping.
-    shape: [f32; 4],
+    shape: [i32; 4],
     /// Corner radius of the shape, at most half its smaller side.
     radius: f32,
     /// Width of the soft edge inside the shape.
@@ -92,14 +92,17 @@ impl PreparedBox {
 
     /// The mask terms of sample `v` along one axis, given the padded, core
     /// and shape extents along that axis.
-    fn axis(&self, v: i32, padded: (i32, i32), core: (i32, i32), shape: (f32, f32)) -> AxisMask {
+    fn axis(&self, v: i32, padded: (i32, i32), core: (i32, i32), shape: (i32, i32)) -> AxisMask {
         if v < padded.0 || v >= padded.1 {
             return AxisMask::OUTSIDE;
         }
+        // Coordinates relative to the start of the padded box: exact in
+        // f32, and the same for a box moved by whole pixels.
+        let local = |c: i32| (i64::from(c) - i64::from(padded.0)) as f32;
+        let (s0, s1) = (local(shape.0), local(shape.1));
         // Distance from the shape's centre minus the half length of its
         // straight part: positive in the corner bands.
-        let q = (v as f32 + 0.5 - f32::midpoint(shape.0, shape.1)).abs()
-            - ((shape.1 - shape.0) * 0.5 - self.radius);
+        let q = (local(v) + 0.5 - f32::midpoint(s0, s1)).abs() - ((s1 - s0) * 0.5 - self.radius);
         let core = v >= core.0 && v < core.1;
         AxisMask {
             mask: if core {
@@ -139,6 +142,32 @@ impl PreparedBox {
         } else {
             column.mask.min(row.mask)
         }
+    }
+
+    /// Everything the mask and the block grid of the box depend on,
+    /// relative to the top-left corner of the padded box: equal keys mean
+    /// equal masks and grids, wherever the boxes are. The seed is not part
+    /// of it.
+    pub(crate) fn shape_key(&self) -> [i64; 15] {
+        let (x, y) = (i64::from(self.padded.x0), i64::from(self.padded.y0));
+        let [s0, s1, s2, s3] = self.shape.map(i64::from);
+        [
+            i64::from(self.padded.x1) - x,
+            i64::from(self.padded.y1) - y,
+            i64::from(self.core.x0) - x,
+            i64::from(self.core.y0) - y,
+            i64::from(self.core.x1) - x,
+            i64::from(self.core.y1) - y,
+            s0 - x,
+            s1 - y,
+            s2 - x,
+            s3 - y,
+            i64::from(self.grid_origin.0) - x,
+            i64::from(self.grid_origin.1) - y,
+            i64::from(self.radius.to_bits()),
+            i64::from(self.feather.to_bits()),
+            i64::from(self.block.to_bits()),
+        ]
     }
 
     /// Mask value of chroma pixel `(cx, cy)`: the maximum of the luma mask
@@ -242,7 +271,7 @@ pub fn prepare_boxes(
         Some(PreparedBox {
             padded,
             core,
-            shape: shape.map(|v| v as f32),
+            shape,
             radius: params.radius.min(half_min),
             feather: params.feather,
             grid_origin: b.grid_origin,

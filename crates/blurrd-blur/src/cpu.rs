@@ -78,23 +78,39 @@ thread_local! {
 /// Buffers of a `blur` call, reused across calls.
 #[derive(Debug, Default)]
 struct Scratch {
-    /// The masks and grids of the boxes of the current call.
+    /// The masks and grids of the box shapes seen so far.
     shapes: Shapes,
     /// Intermediate values of the target being blurred.
     work: Work,
 }
 
-/// The mask terms and block grids of every box, shared by the channels.
+/// The mask terms and block grids of the boxes, kept across calls.
+///
+/// Both depend only on a box's shape relative to its padded box (see
+/// [`PreparedBox::shape_key`]) and on the fill, and are computed in
+/// coordinates relative to the padded box. Boxes of the same size share
+/// them within a frame, and a name that stays or moves by whole pixels
+/// reuses them from the frames before, as kill-feed and scoreboard entries
+/// do for seconds.
 #[derive(Debug, Default)]
 struct Shapes {
-    /// One entry per box of the current call.
+    /// Keys of the valid entries, kept apart from them for a fast search.
+    keys: Vec<ShapeKey>,
+    /// Built shapes; the first `keys.len()` are valid, the others keep
+    /// their buffers for reuse.
     entries: Vec<Shape>,
+    /// Entry of every box of the current call.
+    slots: Vec<usize>,
     /// Gaussian kernels by sigma.
     kernels: Kernels,
 }
 
-/// The mask terms and block grids of one box at luma (index 0) and chroma
-/// (index 1) resolution.
+/// The shape key of a box (see [`PreparedBox::shape_key`]) followed by
+/// the fill's sigma.
+type ShapeKey = [i64; 16];
+
+/// The mask terms and block grids of one shape at luma (index 0) and
+/// chroma (index 1) resolution.
 #[derive(Debug, Default)]
 struct Shape {
     masks: [ChannelMask; 2],
@@ -148,17 +164,42 @@ fn blur_boxes(
 }
 
 impl Shapes {
-    /// Builds the masks and grids of every box of a call.
+    /// Shapes kept across calls; beyond that the store starts over at the
+    /// next call. One call always gets all of its shapes.
+    const CAPACITY: usize = 64;
+
+    /// Finds or builds the shape of every box of a call.
     fn build(&mut self, boxes: &[PreparedBox], params: &PixelParams) {
-        self.entries.resize_with(boxes.len(), Shape::default);
-        for (b, shape) in boxes.iter().zip(self.entries.iter_mut()) {
-            shape.build(b, params.fill, &mut self.kernels);
+        if self.keys.len() > Self::CAPACITY {
+            self.keys.clear();
+        }
+        // The fill decides whether the grids carry interpolation weights
+        // and with which sigma.
+        let fill = match params.fill {
+            Fill::Smooth { sigma_per_block } => i64::from(sigma_per_block.to_bits()),
+            Fill::Blocks | Fill::BoxMean | Fill::Colour(..) => -1,
+        };
+        self.slots.clear();
+        for b in boxes {
+            let mut key = [fill; 16];
+            key[..15].copy_from_slice(&b.shape_key());
+            let found = self.keys.iter().position(|k| *k == key);
+            let slot = found.unwrap_or_else(|| {
+                let slot = self.keys.len();
+                if self.entries.len() == slot {
+                    self.entries.push(Shape::default());
+                }
+                self.entries[slot].build(b, params.fill, &mut self.kernels);
+                self.keys.push(key);
+                slot
+            });
+            self.slots.push(slot);
         }
     }
 
     /// The shape of box `i` of the current call.
     fn of(&self, i: usize) -> &Shape {
-        &self.entries[i]
+        &self.entries[self.slots[i]]
     }
 }
 
@@ -1171,6 +1212,24 @@ mod tests {
             .blur(&mut frame(&mut y, &mut uv, w, h), (0, 0), &boxes, &p)
             .unwrap();
         (y0, uv0, y, uv)
+    }
+
+    #[test]
+    fn stored_shapes_match_fresh_ones() {
+        let rect = RectI::new(20, 10, 60, 24).unwrap();
+        let params = BlurParams::default();
+        // A new thread starts with an empty shape store.
+        let fresh = std::thread::spawn(move || run(&params, rect, 96, 40))
+            .join()
+            .unwrap();
+        // Fill this thread's store beyond its capacity with other shapes,
+        // then blur the box once with a newly built and once with a stored
+        // shape.
+        for width in 0..70 {
+            run(&params, RectI::new(4, 4, 10 + width, 20).unwrap(), 96, 40);
+        }
+        assert_eq!(run(&params, rect, 96, 40), fresh);
+        assert_eq!(run(&params, rect, 96, 40), fresh);
     }
 
     #[test]
