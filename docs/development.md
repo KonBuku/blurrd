@@ -130,7 +130,9 @@ change is merged.
 | `rust (windows)` | Windows | clippy with `-D warnings`, cargo-nextest, doctests with `RUSTDOCFLAGS=-D warnings`                                 |
 | `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                         |
 
-Two more workflows guard pull requests and the workflows themselves:
+`.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
+(see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the
+workflows themselves:
 
 - `.github/workflows/pr-title.yml` checks the pull request title with
   commitlint, because the title becomes the squashed commit header on
@@ -168,6 +170,55 @@ for actions, so `cliff.toml` lists the crate and package updates under
 "Dependencies". Shorten a generated title to 72 characters when squashing.
 Review the Rust `tauri*` and the `@tauri-apps/*` updates together so both
 stay on the same minor version.
+
+## FFmpeg
+
+blurrd links its own minimal FFmpeg build dynamically: FFmpeg 9.0.2 under
+the LGPL-2.1-or-later, with the codec, format, scaling and resampling
+libraries, the hardware codecs (NVENC/NVDEC, AMF, Intel QSV through oneVPL,
+Media Foundation, D3D11VA), dav1d for AV1 decoding and zlib. It contains no
+GPL or non-free parts and no other external libraries. The FFmpeg on your
+`PATH`, if any, is never linked or shipped.
+
+The build is defined in `third_party/ffmpeg-build/`:
+
+| File                       | Purpose                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| `vcpkg.json`               | the `ffmpeg` port (version 9.0.2) and its features                              |
+| `vcpkg-configuration.json` | the vcpkg baseline commit that pins every port version                          |
+| `triplets/`                | `x64-windows-blurrd`: shared libraries, dynamic CRT, release only               |
+| `build.ps1`                | builds, checks the configuration, packages the binaries and the matching source |
+
+`.github/workflows/ffmpeg.yml` runs `build.ps1` on every change to that
+folder. The check fails the build if the configure line contains
+`--enable-gpl`, `--enable-nonfree`, `--enable-version3` or
+`--enable-libopenh264`, if `ffprobe -L` does not report the LGPL 2.1 or
+later, or if a required encoder, decoder or hardware acceleration is
+missing. A manual run with `revision` set to N and `publish` checked uploads
+three files to a new release `deps-ffmpeg-9.0.2-rN`:
+
+- `ffmpeg-9.0.2-rN-win64-lgpl-shared.zip`: `bin/` (DLLs and `ffprobe.exe`),
+  `include/`, `lib/` (import libraries), `licenses/` (the copyright file of
+  every vcpkg package) and `BUILDINFO.txt` (configure line, package
+  versions);
+- `ffmpeg-9.0.2-rN-source.zip`: the FFmpeg release tarball, the vcpkg port
+  files with their patches and the build definition, which is the
+  corresponding source the LGPL requires us to offer;
+- `SHA256SUMS.txt`.
+
+An existing release is never replaced; dispatch the next revision instead.
+To reproduce a build locally, install PowerShell 7, clone vcpkg at the
+baseline commit and run the script from a short path without spaces:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg C:\vcpkg-blurrd
+git -C C:\vcpkg-blurrd checkout <baseline from vcpkg-configuration.json>
+C:\vcpkg-blurrd\bootstrap-vcpkg.bat -disableMetrics
+pwsh third_party/ffmpeg-build/build.ps1 -VcpkgRoot C:\vcpkg-blurrd -OutDir C:\ffb -Revision 0
+```
+
+To change the build (another FFmpeg version, a feature), edit the manifest
+or move the baseline, let the workflow build it and publish a new revision.
 
 ## Changelog and releases
 

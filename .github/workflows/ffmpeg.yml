@@ -1,0 +1,123 @@
+# Builds the minimal LGPL FFmpeg that blurrd links and ships (see
+# third_party/ffmpeg-build/ and docs/development.md, "FFmpeg").
+#
+# Every change to the build definition is built and checked: LGPL-2.1-or-later
+# only, all required components present. A manual run with `publish` set
+# uploads the binary archive, the corresponding source archive and their
+# checksums to a new release `deps-ffmpeg-<version>-r<revision>`; it never
+# replaces an existing release. Pin the published archive afterwards in
+# third_party/ffmpeg.toml.
+
+name: FFmpeg
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "third_party/ffmpeg-build/**"
+      - ".github/workflows/ffmpeg.yml"
+  pull_request:
+    paths:
+      - "third_party/ffmpeg-build/**"
+      - ".github/workflows/ffmpeg.yml"
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Build revision, the N in deps-ffmpeg-<version>-rN (0 = not published)
+        required: true
+        type: number
+        default: 0
+      publish:
+        description: Create the release deps-ffmpeg-<version>-r<revision> with the archives
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: build (windows)
+    runs-on: windows-2025
+    timeout-minutes: 150
+    env:
+      REVISION: ${{ github.event_name == 'workflow_dispatch' && inputs.revision || 0 }}
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw third_party/ffmpeg-build/vcpkg.json | ConvertFrom-Json).'version-string'
+          "tag=deps-ffmpeg-$version-r$env:REVISION" >> $env:GITHUB_OUTPUT
+      - name: vcpkg at the pinned baseline
+        # The runner image ships its own vcpkg at an arbitrary commit; the
+        # build uses a fresh checkout at the baseline from
+        # vcpkg-configuration.json instead.
+        shell: pwsh
+        run: |
+          $baseline = (Get-Content -Raw third_party/ffmpeg-build/vcpkg-configuration.json |
+            ConvertFrom-Json).'default-registry'.baseline
+          git init --quiet C:\vcpkg-blurrd
+          git -C C:\vcpkg-blurrd fetch --quiet --depth 1 https://github.com/microsoft/vcpkg.git $baseline
+          git -C C:\vcpkg-blurrd checkout --quiet FETCH_HEAD
+          C:\vcpkg-blurrd\bootstrap-vcpkg.bat -disableMetrics
+      - name: build and check
+        shell: pwsh
+        run: >-
+          ./third_party/ffmpeg-build/build.ps1
+          -VcpkgRoot C:\vcpkg-blurrd -OutDir C:\ffb -Revision $env:REVISION
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ffmpeg-dist
+          path: C:\ffb\dist\
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: publish
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && inputs.revision > 0
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release and upload its assets
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ffmpeg-dist
+          path: dist
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          TARGET: ${{ github.sha }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::release $TAG already exists; dispatch a new revision instead"
+            exit 1
+          fi
+          gh release create "$TAG" dist/* \
+            --target "$TARGET" \
+            --title "$TAG" \
+            --notes-file - <<EOF
+          Minimal LGPL-2.1-or-later FFmpeg build used by blurrd, built by the
+          FFmpeg workflow from commit $TARGET.
+
+          - \`*-win64-lgpl-shared.zip\`: DLLs, ffprobe, headers, import
+            libraries, licences and BUILDINFO.txt (configure line).
+          - \`*-source.zip\`: the corresponding source (FFmpeg release tarball,
+            vcpkg port files and patches, build definition).
+          - \`SHA256SUMS.txt\`: checksums; pin the binary archive in
+            \`third_party/ffmpeg.toml\`.
+          EOF

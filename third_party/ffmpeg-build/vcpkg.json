@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "blurrd-ffmpeg",
+  "version-string": "9.0.2",
+  "description": "Minimal LGPL-2.1-or-later FFmpeg build shipped with blurrd",
+  "license": "GPL-3.0-only",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": [
+        "amf",
+        "avcodec",
+        "avformat",
+        "dav1d",
+        "ffprobe",
+        "nvcodec",
+        "qsv",
+        "swresample",
+        "swscale",
+        "zlib"
+      ]
+    }
+  ],
+  "overrides": [{ "name": "ffmpeg", "version": "9.0.2", "port-version": 1 }]
+}
