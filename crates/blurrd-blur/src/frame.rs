@@ -1,6 +1,7 @@
 //! Views of YUV 4:2:0 frames and their planes.
 
-use wide::{f32x8, i16x8, i32x8, u8x16, u16x8};
+use wide::bytemuck::cast;
+use wide::{f32x8, i16x8, i32x8, u8x16, u16x8, u32x8};
 
 use crate::BlurError;
 
@@ -124,23 +125,31 @@ impl YuvFrameMut<'_> {
         }
     }
 
-    /// The three channels (Y, U, V) and the plane each one lives in.
-    pub(crate) fn channels(&self) -> [Channel; 3] {
-        let format = self.sample_format();
-        let bytes = format.bytes();
-        let luma = Channel::new(0, 0, bytes, format, self.luma(), Subsampling::Luma);
-        match self {
+    /// The planes the blur writes, each with the channels stored in it.
+    ///
+    /// The interleaved chroma plane of NV12 and P010 is one target with
+    /// both chroma channels, so U and V are read and written together in a
+    /// single pass over the plane.
+    pub(crate) fn targets(&self) -> impl Iterator<Item = Target> + use<> {
+        let luma = self.luma().stride;
+        let targets = match self {
             Self::I420 { u, v, .. } => [
-                luma,
-                Channel::new(1, 0, bytes, format, u, Subsampling::Chroma),
-                Channel::new(2, 0, bytes, format, v, Subsampling::Chroma),
+                Some(Target::new(0, luma, LayoutKind::Packed8, &[0])),
+                Some(Target::new(1, u.stride, LayoutKind::Packed8, &[1])),
+                Some(Target::new(2, v.stride, LayoutKind::Packed8, &[2])),
             ],
-            Self::Nv12 { uv, .. } | Self::P010 { uv, .. } => [
-                luma,
-                Channel::new(1, 0, 2 * bytes, format, uv, Subsampling::Chroma),
-                Channel::new(1, bytes, 2 * bytes, format, uv, Subsampling::Chroma),
+            Self::Nv12 { uv, .. } => [
+                Some(Target::new(0, luma, LayoutKind::Packed8, &[0])),
+                Some(Target::new(1, uv.stride, LayoutKind::Pair8, &[1, 2])),
+                None,
             ],
-        }
+            Self::P010 { uv, .. } => [
+                Some(Target::new(0, luma, LayoutKind::Packed10, &[0])),
+                Some(Target::new(1, uv.stride, LayoutKind::Pair10, &[1, 2])),
+                None,
+            ],
+        };
+        targets.into_iter().flatten()
     }
 
     /// The bytes of plane `index` (0 = Y, then the chroma planes in order).
@@ -174,15 +183,11 @@ impl YuvFrameMut<'_> {
         }
         let (cw, ch) = (luma.width.div_ceil(2), luma.height.div_ceil(2));
         let bytes = self.sample_format().bytes();
-        let mut planes: Vec<(&str, &PlaneMut<'_>, usize)> = vec![("Y", luma, bytes)];
-        match self {
-            Self::I420 { u, v, .. } => {
-                planes.push(("U", u, bytes));
-                planes.push(("V", v, bytes));
-            }
-            Self::Nv12 { uv, .. } | Self::P010 { uv, .. } => planes.push(("UV", uv, 2 * bytes)),
-        }
-        for &(name, plane, pixel_bytes) in &planes[1..] {
+        let chroma = match self {
+            Self::I420 { u, v, .. } => [Some(("U", u, bytes)), Some(("V", v, bytes))],
+            Self::Nv12 { uv, .. } | Self::P010 { uv, .. } => [Some(("UV", uv, 2 * bytes)), None],
+        };
+        for (name, plane, pixel_bytes) in chroma.into_iter().flatten() {
             if (plane.width, plane.height) != (cw, ch) {
                 return Err(BlurError::InvalidFrame(format!(
                     "{name} plane is {}x{}, expected {cw}x{ch} for a {}x{} luma plane",
@@ -229,224 +234,225 @@ impl Subsampling {
     }
 }
 
-/// Where the samples of one channel (Y, U or V) live inside a plane.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Channel {
-    /// Index of the plane, for [`YuvFrameMut::plane_data`].
-    pub(crate) plane: usize,
-    /// Byte offset of the channel's sample inside a pixel.
-    offset: usize,
-    /// Bytes from one pixel to the next.
-    step: usize,
-    /// Bytes from one row to the next.
-    stride: usize,
-    /// Sample storage.
-    pub(crate) format: SampleFormat,
-    /// Resolution relative to luma.
-    pub(crate) subsampling: Subsampling,
+/// How the pixels of a target plane are stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LayoutKind {
+    /// One 8-bit sample per pixel ([`Packed8`]).
+    Packed8,
+    /// One 16-bit P010 sample per pixel ([`Packed10`]).
+    Packed10,
+    /// An interleaved pair of 8-bit samples per pixel ([`Pair8`]).
+    Pair8,
+    /// An interleaved pair of 16-bit P010 samples per pixel ([`Pair10`]).
+    Pair10,
 }
 
-impl Channel {
+/// One plane the blur writes and the channels (0 = Y, 1 = U, 2 = V) of
+/// each of its pixels, in storage order.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Target {
+    /// Index of the plane, for [`YuvFrameMut::plane_data`].
+    pub(crate) plane: usize,
+    /// Bytes from one row to the next.
+    pub(crate) stride: usize,
+    /// How the pixels are stored.
+    pub(crate) layout: LayoutKind,
+    /// The channels of each pixel.
+    pub(crate) channels: &'static [usize],
+}
+
+impl Target {
     const fn new(
         plane: usize,
-        offset: usize,
-        step: usize,
-        format: SampleFormat,
-        view: &PlaneMut<'_>,
-        subsampling: Subsampling,
+        stride: usize,
+        layout: LayoutKind,
+        channels: &'static [usize],
     ) -> Self {
         Self {
             plane,
-            offset,
-            step,
-            stride: view.stride,
-            format,
-            subsampling,
+            stride,
+            layout,
+            channels,
+        }
+    }
+
+    /// Resolution of the plane relative to luma.
+    pub(crate) const fn subsampling(&self) -> Subsampling {
+        if self.plane == 0 {
+            Subsampling::Luma
+        } else {
+            Subsampling::Chroma
         }
     }
 
     /// Largest sample value (255 for 8-bit, 1023 for 10-bit).
     pub(crate) const fn max_value(&self) -> f32 {
-        match self.format {
-            SampleFormat::U8 => 255.0,
-            SampleFormat::U16Le => 1023.0,
+        match self.layout {
+            LayoutKind::Packed8 | LayoutKind::Pair8 => 255.0,
+            LayoutKind::Packed10 | LayoutKind::Pair10 => 1023.0,
         }
-    }
-
-    /// Byte index of the sample at `(x, y)` (plane coordinates).
-    const fn index(&self, x: usize, y: usize) -> usize {
-        y * self.stride + x * self.step + self.offset
-    }
-
-    /// Byte index of the first sample of row `y` from column `x` (plane
-    /// coordinates) and the bytes from one sample to the next.
-    pub(crate) const fn row_start(&self, x: usize, y: usize) -> (usize, usize) {
-        (self.index(x, y), self.step)
     }
 }
 
-/// How the samples of one channel are laid out in a plane row, for loops
-/// specialised per layout. Eight consecutive samples move through a fixed
-/// array and are widened and narrowed with vector instructions.
-pub(crate) trait Lanes {
-    /// Bytes from one sample to the next.
+// The 16-bit layouts reinterpret little-endian sample bytes as lanes.
+#[cfg(not(target_endian = "little"))]
+compile_error!("blurrd-blur reads 16-bit samples as little-endian vector lanes");
+
+/// How the `N` samples of a pixel (one channel, or an interleaved U/V pair)
+/// are stored in a plane row, for loops specialised per layout. Eight
+/// consecutive pixels move through vector registers; the 16-bit layouts
+/// reinterpret the row bytes as lanes instead of assembling them byte by
+/// byte, and a pair layout reads and writes both channels at once.
+pub(crate) trait Layout<const N: usize> {
+    /// Bytes per pixel.
     const STEP: usize;
-    /// Bytes covered by eight consecutive samples, from the first byte of
-    /// the first to the last byte of the eighth.
-    const SPAN: usize;
-    /// Loads eight samples from the start of `chunk` (at least `SPAN`
-    /// bytes) as code values.
-    fn load8(chunk: &[u8]) -> f32x8;
-    /// Stores eight code values (rounded, in range) at the start of
-    /// `chunk`, leaving the bytes of other channels untouched.
-    fn store8(chunk: &mut [u8], values: i32x8);
-    /// Loads the sample at byte index `i`.
-    fn load(data: &[u8], i: usize) -> f32;
-    /// Stores a code value (rounded, in range) at byte index `i`.
-    fn store(data: &mut [u8], i: usize, value: i32);
+    /// Loads the eight pixels at the start of `chunk` (at least
+    /// `8 * STEP` bytes) as code values, one vector per channel.
+    fn load8(chunk: &[u8]) -> [f32x8; N];
+    /// Stores eight pixels of in-range code values at the start of `chunk`
+    /// (all `8 * STEP` bytes are written).
+    fn store8(chunk: &mut [u8], values: [i32x8; N]);
+    /// Loads the pixel at the start of `pixel`.
+    fn load(pixel: &[u8]) -> [f32; N];
+    /// Stores in-range code values into the pixel at the start of `pixel`.
+    fn store(pixel: &mut [u8], values: [i32; N]);
 }
 
 /// 8-bit samples next to each other (luma, I420 chroma).
 #[derive(Debug)]
 pub(crate) struct Packed8;
 
-/// 8-bit samples interleaved with another channel (NV12 chroma).
-#[derive(Debug)]
-pub(crate) struct Paired8;
-
 /// 10-bit P010 samples next to each other (P010 luma).
 #[derive(Debug)]
 pub(crate) struct Packed10;
 
-/// 10-bit P010 samples interleaved with another channel (P010 chroma).
+/// Interleaved U/V pairs of 8-bit samples (NV12 chroma).
 #[derive(Debug)]
-pub(crate) struct Paired10;
+pub(crate) struct Pair8;
 
-/// Copies the first `N` bytes of `chunk` into a zero-padded array of `M`.
-fn padded<const N: usize, const M: usize>(chunk: &[u8]) -> [u8; M] {
-    let mut bytes = [0u8; M];
-    bytes[..N].copy_from_slice(&chunk[..N]);
-    bytes
+/// Interleaved U/V pairs of 10-bit P010 samples (P010 chroma).
+#[derive(Debug)]
+pub(crate) struct Pair10;
+
+/// The first `M` bytes of `bytes` as an array.
+fn take<const M: usize>(bytes: &[u8]) -> [u8; M] {
+    let mut array = [0; M];
+    array.copy_from_slice(&bytes[..M]);
+    array
 }
 
-/// Little-endian 16-bit words of 16 bytes.
-fn words(bytes: [u8; 16]) -> u16x8 {
-    u16x8::from(std::array::from_fn(|k| {
-        u16::from_le_bytes([bytes[2 * k], bytes[2 * k + 1]])
-    }))
-}
-
-/// The bytes of eight little-endian 16-bit words.
-fn word_bytes(words: u16x8) -> [u8; 16] {
-    let words = words.to_array();
-    std::array::from_fn(|i| words[i / 2].to_le_bytes()[i % 2])
-}
-
-/// Narrows eight in-range values (0..=1023) to 16-bit words.
+/// Narrows in-range (0..=1023) lanes to 16-bit words.
 fn narrow16(values: i32x8) -> u16x8 {
-    u16x8::from(
-        i16x8::from_i32x8_saturate(values)
-            .to_array()
-            .map(|v| v as u16),
-    )
+    cast(i16x8::from_i32x8_saturate(values))
 }
 
-impl Lanes for Packed8 {
+impl Layout<1> for Packed8 {
     const STEP: usize = 1;
-    const SPAN: usize = 8;
 
-    fn load8(chunk: &[u8]) -> f32x8 {
-        let bytes = u8x16::from(padded::<8, 16>(chunk));
-        i32x8::from_u16x8(u16x8::from_u8x16_low(bytes)).round_float()
+    fn load8(chunk: &[u8]) -> [f32x8; 1] {
+        let mut bytes = [0; 16];
+        bytes[..8].copy_from_slice(&chunk[..8]);
+        let words = u16x8::from_u8x16_low(u8x16::from(bytes));
+        [i32x8::from_u16x8(words).round_float()]
     }
 
-    fn store8(chunk: &mut [u8], values: i32x8) {
+    fn store8(chunk: &mut [u8], [values]: [i32x8; 1]) {
         let narrow = i16x8::from_i32x8_saturate(values);
         let bytes = u8x16::narrow_i16x8(narrow, narrow).to_array();
         chunk[..8].copy_from_slice(&bytes[..8]);
     }
 
-    fn load(data: &[u8], i: usize) -> f32 {
-        f32::from(data[i])
+    fn load(pixel: &[u8]) -> [f32; 1] {
+        [f32::from(pixel[0])]
     }
 
-    fn store(data: &mut [u8], i: usize, value: i32) {
-        data[i] = value as u8;
+    fn store(pixel: &mut [u8], [value]: [i32; 1]) {
+        pixel[0] = value as u8;
     }
 }
 
-impl Lanes for Paired8 {
+impl Layout<1> for Packed10 {
     const STEP: usize = 2;
-    const SPAN: usize = 15;
 
-    fn load8(chunk: &[u8]) -> f32x8 {
-        let samples = words(padded::<15, 16>(chunk)) & u16x8::splat(0x00FF);
-        i32x8::from_u16x8(samples).round_float()
+    fn load8(chunk: &[u8]) -> [f32x8; 1] {
+        let words = cast::<[u8; 16], u16x8>(take(chunk)) >> 6_u32;
+        [i32x8::from_u16x8(words).round_float()]
     }
 
-    fn store8(chunk: &mut [u8], values: i32x8) {
-        let old = words(padded::<15, 16>(chunk)) & u16x8::splat(0xFF00);
-        let bytes = word_bytes(old | narrow16(values));
-        chunk[..15].copy_from_slice(&bytes[..15]);
+    fn store8(chunk: &mut [u8], [values]: [i32x8; 1]) {
+        let words = narrow16(values) << 6_u32;
+        chunk[..16].copy_from_slice(&cast::<u16x8, [u8; 16]>(words));
     }
 
-    fn load(data: &[u8], i: usize) -> f32 {
-        Packed8::load(data, i)
+    fn load(pixel: &[u8]) -> [f32; 1] {
+        [f32::from(u16::from_le_bytes([pixel[0], pixel[1]]) >> 6)]
     }
 
-    fn store(data: &mut [u8], i: usize, value: i32) {
-        Packed8::store(data, i, value);
+    fn store(pixel: &mut [u8], [value]: [i32; 1]) {
+        pixel[..2].copy_from_slice(&((value as u16) << 6).to_le_bytes());
     }
 }
 
-impl Lanes for Packed10 {
+impl Layout<2> for Pair8 {
     const STEP: usize = 2;
-    const SPAN: usize = 16;
 
-    fn load8(chunk: &[u8]) -> f32x8 {
-        let samples = words(padded::<16, 16>(chunk)) >> 6_u32;
-        i32x8::from_u16x8(samples).round_float()
+    fn load8(chunk: &[u8]) -> [f32x8; 2] {
+        // Each 16-bit lane holds one pair: U in the low byte, V in the high.
+        let words = cast::<[u8; 16], u16x8>(take(chunk));
+        let u = words & u16x8::splat(0x00FF);
+        let v = words >> 8_u32;
+        [
+            i32x8::from_u16x8(u).round_float(),
+            i32x8::from_u16x8(v).round_float(),
+        ]
     }
 
-    fn store8(chunk: &mut [u8], values: i32x8) {
-        chunk[..16].copy_from_slice(&word_bytes(narrow16(values) << 6_u32));
+    fn store8(chunk: &mut [u8], [u, v]: [i32x8; 2]) {
+        let words = narrow16(u) | (narrow16(v) << 8_u32);
+        chunk[..16].copy_from_slice(&cast::<u16x8, [u8; 16]>(words));
     }
 
-    fn load(data: &[u8], i: usize) -> f32 {
-        f32::from(u16::from_le_bytes([data[i], data[i + 1]]) >> 6)
+    fn load(pixel: &[u8]) -> [f32; 2] {
+        [f32::from(pixel[0]), f32::from(pixel[1])]
     }
 
-    fn store(data: &mut [u8], i: usize, value: i32) {
-        data[i..i + 2].copy_from_slice(&((value as u16) << 6).to_le_bytes());
+    fn store(pixel: &mut [u8], [u, v]: [i32; 2]) {
+        pixel[0] = u as u8;
+        pixel[1] = v as u8;
     }
 }
 
-impl Lanes for Paired10 {
+impl Layout<2> for Pair10 {
     const STEP: usize = 4;
-    const SPAN: usize = 30;
 
-    fn load8(chunk: &[u8]) -> f32x8 {
-        let bytes: [u8; 32] = padded::<30, 32>(chunk);
-        f32x8::from(std::array::from_fn(|k| {
-            f32::from(u16::from_le_bytes([bytes[4 * k], bytes[4 * k + 1]]) >> 6)
-        }))
+    fn load8(chunk: &[u8]) -> [f32x8; 2] {
+        // Each 32-bit lane holds one pair: U in the low half, V in the
+        // high half, each with its value in the top 10 bits.
+        let lanes = cast::<[u8; 32], u32x8>(take(chunk));
+        let u = (lanes & u32x8::splat(0xFFFF)) >> 6_u32;
+        let v = lanes >> 22_u32;
+        // Both are below 1024, so the signed conversion is exact.
+        [
+            cast::<u32x8, i32x8>(u).round_float(),
+            cast::<u32x8, i32x8>(v).round_float(),
+        ]
     }
 
-    fn store8(chunk: &mut [u8], values: i32x8) {
-        let mut bytes: [u8; 32] = padded::<30, 32>(chunk);
-        let words = (narrow16(values) << 6_u32).to_array();
-        for (k, word) in words.into_iter().enumerate() {
-            bytes[4 * k..4 * k + 2].copy_from_slice(&word.to_le_bytes());
-        }
-        chunk[..30].copy_from_slice(&bytes[..30]);
+    fn store8(chunk: &mut [u8], [u, v]: [i32x8; 2]) {
+        let (u, v) = (cast::<i32x8, u32x8>(u), cast::<i32x8, u32x8>(v));
+        let lanes = (u << 6_u32) | (v << 22_u32);
+        chunk[..32].copy_from_slice(&cast::<u32x8, [u8; 32]>(lanes));
     }
 
-    fn load(data: &[u8], i: usize) -> f32 {
-        Packed10::load(data, i)
+    fn load(pixel: &[u8]) -> [f32; 2] {
+        let [u] = Packed10::load(pixel);
+        let [v] = Packed10::load(&pixel[2..]);
+        [u, v]
     }
 
-    fn store(data: &mut [u8], i: usize, value: i32) {
-        Packed10::store(data, i, value);
+    fn store(pixel: &mut [u8], [u, v]: [i32; 2]) {
+        Packed10::store(pixel, [u]);
+        Packed10::store(&mut pixel[2..], [v]);
     }
 }
 

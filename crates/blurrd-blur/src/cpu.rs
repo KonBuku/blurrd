@@ -10,9 +10,7 @@ use std::cell::RefCell;
 use blurrd_core::RectI;
 use wide::f32x8;
 
-use crate::frame::{
-    Channel, Lanes, Packed8, Packed10, Paired8, Paired10, SampleFormat, Subsampling,
-};
+use crate::frame::{Layout, LayoutKind, Packed8, Packed10, Pair8, Pair10, Subsampling, Target};
 use crate::params::{Fill, NOISE_AMPLITUDE};
 use crate::prepare::AxisMask;
 use crate::{BlurBackend, BlurError, PixelParams, PreparedBox, YuvFrameMut};
@@ -32,7 +30,10 @@ use crate::{BlurBackend, BlurError, PixelParams, PreparedBox, YuvFrameMut};
 /// once, and every output row is a weighted sum of those few rows, with the
 /// vertical upsample folded into the vertical gaussian weights. That is the
 /// same result as upsampling the whole box first, at a fraction of the
-/// work. The inner loops run on 8-lane vectors.
+/// work. The output rows are produced one at a time and mixed into the
+/// plane right away. The inner loops run on 8-lane vectors, and the
+/// interleaved chroma of NV12 and P010 is read and written as U/V pairs in
+/// one pass.
 ///
 /// Every box is computed from the source pixels of its padded box only; the
 /// results are composited afterwards in box order, so overlapping boxes do
@@ -74,6 +75,50 @@ thread_local! {
     static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
 }
 
+/// Buffers of a `blur` call, reused across calls.
+#[derive(Debug, Default)]
+struct Scratch {
+    /// The masks and grids of the boxes of the current call.
+    shapes: Shapes,
+    /// Intermediate values of the target being blurred.
+    work: Work,
+}
+
+/// The mask terms and block grids of every box, shared by the channels.
+#[derive(Debug, Default)]
+struct Shapes {
+    /// One entry per box of the current call.
+    entries: Vec<Shape>,
+    /// Gaussian kernels by sigma.
+    kernels: Kernels,
+}
+
+/// The mask terms and block grids of one box at luma (index 0) and chroma
+/// (index 1) resolution.
+#[derive(Debug, Default)]
+struct Shape {
+    masks: [ChannelMask; 2],
+    geometries: [Geometry; 2],
+}
+
+/// Intermediate values of one target plane.
+#[derive(Debug, Default)]
+struct Work {
+    /// Column sums of the current band of rows, one row per channel.
+    sums: Vec<f32>,
+    /// Block means, per channel one row per vertical cell.
+    means: Vec<f32>,
+    /// The rows every box is filled from, box after box (see
+    /// [`Job::fill_rows`]).
+    rows: Vec<f32>,
+    /// Start of each box's rows in `rows`.
+    starts: Vec<usize>,
+    /// One upsampled row of means with its replicated border.
+    padded_row: Vec<f32>,
+    /// Mask of one row in a corner band.
+    row_mask: Vec<f32>,
+}
+
 /// Blurs validated `boxes` into `frame` with the given buffers.
 fn blur_boxes(
     frame: &mut YuvFrameMut<'_>,
@@ -82,76 +127,126 @@ fn blur_boxes(
     params: &PixelParams,
     scratch: &mut Scratch,
 ) {
-    let mut kernels = std::mem::take(&mut scratch.kernels);
-    let mut geometries = std::mem::take(&mut scratch.geometries);
-    geometries.resize_with(boxes.len(), Default::default);
-    // Mask terms of every box at luma and at chroma resolution, shared by
-    // the channels.
-    let mut masks = std::mem::take(&mut scratch.masks);
-    masks.resize_with(boxes.len(), Default::default);
-    for (b, [luma, chroma]) in boxes.iter().zip(masks.iter_mut()) {
-        luma.build(b, Subsampling::Luma);
-        chroma.build(b, Subsampling::Chroma);
-    }
-    for (index, channel) in frame.channels().into_iter().enumerate() {
-        let s = channel.subsampling.factor();
-        let offset = (origin.0 / s, origin.1 / s);
-        scratch.patches.clear();
-        // Grid cells and interpolation weights depend only on the box and
-        // the resolution: U reuses them for V.
-        let resolution = usize::from(channel.subsampling == Subsampling::Chroma);
-        if index < 2 {
-            for (b, geometry) in boxes.iter().zip(geometries.iter_mut()) {
-                let kernel = match params.fill {
-                    Fill::Smooth { sigma_per_block } => {
-                        kernels.get(sigma_per_block * b.block / s as f32)
-                    }
-                    Fill::Blocks | Fill::BoxMean | Fill::Colour(..) => &[],
-                };
-                geometry[resolution].build(b, channel.subsampling, kernel);
+    let Scratch { shapes, work } = scratch;
+    shapes.build(boxes, params);
+    for target in frame.targets() {
+        match target.layout {
+            LayoutKind::Packed8 => {
+                blur_target::<Packed8, 1>(frame, &target, origin, boxes, params, shapes, work);
+            }
+            LayoutKind::Packed10 => {
+                blur_target::<Packed10, 1>(frame, &target, origin, boxes, params, shapes, work);
+            }
+            LayoutKind::Pair8 => {
+                blur_target::<Pair8, 2>(frame, &target, origin, boxes, params, shapes, work);
+            }
+            LayoutKind::Pair10 => {
+                blur_target::<Pair10, 2>(frame, &target, origin, boxes, params, shapes, work);
             }
         }
-        let source: &[u8] = frame.plane_data(channel.plane);
-        for (b, geometry) in boxes.iter().zip(&geometries) {
-            let job = PatchJob {
-                geometry: &geometry[resolution],
-                channel: &channel,
-                data: source,
-                offset,
-                area: Area::of(b, channel.subsampling),
-                index,
-                params,
-                b,
-            };
-            job.fill(scratch);
-        }
-        let target = frame.plane_data(channel.plane);
-        let mut start = 0;
-        for (b, [luma, chroma]) in boxes.iter().zip(&masks) {
-            let area = Area::of(b, channel.subsampling);
-            let end = start + area.len();
-            let mask = if channel.subsampling == Subsampling::Luma {
-                luma
-            } else {
-                chroma
-            };
-            let patch = &scratch.patches[start..end];
-            composite(
-                &channel,
-                target,
-                offset,
-                area,
-                b,
-                mask,
-                patch,
-                &mut scratch.row_mask,
-            );
-            start = end;
+    }
+}
+
+impl Shapes {
+    /// Builds the masks and grids of every box of a call.
+    fn build(&mut self, boxes: &[PreparedBox], params: &PixelParams) {
+        self.entries.resize_with(boxes.len(), Shape::default);
+        for (b, shape) in boxes.iter().zip(self.entries.iter_mut()) {
+            shape.build(b, params.fill, &mut self.kernels);
         }
     }
-    scratch.masks = masks;
-    scratch.geometries = geometries;
-    scratch.kernels = kernels;
+
+    /// The shape of box `i` of the current call.
+    fn of(&self, i: usize) -> &Shape {
+        &self.entries[i]
+    }
+}
+
+impl Shape {
+    /// Computes the masks and grids of box `b`.
+    fn build(&mut self, b: &PreparedBox, fill: Fill, kernels: &mut Kernels) {
+        let [luma, chroma] = &mut self.masks;
+        luma.build_luma(b);
+        chroma.build_chroma(luma);
+        for (geometry, subsampling) in self
+            .geometries
+            .iter_mut()
+            .zip([Subsampling::Luma, Subsampling::Chroma])
+        {
+            let kernel = match fill {
+                Fill::Smooth { sigma_per_block } => {
+                    kernels.get(sigma_per_block * b.block / subsampling.factor() as f32)
+                }
+                Fill::Blocks | Fill::BoxMean | Fill::Colour(..) => &[],
+            };
+            geometry.build(b, subsampling, kernel);
+        }
+    }
+}
+
+/// Blurs every box into one target plane whose pixels have `N` channels
+/// stored as `L`.
+fn blur_target<L: Layout<N>, const N: usize>(
+    frame: &mut YuvFrameMut<'_>,
+    target: &Target,
+    origin: (i32, i32),
+    boxes: &[PreparedBox],
+    params: &PixelParams,
+    shapes: &Shapes,
+    work: &mut Work,
+) {
+    let subsampling = target.subsampling();
+    let s = subsampling.factor();
+    let plane = PlaneAccess {
+        stride: target.stride,
+        offset: (origin.0 / s, origin.1 / s),
+    };
+    let resolution = usize::from(subsampling == Subsampling::Chroma);
+
+    // Everything is read from the source before anything is written.
+    let source: &[u8] = frame.plane_data(target.plane);
+    work.rows.clear();
+    work.starts.clear();
+    for (i, b) in boxes.iter().enumerate() {
+        work.starts.push(work.rows.len());
+        let job = Job {
+            source,
+            plane,
+            target,
+            area: Area::of(b, subsampling),
+            params,
+            geometry: &shapes.of(i).geometries[resolution],
+            b,
+        };
+        job.fill_rows::<L, N>(work);
+    }
+
+    let data = frame.plane_data(target.plane);
+    let Work {
+        rows,
+        starts,
+        row_mask,
+        ..
+    } = work;
+    for (i, (b, &start)) in boxes.iter().zip(starts.iter()).enumerate() {
+        let shape = shapes.of(i);
+        let area = Area::of(b, subsampling);
+        let fill = Filled {
+            fill: params.fill,
+            geometry: &shape.geometries[resolution],
+            rows: &rows[start..],
+            width: area.width(),
+        };
+        let mixer = Mixer {
+            data: &mut *data,
+            plane,
+            area,
+            b,
+            mask: &shape.masks[resolution],
+            max: target.max_value(),
+        };
+        mixer.composite::<L, N>(&fill, row_mask);
+    }
 }
 
 /// The part of the full frame that `frame` shows, given its origin.
@@ -175,28 +270,22 @@ fn view_rect(frame: &YuvFrameMut<'_>, origin: (i32, i32)) -> Result<RectI, BlurE
         })
 }
 
-/// Buffers of a `blur` call, reused across calls.
-#[derive(Debug, Default)]
-struct Scratch {
-    /// Mask terms of every box at luma and at chroma resolution.
-    masks: Vec<[ChannelMask; 2]>,
-    /// Blurred values of every box of the current channel, box after box.
-    patches: Vec<f32>,
-    /// Gaussian kernels by sigma.
-    kernels: Kernels,
-    /// Grid cells and interpolation weights of every box at luma and at
-    /// chroma resolution.
-    geometries: Vec<[Geometry; 2]>,
-    /// Block means, one row per vertical cell.
-    means: Vec<f32>,
-    /// Column sums of the current cell row.
-    sums: Vec<f32>,
-    /// Horizontally upsampled and blurred rows of means.
-    smooth_rows: Vec<f32>,
-    /// One upsampled row of means with its replicated border.
-    padded_row: Vec<f32>,
-    /// Mask of one row in a corner band.
-    row_mask: Vec<f32>,
+/// Where the pixels of a target plane are, relative to full-frame channel
+/// coordinates.
+#[derive(Debug, Clone, Copy)]
+struct PlaneAccess {
+    /// Bytes from one row to the next.
+    stride: usize,
+    /// Full-frame channel coordinates of the view's first pixel.
+    offset: (i32, i32),
+}
+
+impl PlaneAccess {
+    /// Byte index of pixel `(x, y)` (full-frame channel coordinates) in a
+    /// plane with `step` bytes per pixel.
+    const fn index(&self, x: i32, y: i32, step: usize) -> usize {
+        (y - self.offset.1) as usize * self.stride + (x - self.offset.0) as usize * step
+    }
 }
 
 /// A box's padded area in one channel, in full-frame channel coordinates.
@@ -237,135 +326,216 @@ impl Area {
     }
 }
 
-/// The blur of one box in one channel.
-struct PatchJob<'a> {
-    channel: &'a Channel,
-    data: &'a [u8],
-    /// Full-frame channel coordinates of the view's first sample.
-    offset: (i32, i32),
+/// The source side of one box in one target plane.
+struct Job<'a> {
+    source: &'a [u8],
+    plane: PlaneAccess,
+    target: &'a Target,
     area: Area,
-    /// 0 = Y, 1 = U, 2 = V.
-    index: usize,
     params: &'a PixelParams,
     /// Grid cells and interpolation weights of the box at this resolution.
     geometry: &'a Geometry,
     b: &'a PreparedBox,
 }
 
-impl PatchJob<'_> {
-    /// Sums the source samples of full-frame channel rows `y0..y1` from
-    /// column `x` per column into `sums`.
-    fn sum_band(&self, x: i32, (y0, y1): (i32, i32), sums: &mut [f32]) {
-        let column = (x - self.offset.0) as usize;
-        let (first, step) = self
-            .channel
-            .row_start(column, (y0 - self.offset.1) as usize);
-        let stride = self
-            .channel
-            .row_start(column, (y0 + 1 - self.offset.1) as usize)
-            .0
-            - first;
-        let rows = (y1 - y0) as usize;
+impl Job<'_> {
+    /// Sums the source pixels of full-frame channel rows `y0..y1` per column
+    /// of the area into `sums` (one row of the area's width per channel).
+    fn sum_band<L: Layout<N>, const N: usize>(&self, (y0, y1): (i32, i32), sums: &mut [f32]) {
         let band = Band {
-            data: self.data,
-            first,
-            stride,
-            rows,
+            data: self.source,
+            first: self.plane.index(self.area.x0, y0, L::STEP),
+            stride: self.plane.stride,
+            rows: (y1 - y0) as usize,
         };
-        match (self.channel.format, step) {
-            (SampleFormat::U8, 1) => band.sum::<Packed8>(sums),
-            (SampleFormat::U8, _) => band.sum::<Paired8>(sums),
-            (SampleFormat::U16Le, 2) => band.sum::<Packed10>(sums),
-            (SampleFormat::U16Le, _) => band.sum::<Paired10>(sums),
-        }
+        band.sum::<L, N>(self.area.width(), sums);
     }
 
-    /// Appends the blurred values of the area (row-major) to
-    /// `scratch.patches`. Noise can push them slightly out of range; the
-    /// composite clamps.
-    fn fill(&self, scratch: &mut Scratch) {
-        let a = self.area;
-        let start = scratch.patches.len();
-        scratch.patches.resize(start + a.len(), 0.0);
-        let max = self.channel.max_value();
+    /// Appends the rows the box is filled from to `work.rows`:
+    ///
+    /// - smooth fill: per channel the horizontally upsampled and blurred
+    ///   row of every cell row; output rows are weighted sums of them;
+    /// - blocks: per channel the expanded means of every cell row;
+    /// - box mean and solid colour: per channel one constant row.
+    ///
+    /// Noise can push values slightly out of range; the mix clamps.
+    fn fill_rows<L: Layout<N>, const N: usize>(&self, work: &mut Work) {
+        let w = self.area.width();
         match self.params.fill {
             Fill::Smooth { .. } => {
-                self.block_means(scratch);
-                smooth(scratch, self.geometry, start, a);
+                self.block_means::<L, N>(work);
+                smooth(work, self.geometry, w, N);
             }
             Fill::Blocks => {
-                self.block_means(scratch);
-                let (cols, rows) = (&self.geometry.cols, &self.geometry.rows);
-                let out = &mut scratch.patches[start..];
-                let w = a.width();
-                for r in 0..rows.len() {
-                    let y0 = (rows.bounds[r] - a.y0) as usize;
-                    let y1 = (rows.bounds[r + 1] - a.y0) as usize;
-                    let first = &mut out[y0 * w..(y0 + 1) * w];
-                    for c in 0..cols.len() {
-                        let x0 = (cols.bounds[c] - a.x0) as usize;
-                        let x1 = (cols.bounds[c + 1] - a.x0) as usize;
-                        first[x0..x1].fill(scratch.means[r * cols.len() + c]);
-                    }
-                    let (head, tail) = out.split_at_mut((y0 + 1) * w);
-                    let first = &head[y0 * w..];
-                    for row in tail[..(y1 - y0 - 1) * w].chunks_exact_mut(w) {
-                        row.copy_from_slice(first);
+                self.block_means::<L, N>(work);
+                let cols = &self.geometry.cols;
+                for means in work.means.chunks_exact(cols.len()) {
+                    for (c, &mean) in means.iter().enumerate() {
+                        let (x0, x1) = (cols.bounds[c], cols.bounds[c + 1]);
+                        let len = (x1 - x0) as usize;
+                        work.rows.extend(std::iter::repeat_n(mean, len));
                     }
                 }
             }
             Fill::BoxMean => {
-                scratch.sums.resize(a.width(), 0.0);
-                self.sum_band(a.x0, (a.y0, a.y1), &mut scratch.sums);
-                let mean = lane_sum(&scratch.sums) / a.len() as f32;
-                scratch.patches[start..].fill(mean);
+                work.sums.resize(N * w, 0.0);
+                self.sum_band::<L, N>((self.area.y0, self.area.y1), &mut work.sums);
+                let len = self.area.len() as f32;
+                for sums in work.sums.chunks_exact(w) {
+                    let mean = lane_sum(sums) / len;
+                    work.rows.extend(std::iter::repeat_n(mean, w));
+                }
             }
             Fill::Colour(colour, rgb) => {
-                let bits = if max > 255.0 { 10 } else { 8 };
-                let value = colour.code_values(rgb, bits)[self.index];
-                scratch.patches[start..].fill(value);
+                let bits = if self.target.max_value() > 255.0 {
+                    10
+                } else {
+                    8
+                };
+                let values = colour.code_values(rgb, bits);
+                for &channel in self.target.channels {
+                    work.rows.extend(std::iter::repeat_n(values[channel], w));
+                }
             }
         }
     }
 
-    /// Computes the block means of the area into `scratch.means`
-    /// (row-major, one row per vertical cell). Adds the per-block
-    /// noise to luma when it is enabled.
-    fn block_means(&self, scratch: &mut Scratch) {
-        let a = self.area;
+    /// Computes the block means of the area into `work.means` (per channel
+    /// one row per vertical cell). Adds the per-block noise to luma when it
+    /// is enabled.
+    fn block_means<L: Layout<N>, const N: usize>(&self, work: &mut Work) {
+        let w = self.area.width();
         let (cols, rows) = (&self.geometry.cols, &self.geometry.rows);
-        let w = a.width();
-        scratch.means.clear();
-        scratch.sums.resize(w, 0.0);
-        let amplitude = NOISE_AMPLITUDE * self.channel.max_value() / 255.0;
-        let noisy = self.params.noise && self.index == 0;
-        for r in 0..rows.len() {
-            self.sum_band(
-                a.x0,
-                (rows.bounds[r], rows.bounds[r + 1]),
-                &mut scratch.sums,
-            );
-            let height = (rows.bounds[r + 1] - rows.bounds[r]) as f32;
-            for c in 0..cols.len() {
-                let x0 = (cols.bounds[c] - a.x0) as usize;
-                let x1 = (cols.bounds[c + 1] - a.x0) as usize;
-                let sum: f32 = scratch.sums[x0..x1].iter().sum();
-                let mut mean = sum / (height * (x1 - x0) as f32);
-                if noisy {
-                    mean += amplitude * noise(self.b.seed, cols.index(c), rows.index(r));
+        let (nx, ny) = (cols.len(), rows.len());
+        work.means.clear();
+        work.means.resize(N * ny * nx, 0.0);
+        work.sums.resize(N * w, 0.0);
+        let amplitude = NOISE_AMPLITUDE * self.target.max_value() / 255.0;
+        for r in 0..ny {
+            let (y0, y1) = (rows.bounds[r], rows.bounds[r + 1]);
+            let band = (self.area.y0 + y0, self.area.y0 + y1);
+            self.sum_band::<L, N>(band, &mut work.sums);
+            let height = (y1 - y0) as f32;
+            for (c, sums) in work.sums.chunks_exact(w).enumerate() {
+                let noisy = self.params.noise && self.target.channels[c] == 0;
+                let means = &mut work.means[(c * ny + r) * nx..][..nx];
+                for (col, mean) in means.iter_mut().enumerate() {
+                    let x0 = cols.bounds[col] as usize;
+                    let x1 = cols.bounds[col + 1] as usize;
+                    let sum: f32 = sums[x0..x1].iter().sum();
+                    *mean = sum / (height * (x1 - x0) as f32);
+                    if noisy {
+                        *mean += amplitude * noise(self.b.seed, cols.index(col), rows.index(r));
+                    }
                 }
-                scratch.means.push(mean);
             }
         }
     }
 }
 
-/// A box's block grid and interpolation weights at one resolution.
+/// The rows a box is filled from (see [`Job::fill_rows`]) and how output
+/// rows are made of them.
+struct Filled<'a> {
+    fill: Fill,
+    geometry: &'a Geometry,
+    /// The box's rows, from the start of them.
+    rows: &'a [f32],
+    width: usize,
+}
+
+impl Filled<'_> {
+    /// The cell rows of channel `c`, `first..=last`.
+    fn cell_rows(&self, c: usize, (first, last): (usize, usize)) -> &[f32] {
+        let (w, ny) = (self.width, self.geometry.rows.len());
+        &self.rows[(c * ny + first) * w..(c * ny + last + 1) * w]
+    }
+
+    /// The smooth fill of output row `y` (area row index): a weighted sum
+    /// of the few cell rows that reach it.
+    fn weighted<const N: usize>(&self, y: usize) -> Weighted<'_, N> {
+        let geometry = self.geometry;
+        let band = geometry.bands[y];
+        Weighted {
+            weights: &geometry.vertical[y * geometry.rows.len()..][band.0..=band.1],
+            rows: std::array::from_fn(|c| self.cell_rows(c, band)),
+            width: self.width,
+        }
+    }
+
+    /// The hard blocks of output row `y` (area row index).
+    fn blocks<const N: usize>(&self, y: usize) -> Direct<'_, N> {
+        let r = self.geometry.cell_rows[y];
+        Direct(std::array::from_fn(|c| self.cell_rows(c, (r, r))))
+    }
+
+    /// The constant row of a box-mean or colour fill.
+    fn constant<const N: usize>(&self) -> Direct<'_, N> {
+        let w = self.width;
+        Direct(std::array::from_fn(|c| &self.rows[c * w..(c + 1) * w]))
+    }
+}
+
+/// The blurred values of one output row, per channel.
+trait Blurred<const N: usize> {
+    /// The values of pixels `x..x + 8`.
+    fn load8(&self, x: usize) -> [f32x8; N];
+    /// The values of pixel `x`.
+    fn get(&self, x: usize) -> [f32; N];
+}
+
+/// A row stored as it is.
+struct Direct<'a, const N: usize>([&'a [f32]; N]);
+
+impl<const N: usize> Blurred<N> for Direct<'_, N> {
+    fn load8(&self, x: usize) -> [f32x8; N] {
+        self.0.map(|row| load8(&row[x..]))
+    }
+
+    fn get(&self, x: usize) -> [f32; N] {
+        self.0.map(|row| row[x])
+    }
+}
+
+/// `sum_r weights[r] * rows[c][r * width + x]`, computed while mixing, so
+/// the output row is never stored.
+struct Weighted<'a, const N: usize> {
+    weights: &'a [f32],
+    /// Per channel the cell rows that reach the output row.
+    rows: [&'a [f32]; N],
+    width: usize,
+}
+
+impl<const N: usize> Blurred<N> for Weighted<'_, N> {
+    fn load8(&self, x: usize) -> [f32x8; N] {
+        self.rows.map(|rows| {
+            let mut acc = f32x8::ZERO;
+            for (r, &w) in self.weights.iter().enumerate() {
+                acc += f32x8::splat(w) * load8(&rows[r * self.width + x..]);
+            }
+            acc
+        })
+    }
+
+    fn get(&self, x: usize) -> [f32; N] {
+        self.rows.map(|rows| {
+            let mut acc = 0.0;
+            for (r, &w) in self.weights.iter().enumerate() {
+                acc += w * rows[r * self.width + x];
+            }
+            acc
+        })
+    }
+}
+
+/// A box's block grid and interpolation weights at one resolution, in
+/// coordinates relative to the box's padded area.
 #[derive(Debug, Default)]
 struct Geometry {
     /// Grid cells along x and y.
     cols: Cells,
     rows: Cells,
+    /// Cell row of every area row.
+    cell_rows: Vec<usize>,
     /// Horizontal bilinear taps per output column: the two cells and the
     /// weight of the second.
     tap_first: Vec<u32>,
@@ -373,7 +543,9 @@ struct Geometry {
     tap_weight: Vec<f32>,
     /// Gaussian weights for the horizontal pass.
     kernel: Vec<f32>,
-    /// Folded vertical weights, `rows.len()` per output row.
+    /// Vertical bilinear taps per area row, like the horizontal ones.
+    row_taps: Vec<(usize, usize, f32)>,
+    /// Folded vertical weights, one per cell row for every output row.
     vertical: Vec<f32>,
     /// Per output row, the first and last cell row with a non-zero weight.
     bands: Vec<(usize, usize)>,
@@ -384,32 +556,42 @@ impl Geometry {
     /// `kernel` is not empty (smooth fill), the interpolation weights.
     fn build(&mut self, b: &PreparedBox, subsampling: Subsampling, kernel: &[f32]) {
         let area = Area::of(b, subsampling);
-        let s = subsampling.factor() as f32;
-        let block = b.block / s;
+        let s = subsampling.factor();
+        let block = b.block / s as f32;
+        // The grid origin relative to the area. The padded box starts on
+        // even coordinates, so this is exact for chroma as well.
+        let local = |g: i32, start: i32| (i64::from(g) - i64::from(s * start)) as f32 / s as f32;
         let (gx, gy) = b.grid_origin;
-        self.cols.compute(gx as f32 / s, block, area.x0, area.x1);
-        self.rows.compute(gy as f32 / s, block, area.y0, area.y1);
+        let (width, height) = (area.width() as i32, area.height() as i32);
+        self.cols.compute(local(gx, area.x0), block, 0, width);
+        self.rows.compute(local(gy, area.y0), block, 0, height);
+        self.cell_rows.clear();
+        for (r, bounds) in self.rows.bounds.windows(2).enumerate() {
+            let len = (bounds[1] - bounds[0]) as usize;
+            self.cell_rows.extend(std::iter::repeat_n(r, len));
+        }
         self.kernel.clear();
         self.kernel.extend_from_slice(kernel);
         if kernel.is_empty() {
             return;
         }
-        let mut taps = Vec::new();
-        bilinear_taps(&self.cols, area.x0, area.width(), &mut taps);
         self.tap_first.clear();
         self.tap_second.clear();
         self.tap_weight.clear();
-        for &(c0, c1, t) in &taps {
+        bilinear_taps(&self.cols, area.width(), |c0, c1, t| {
             self.tap_first.push(c0 as u32);
             self.tap_second.push(c1 as u32);
             self.tap_weight.push(t);
-        }
+        });
 
         // A = G * U: the vertical bilinear weights folded into the gaussian
         // (replicated border), one row of cell weights per output row.
         let (height, ny) = (area.height(), self.rows.len());
         let radius = kernel.len() / 2;
-        bilinear_taps(&self.rows, area.y0, height, &mut taps);
+        self.row_taps.clear();
+        bilinear_taps(&self.rows, height, |r0, r1, t| {
+            self.row_taps.push((r0, r1, t));
+        });
         self.vertical.clear();
         self.vertical.resize(height * ny, 0.0);
         self.bands.clear();
@@ -419,7 +601,7 @@ impl Geometry {
             let (mut pair, mut sum0, mut sum1) = ((0, 0), 0.0f32, 0.0f32);
             for (t, &k) in kernel.iter().enumerate() {
                 let source = (y + t).saturating_sub(radius).min(height - 1);
-                let (r0, r1, w) = taps[source];
+                let (r0, r1, w) = self.row_taps[source];
                 if (r0, r1) != pair {
                     weights[pair.0] += sum0;
                     weights[pair.1] += sum1;
@@ -437,43 +619,35 @@ impl Geometry {
     }
 }
 
-/// Bilinear upsample of the block means followed by a separable gaussian
-/// with a replicated border, written to `scratch.patches[start..]`.
+/// Bilinear upsample of the block means followed by a horizontal gaussian
+/// with a replicated border: appends the smoothed row of every cell row of
+/// every channel (`channels` sets of means in `work.means`) to `work.rows`.
 ///
-/// Horizontal pass: each row of means is upsampled to the area's width,
-/// padded by the kernel radius with its edge values and convolved. Vertical
-/// pass: output row `y` is `sum_k A[y][k] * row_k` with the folded weights
-/// of [`Geometry`]. That equals upsampling the whole area first, because
-/// both passes are linear and act on different axes.
-fn smooth(scratch: &mut Scratch, geometry: &Geometry, start: usize, area: Area) {
-    let (width, height) = (area.width(), area.height());
-    let (nx, ny) = (geometry.cols.len(), geometry.rows.len());
+/// Each row of means is upsampled to the area's `width`, padded by the
+/// kernel radius with its edge values and convolved. Output row `y` is then
+/// `sum_k A[y][k] * row_k` with the folded weights of [`Geometry`], which
+/// equals upsampling the whole area first, because both passes are linear
+/// and act on different axes.
+fn smooth(work: &mut Work, geometry: &Geometry, width: usize, channels: usize) {
+    let nx = geometry.cols.len();
     let kernel = &geometry.kernel;
     let radius = kernel.len() / 2;
-
-    scratch.smooth_rows.clear();
-    scratch.smooth_rows.resize(ny * width, 0.0);
-    scratch.padded_row.resize(width + 2 * radius, 0.0);
-    for r in 0..ny {
-        let means = &scratch.means[r * nx..(r + 1) * nx];
-        let padded = &mut scratch.padded_row;
+    let start = work.rows.len();
+    let rows = work.means.len() / nx;
+    debug_assert_eq!(rows, channels * geometry.rows.len());
+    work.rows.resize(start + rows * width, 0.0);
+    work.padded_row.resize(width + 2 * radius, 0.0);
+    let padded = &mut work.padded_row;
+    for (means, out) in work
+        .means
+        .chunks_exact(nx)
+        .zip(work.rows[start..].chunks_exact_mut(width))
+    {
         upsample(means, geometry, &mut padded[radius..radius + width]);
         let (left, right) = (padded[radius], padded[radius + width - 1]);
         padded[..radius].fill(left);
         padded[radius + width..].fill(right);
-        let out = &mut scratch.smooth_rows[r * width..(r + 1) * width];
         convolve(padded, kernel, out);
-    }
-
-    let out = &mut scratch.patches[start..start + width * height];
-    for ((row, weights), &(first, last)) in out
-        .chunks_exact_mut(width)
-        .zip(geometry.vertical.chunks_exact(ny))
-        .zip(&geometry.bands)
-    {
-        // Only a few cell rows reach an output row; skip the zero weights.
-        let rows = &scratch.smooth_rows[first * width..(last + 1) * width];
-        weighted_rows(&weights[first..=last], rows, row);
     }
 }
 
@@ -548,45 +722,6 @@ fn upsample(means: &[f32], geometry: &Geometry, out: &mut [f32]) {
     }
 }
 
-/// `out[x] = sum_r weights[r] * rows[r * out.len() + x]`, four groups of
-/// eight outputs at a time.
-fn weighted_rows(weights: &[f32], rows: &[f32], out: &mut [f32]) {
-    let width = out.len();
-    let (chunks, rest) = out.as_chunks_mut::<8>();
-    let (blocks, remainder) = chunks.as_chunks_mut::<4>();
-    let mut base = 0;
-    for block in blocks {
-        let mut acc = [f32x8::ZERO; 4];
-        for (r, &w) in weights.iter().enumerate() {
-            let w = f32x8::splat(w);
-            let start = r * width + base;
-            let (window, _) = rows[start..start + 32].as_chunks::<8>();
-            for (a, s) in acc.iter_mut().zip(window) {
-                *a += w * f32x8::from(*s);
-            }
-        }
-        for (o, a) in block.iter_mut().zip(acc) {
-            *o = a.to_array();
-        }
-        base += 32;
-    }
-    for o in remainder {
-        let mut acc = f32x8::ZERO;
-        for (r, &w) in weights.iter().enumerate() {
-            acc += f32x8::splat(w) * load8(&rows[r * width + base..]);
-        }
-        *o = acc.to_array();
-        base += 8;
-    }
-    for (i, o) in rest.iter_mut().enumerate() {
-        *o = weights
-            .iter()
-            .enumerate()
-            .map(|(r, &w)| w * rows[r * width + base + i])
-            .sum();
-    }
-}
-
 /// The first eight values of `values` as a vector.
 fn load8(values: &[f32]) -> f32x8 {
     let mut lanes = [0.0; 8];
@@ -594,10 +729,10 @@ fn load8(values: &[f32]) -> f32x8 {
     f32x8::from(lanes)
 }
 
-/// Consecutive rows of one channel inside a plane.
+/// Consecutive rows of a plane.
 struct Band<'a> {
     data: &'a [u8],
-    /// Byte index of the first sample of the first row.
+    /// Byte index of the first pixel of the first row.
     first: usize,
     /// Bytes from one row to the next.
     stride: usize,
@@ -605,43 +740,59 @@ struct Band<'a> {
 }
 
 impl Band<'_> {
-    /// `sums[i] = sum over the rows of sample i`. Four groups of eight
-    /// columns are summed at once, so the additions of one group do not
-    /// wait for each other.
-    fn sum<L: Lanes>(&self, sums: &mut [f32]) {
-        let (chunks, rest) = sums.as_chunks_mut::<8>();
-        let (blocks, remainder) = chunks.as_chunks_mut::<4>();
+    /// Sums the first `width` pixels over the rows, per column and channel:
+    /// `sums[c * width + i]` is the sum of channel `c` of pixel `i`. Up to
+    /// four groups of eight pixels are summed at once (fewer for pairs, to
+    /// stay within the vector registers), so the additions of one group do
+    /// not wait for each other.
+    fn sum<L: Layout<N>, const N: usize>(&self, width: usize, sums: &mut [f32]) {
+        let groups = 4 / N;
         let mut column = 0;
-        for block in blocks {
-            let mut acc = [f32x8::ZERO; 4];
+        while column + 8 * groups <= width {
+            let mut acc = [[f32x8::ZERO; N]; 4];
             for row in 0..self.rows {
                 let start = self.first + row * self.stride + column * L::STEP;
-                for (k, a) in acc.iter_mut().enumerate() {
-                    *a += L::load8(&self.data[start + k * 8 * L::STEP..]);
+                for (g, a) in acc.iter_mut().take(groups).enumerate() {
+                    let values = L::load8(&self.data[start + 8 * g * L::STEP..]);
+                    for (a, v) in a.iter_mut().zip(values) {
+                        *a += v;
+                    }
                 }
             }
-            for (o, a) in block.iter_mut().zip(acc) {
-                *o = a.to_array();
+            for (g, a) in acc.iter().take(groups).enumerate() {
+                for (c, a) in a.iter().enumerate() {
+                    let at = c * width + column + 8 * g;
+                    sums[at..at + 8].copy_from_slice(&a.to_array());
+                }
             }
-            column += 32;
+            column += 8 * groups;
         }
-        for o in remainder {
-            let mut acc = f32x8::ZERO;
+        while column + 8 <= width {
+            let mut acc = [f32x8::ZERO; N];
             for row in 0..self.rows {
-                acc += L::load8(&self.data[self.first + row * self.stride + column * L::STEP..]);
+                let values =
+                    L::load8(&self.data[self.first + row * self.stride + column * L::STEP..]);
+                for (a, v) in acc.iter_mut().zip(values) {
+                    *a += v;
+                }
             }
-            *o = acc.to_array();
+            for (c, a) in acc.iter().enumerate() {
+                let at = c * width + column;
+                sums[at..at + 8].copy_from_slice(&a.to_array());
+            }
             column += 8;
         }
-        for (i, o) in rest.iter_mut().enumerate() {
-            *o = (0..self.rows)
-                .map(|row| {
-                    L::load(
-                        self.data,
-                        self.first + row * self.stride + (column + i) * L::STEP,
-                    )
-                })
-                .sum();
+        for i in column..width {
+            let mut acc = [0.0f32; N];
+            for row in 0..self.rows {
+                let values = L::load(&self.data[self.first + row * self.stride + i * L::STEP..]);
+                for (a, v) in acc.iter_mut().zip(values) {
+                    *a += v;
+                }
+            }
+            for (c, a) in acc.into_iter().enumerate() {
+                sums[c * width + i] = a;
+            }
         }
     }
 }
@@ -699,28 +850,27 @@ impl Cells {
     }
 }
 
-/// For each of `len` samples from `lo`, the two cells to interpolate and
-/// the weight of the second one, written to `out`. Samples before the first
+/// Calls `tap` for each of the first `len` samples with the two cells to
+/// interpolate and the weight of the second one. Samples before the first
 /// or after the last cell centre take that cell's value (replicated
 /// border).
-fn bilinear_taps(cells: &Cells, lo: i32, len: usize, out: &mut Vec<(usize, usize, f32)>) {
+fn bilinear_taps(cells: &Cells, len: usize, mut tap: impl FnMut(usize, usize, f32)) {
     let c = &cells.centres;
     let last = c.len() - 1;
     let mut j = 0;
-    out.clear();
-    out.extend((0..len).map(|i| {
-        let p = (lo + i as i32) as f32 + 0.5;
+    for i in 0..len {
+        let p = i as f32 + 0.5;
         while j < last && c[j + 1] <= p {
             j += 1;
         }
         if p <= c[0] {
-            (0, 0, 0.0)
+            tap(0, 0, 0.0);
         } else if j == last {
-            (last, last, 0.0)
+            tap(last, last, 0.0);
         } else {
-            (j, j + 1, (p - c[j]) / (c[j + 1] - c[j]))
+            tap(j, j + 1, (p - c[j]) / (c[j + 1] - c[j]));
         }
-    }));
+    }
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -795,31 +945,38 @@ struct ChannelMask {
 }
 
 impl ChannelMask {
-    /// Computes the terms of box `b` at the given resolution.
-    fn build(&mut self, b: &PreparedBox, subsampling: Subsampling) {
-        let area = Area::of(b, subsampling);
-        let factor = subsampling.factor();
-        self.chroma = factor == 2;
-        // Luma terms of the samples' columns and rows; a second luma
-        // column or row outside the padded box has mask 0.
-        let terms = |at: fn(&PreparedBox, i32) -> AxisMask, v: i32, end: i32| {
-            let first = at(b, factor * v);
-            let second = if factor == 1 {
-                first
-            } else if 2 * v + 1 < end {
-                at(b, 2 * v + 1)
-            } else {
-                AxisMask::OUTSIDE
-            };
-            [first, second]
-        };
+    /// Computes the luma terms of box `b`.
+    fn build_luma(&mut self, b: &PreparedBox) {
         let padded = b.padded();
+        self.chroma = false;
         self.columns.clear();
-        self.columns
-            .extend((area.x0..area.x1).map(|x| terms(PreparedBox::column, x, padded.x1)));
+        self.columns.extend((padded.x0..padded.x1).map(|x| {
+            let term = b.column(x);
+            [term, term]
+        }));
         self.rows.clear();
-        self.rows
-            .extend((area.y0..area.y1).map(|y| terms(PreparedBox::row, y, padded.y1)));
+        self.rows.extend((padded.y0..padded.y1).map(|y| {
+            let term = b.row(y);
+            [term, term]
+        }));
+        self.pool();
+    }
+
+    /// Computes the chroma terms from the luma terms of the same box:
+    /// chroma sample `i` covers luma columns (rows) `2i` and `2i + 1` of the
+    /// padded box, which starts on an even coordinate; a second column (row)
+    /// past an odd frame edge is outside the box.
+    fn build_chroma(&mut self, luma: &Self) {
+        self.chroma = true;
+        self.columns.clear();
+        self.columns.extend(luma_pairs(&luma.columns));
+        self.rows.clear();
+        self.rows.extend(luma_pairs(&luma.rows));
+        self.pool();
+    }
+
+    /// Derives the max-pooled column masks and the corner columns.
+    fn pool(&mut self) {
         self.pooled.clear();
         self.pooled
             .extend(self.columns.iter().map(|[c0, c1]| c0.mask.max(c1.mask)));
@@ -834,95 +991,121 @@ impl ChannelMask {
     }
 }
 
-/// Mixes a box's blurred values into the plane through its mask.
-///
-/// The mask is the minimum of a column and a row term everywhere except in
-/// the rounded corners (see [`PreparedBox::pixel_mask`]), so rows outside
-/// the corner bands use one row value against the precomputed column
-/// profile. Chroma takes the maximum over the 2×2 luma pixels of each
-/// sample; outside the corners that is the minimum of the max-pooled
-/// column and row terms.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "internal hot path; a struct would only rename them"
-)]
-fn composite(
-    channel: &Channel,
-    data: &mut [u8],
-    offset: (i32, i32),
+/// The chroma terms of luma terms: pairs of consecutive luma columns
+/// (rows), the second one outside the box past an odd frame edge.
+fn luma_pairs(terms: &[[AxisMask; 2]]) -> impl Iterator<Item = [AxisMask; 2]> + '_ {
+    terms.chunks(2).map(|pair| match pair {
+        [[first, _], [second, _]] => [*first, *second],
+        [[first, _]] => [*first, AxisMask::OUTSIDE],
+        _ => [AxisMask::OUTSIDE; 2],
+    })
+}
+
+/// Mixes a box's blurred rows into a target plane through its mask.
+struct Mixer<'a> {
+    data: &'a mut [u8],
+    plane: PlaneAccess,
     area: Area,
-    b: &PreparedBox,
-    mask: &ChannelMask,
-    patch: &[f32],
-    row_mask: &mut Vec<f32>,
-) {
-    let w = area.width();
-    let max = channel.max_value();
-    let px = (area.x0 - offset.0) as usize;
-    let mix_row = match (channel.format, channel.row_start(0, 0).1) {
-        (SampleFormat::U8, 1) => mix_row::<Packed8>,
-        (SampleFormat::U8, _) => mix_row::<Paired8>,
-        (SampleFormat::U16Le, 2) => mix_row::<Packed10>,
-        (SampleFormat::U16Le, _) => mix_row::<Paired10>,
-    };
-    for ((y, blurred), &[r0, r1]) in (area.y0..area.y1)
-        .zip(patch.chunks_exact(w))
-        .zip(&mask.rows)
-    {
-        let (start, _) = channel.row_start(px, (y - offset.1) as usize);
-        let pooled_row = r0.mask.max(r1.mask);
-        if r0.corner || r1.corner {
-            // Full mask for this row: separable terms, then the corners.
-            row_mask.clear();
-            row_mask.extend(mask.pooled.iter().map(|&m| m.min(pooled_row)));
-            for &i in &mask.corners {
-                let [c0, c1] = mask.columns[i];
-                row_mask[i] = if mask.chroma {
-                    b.pixel_mask(c0, r0)
-                        .max(b.pixel_mask(c1, r0))
-                        .max(b.pixel_mask(c0, r1))
-                        .max(b.pixel_mask(c1, r1))
-                } else {
-                    b.pixel_mask(c0, r0)
-                };
+    b: &'a PreparedBox,
+    mask: &'a ChannelMask,
+    /// Largest sample value.
+    max: f32,
+}
+
+impl Mixer<'_> {
+    /// Mixes every row of the box with the blurred values of `fill`.
+    fn composite<L: Layout<N>, const N: usize>(self, fill: &Filled<'_>, row_mask: &mut Vec<f32>) {
+        match fill.fill {
+            Fill::Smooth { .. } => self.mix_rows::<L, N, _>(|y| fill.weighted(y), row_mask),
+            Fill::Blocks => self.mix_rows::<L, N, _>(|y| fill.blocks(y), row_mask),
+            Fill::BoxMean | Fill::Colour(..) => {
+                self.mix_rows::<L, N, _>(|_| fill.constant(), row_mask);
             }
-            mix_row(data, start, blurred, row_mask, 1.0, max);
-        } else {
-            mix_row(data, start, blurred, &mask.pooled, pooled_row, max);
+        }
+    }
+
+    /// Mixes every row of the box, with `blurred(y)` giving the values of
+    /// area row `y`.
+    ///
+    /// The mask is the minimum of a column and a row term everywhere except
+    /// in the rounded corners (see [`PreparedBox::pixel_mask`]), so rows
+    /// outside the corner bands use one row value against the precomputed
+    /// column profile. Chroma takes the maximum over the 2×2 luma pixels of
+    /// each sample; outside the corners that is the minimum of the
+    /// max-pooled column and row terms.
+    fn mix_rows<L: Layout<N>, const N: usize, B: Blurred<N>>(
+        self,
+        blurred: impl Fn(usize) -> B,
+        row_mask: &mut Vec<f32>,
+    ) {
+        let mask = self.mask;
+        for (i, (y, &[r0, r1])) in (self.area.y0..self.area.y1).zip(&mask.rows).enumerate() {
+            let start = self.plane.index(self.area.x0, y, L::STEP);
+            let pooled_row = r0.mask.max(r1.mask);
+            if r0.corner || r1.corner {
+                // Full mask for this row: separable terms, then the corners.
+                row_mask.clear();
+                row_mask.extend(mask.pooled.iter().map(|&m| m.min(pooled_row)));
+                for &c in &mask.corners {
+                    let [c0, c1] = mask.columns[c];
+                    row_mask[c] = if mask.chroma {
+                        self.b
+                            .pixel_mask(c0, r0)
+                            .max(self.b.pixel_mask(c1, r0))
+                            .max(self.b.pixel_mask(c0, r1))
+                            .max(self.b.pixel_mask(c1, r1))
+                    } else {
+                        self.b.pixel_mask(c0, r0)
+                    };
+                }
+                mix_row::<L, N>(self.data, start, &blurred(i), row_mask, 1.0, self.max);
+            } else {
+                let mask = &mask.pooled;
+                mix_row::<L, N>(self.data, start, &blurred(i), mask, pooled_row, self.max);
+            }
         }
     }
 }
 
-/// Mixes one row in place: sample `i` (from byte `start`) becomes
-/// `round(clamp(src + (blurred - src) * min(mask[i], row_mask)))`, eight
-/// lanes at a time.
-fn mix_row<L: Lanes>(
+/// Mixes one row in place: channel `c` of pixel `i` (from byte `start`)
+/// becomes `round(clamp(src + (blurred[c][i] - src) * min(mask[i],
+/// row_mask)))`, eight pixels at a time.
+fn mix_row<L: Layout<N>, const N: usize>(
     data: &mut [u8],
     start: usize,
-    blurred: &[f32],
+    blurred: &impl Blurred<N>,
     mask: &[f32],
     row_mask: f32,
     max: f32,
 ) {
+    let width = mask.len();
     let (zero, half) = (f32x8::ZERO, f32x8::splat(0.5));
     let (row_v, max_v) = (f32x8::splat(row_mask), f32x8::splat(max));
-    let (blur_chunks, blur_rest) = blurred.as_chunks::<8>();
-    let (mask_chunks, mask_rest) = mask[..blurred.len()].as_chunks::<8>();
-    for (n, (b, m)) in blur_chunks.iter().zip(mask_chunks).enumerate() {
-        let chunk = &mut data[start + n * 8 * L::STEP..][..L::SPAN];
-        let s = L::load8(chunk);
-        let (b, m) = (f32x8::from(*b), f32x8::from(*m).fast_min(row_v));
-        // All values are finite, so the fast (not NaN-aware) operations are
-        // exact here.
-        let mixed = ((b - s) * m + s).fast_max(zero).fast_min(max_v) + half;
-        L::store8(chunk, mixed.fast_trunc_int());
+    let (mask_chunks, mask_rest) = mask.as_chunks::<8>();
+    for (n, m) in mask_chunks.iter().enumerate() {
+        let chunk = &mut data[start + n * 8 * L::STEP..][..8 * L::STEP];
+        let source = L::load8(chunk);
+        let values = blurred.load8(n * 8);
+        let m = f32x8::from(*m).fast_min(row_v);
+        let mixed = std::array::from_fn(|c| {
+            let (b, s) = (values[c], source[c]);
+            // All values are finite, so the fast (not NaN-aware) operations
+            // are exact here.
+            (((b - s) * m + s).fast_max(zero).fast_min(max_v) + half).fast_trunc_int()
+        });
+        L::store8(chunk, mixed);
     }
-    let rest_start = start + blur_chunks.len() * 8 * L::STEP;
-    for (k, (&b, &m)) in blur_rest.iter().zip(mask_rest).enumerate() {
-        let i = rest_start + k * L::STEP;
-        let s = L::load(data, i);
-        let mixed = ((b - s) * m.min(row_mask) + s).clamp(0.0, max) + 0.5;
-        L::store(data, i, mixed as i32);
+    let done = width - mask_rest.len();
+    for (k, &m) in mask_rest.iter().enumerate() {
+        let i = done + k;
+        let pixel = &mut data[start + i * L::STEP..];
+        let (source, values) = (L::load(pixel), blurred.get(i));
+        let m = m.min(row_mask);
+        let mixed = std::array::from_fn(|c| {
+            let (b, s) = (values[c], source[c]);
+            (((b - s) * m + s).clamp(0.0, max) + 0.5) as i32
+        });
+        L::store(pixel, mixed);
     }
 }
 
