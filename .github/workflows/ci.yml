@@ -1,0 +1,115 @@
+# Continuous integration: formatting, lints, secret scan, Rust tests on
+# Windows and the cargo-deny policy. Each step lands together with the code
+# it checks; see docs/development.md ("Continuous integration").
+#
+# Every action is pinned to a full commit SHA with its tag as a comment, so
+# Dependabot can update both. Tools that are installed by version (nextest,
+# cargo-deny, gitleaks) are pinned in the env block below.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+  CARGO_NEXTEST_VERSION: "0.9.146"
+  CARGO_DENY_VERSION: "0.20.2"
+  GITLEAKS_VERSION: "8.30.1"
+  # SHA-256 of gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz, taken from the
+  # checksums file of the gitleaks release.
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gitleaks scans the whole history, not only the checked-out tree.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: rust toolchain
+        # Installs the toolchain, components and targets pinned in
+        # rust-toolchain.toml with the rustup that ships on the runner.
+        run: rustup toolchain install --no-self-update
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+      - name: oxfmt
+        run: pnpm exec oxfmt --check
+      - name: oxlint
+        run: pnpm lint
+      - name: typos
+        uses: crate-ci/typos@7f9d0819ca1c008ade73f4b41fa9d258d48f605b # v1.51.1
+      - name: gitleaks
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose .
+
+  rust:
+    name: rust (windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: rust toolchain
+        # Installs the toolchain, components and targets pinned in
+        # rust-toolchain.toml with the rustup that ships on the runner.
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: tests
+        run: cargo nextest run --workspace --locked
+      - name: doctests
+        run: cargo test --workspace --doc --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  deny:
+    name: deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: rust toolchain
+        # Installs the toolchain, components and targets pinned in
+        # rust-toolchain.toml with the rustup that ships on the runner.
+        run: rustup toolchain install --no-self-update
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
+      - name: cargo-deny
+        run: cargo deny --locked check advisories bans licenses sources

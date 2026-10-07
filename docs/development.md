@@ -90,6 +90,39 @@ Contributor Covenant text.
 The `pre-commit` hook needs `cargo` and `typos` on `PATH`. To skip the hooks
 for a single command, for example while rebasing, set `LEFTHOOK=0`.
 
+## Continuous integration
+
+GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
+every pull request and on manual dispatch. All jobs must pass before a
+change is merged.
+
+| Job              | Runner  | Checks                                                                              |
+| ---------------- | ------- | ----------------------------------------------------------------------------------- |
+| `lint`           | Ubuntu  | rustfmt, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history |
+| `rust (windows)` | Windows | clippy with `-D warnings`, cargo-nextest, doctests with `RUSTDOCFLAGS=-D warnings`  |
+| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)          |
+
+The jobs run the same commands as the sections above, so a green local run
+predicts a green CI run. To reproduce the secret scan locally, install
+[gitleaks](https://github.com/gitleaks/gitleaks) 8.30.1 and run
+`gitleaks git --redact --verbose .` in the repository root.
+
+Pinning rules:
+
+- Every action is pinned to a full commit SHA with the release tag as a
+  comment (`uses: owner/action@<sha> # vX.Y.Z`). Dependabot updates the SHA
+  and the comment together.
+- The Rust toolchain comes from `rust-toolchain.toml`: CI runs
+  `rustup toolchain install` with the rustup that ships on the runner, so CI
+  and local builds always use the same toolchain and components.
+- cargo-nextest, cargo-deny and gitleaks are installed by exact version from
+  the `env` block of `ci.yml`. gitleaks is downloaded from its GitHub release
+  and checked against a pinned SHA-256; when you bump `GITLEAKS_VERSION`,
+  update `GITLEAKS_SHA256` from the `gitleaks_<version>_checksums.txt` file
+  of the same release.
+- Workflows request `contents: read` only; a job asks for more permissions
+  only when it needs them.
+
 ## Changelog and releases
 
 `CHANGELOG.md` and the release notes are generated from the commit history by
