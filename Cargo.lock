@@ -99,6 +99,7 @@ name = "blurrd-blur"
 version = "0.1.0"
 dependencies = [
  "blurrd-core",
+ "proptest",
  "thiserror",
 ]
 

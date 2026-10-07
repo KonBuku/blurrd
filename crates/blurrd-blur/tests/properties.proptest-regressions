@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a7eb1ee2449aa64bd5be6310a6c2bc48928e84a5134be23f69cddb318100d624 # shrinks to format = I420, (w, h) = (40, 30), params = BlurParams { style: PixelBlur, strength: Low, pad: (0, 0), radius: 0, feather: 0.0, noise: false }, sy = 0.6666667, seed = 0, boxes = [BlurBox { rect: RectI { x0: 0, y0: 19, x1: 1, y1: 20 }, region: KillFeed, seed: 0, grid_origin: (0, 19), block_scale: 1.0 }]
