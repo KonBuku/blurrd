@@ -11,21 +11,21 @@ again.
 
 ## Files
 
-| File | Use |
-| --- | --- |
-| `blurrd-icon.svg` | Master app icon on the macOS grid (tile 824/1024, 100 unit transparent margin). |
-| `blurrd-icon-fullbleed.svg` | Windows/Linux master (tile 960/1024), so the icon does not look small in the taskbar or Explorer. |
-| `blurrd-icon-small.svg` | Simplified mark for 32 px and below: no blur filter, the pill fades by opacity instead. |
-| `blurrd-icon-light.svg` | White tile with an ink mark, only for dark marketing surfaces. |
-| `blurrd-glyph.svg` | Mark without a tile. Uses `currentColor`, so the UI can colour it (title bar, empty states). |
-| `blurrd-glyph-ink.svg`, `blurrd-glyph-white.svg` | Mark without a tile in fixed colours. |
-| `blurrd-lockup-on-light.svg`, `blurrd-lockup-on-dark.svg` | Icon plus wordmark, for light and dark backgrounds. |
-| `blurrd-wordmark-ink.svg`, `blurrd-wordmark-white.svg` | Wordmark only. |
-| `social-preview.svg`, `social-preview.png` | GitHub social preview, 1280 x 640. |
-| `app-icon.png` | 1024 px render of the full-bleed icon; the source for `tauri icon`. |
-| `app-icon-macos.png` | 1024 px render of the macOS-grid icon. |
-| `png/` | 1024 px wide renders of the light icon and the lockups. |
-| `tauri/` | Hand-tuned icons that replace the `tauri icon` output (see below). |
+| File                                                      | Use                                                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `blurrd-icon.svg`                                         | Master app icon on the macOS grid (tile 824/1024, 100 unit transparent margin).                   |
+| `blurrd-icon-fullbleed.svg`                               | Windows/Linux master (tile 960/1024), so the icon does not look small in the taskbar or Explorer. |
+| `blurrd-icon-small.svg`                                   | Simplified mark for 32 px and below: no blur filter, the pill fades by opacity instead.           |
+| `blurrd-icon-light.svg`                                   | White tile with an ink mark, only for dark marketing surfaces.                                    |
+| `blurrd-glyph.svg`                                        | Mark without a tile. Uses `currentColor`, so the UI can colour it (title bar, empty states).      |
+| `blurrd-glyph-ink.svg`, `blurrd-glyph-white.svg`          | Mark without a tile in fixed colours.                                                             |
+| `blurrd-lockup-on-light.svg`, `blurrd-lockup-on-dark.svg` | Icon plus wordmark, for light and dark backgrounds.                                               |
+| `blurrd-wordmark-ink.svg`, `blurrd-wordmark-white.svg`    | Wordmark only.                                                                                    |
+| `social-preview.svg`, `social-preview.png`                | GitHub social preview, 1280 x 640.                                                                |
+| `app-icon.png`                                            | 1024 px render of the full-bleed icon; the source for `tauri icon`.                               |
+| `app-icon-macos.png`                                      | 1024 px render of the macOS-grid icon.                                                            |
+| `png/`                                                    | 1024 px wide renders of the light icon and the lockups.                                           |
+| `tauri/`                                                  | Hand-tuned icons that replace the `tauri icon` output (see below).                                |
 
 ## App icons
 

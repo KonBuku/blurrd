@@ -17,15 +17,18 @@ policy and the commit conventions.
   0.20.2 and [typos](https://github.com/crate-ci/typos) 1.51.1, for example
   with `cargo install --locked cargo-nextest@0.9.146 cargo-deny@0.20.2 typos-cli@1.51.1`
   or from the prebuilt binaries on their release pages.
+- [Node.js](https://nodejs.org) 24 LTS (`.nvmrc`) and pnpm 12.10.1
+  (`npm install --global pnpm@12.10.1`; corepack is not used). The exact pnpm
+  version is pinned in the `packageManager` field of `package.json`.
 
 ## Repository layout
 
-| Path | Contents |
-| --- | --- |
+| Path                 | Contents                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------ |
 | `crates/blurrd-core` | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`. |
-| `xtask` | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them). |
-| `docs` | Developer and user documentation. |
-| `assets/brand` | Logo and brand assets with their generator. |
+| `xtask`              | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).      |
+| `docs`               | Developer and user documentation.                                                    |
+| `assets/brand`       | Logo and brand assets with their generator.                                          |
 
 ## Rust workspace
 
@@ -48,8 +51,26 @@ expect and print (`clippy.toml`).
 
 ### Build profiles
 
-| Profile | Use |
-| --- | --- |
-| `dev` | Day-to-day builds. Dependencies are optimised (`opt-level = 2`) so image and OCR code stays usable. |
-| `release` | Desktop app releases. Panics unwind, because the app catches panics on job threads and reports them as internal errors. |
-| `dist-cli` | Distributed `blurrd` CLI binaries (`cargo build --profile dist-cli`). Inherits `release` but aborts on panic. |
+| Profile    | Use                                                                                                                     |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `dev`      | Day-to-day builds. Dependencies are optimised (`opt-level = 2`) so image and OCR code stays usable.                     |
+| `release`  | Desktop app releases. Panics unwind, because the app catches panics on job threads and reports them as internal errors. |
+| `dist-cli` | Distributed `blurrd` CLI binaries (`cargo build --profile dist-cli`). Inherits `release` but aborts on panic.           |
+
+## pnpm workspace
+
+The repository root is a pnpm workspace (`pnpm-workspace.yaml`); the desktop
+frontend joins it as `apps/desktop`. The root `package.json` pins the
+repository tooling to exact versions.
+
+```sh
+pnpm install          # install the tooling
+pnpm lint             # oxlint, warnings are errors
+pnpm lint:fix         # apply oxlint's safe fixes
+pnpm fmt              # format JavaScript, TypeScript, JSON, YAML, TOML, CSS and Markdown (oxfmt) and Rust
+pnpm fmt:check        # check formatting without writing, as in CI
+```
+
+oxlint is configured in `.oxlintrc.json` and oxfmt in `.oxfmtrc.json`.
+`CODE_OF_CONDUCT.md` is excluded from formatting because it is the verbatim
+Contributor Covenant text.

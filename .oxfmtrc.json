@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "THIRD-PARTY-NOTICES.md",
+    "pnpm-lock.yaml",
+    "**/src-tauri/gen/**"
+  ]
+}

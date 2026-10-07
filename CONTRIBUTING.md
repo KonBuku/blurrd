@@ -63,24 +63,24 @@ blurrd follows [Conventional Commits 1.0.0](https://www.conventionalcommits.org/
 - **Scopes:** one of the following, or none when a change spans several
   areas.
 
-  | Scope | Area |
-  | --- | --- |
-  | `core` | shared types, project schema, geometry, settings, errors |
-  | `blur` | blur implementation |
-  | `video` | probing, decoding, encoding, muxing, Windows system calls |
-  | `detect` | HUD and screen detectors, temporal tracking |
-  | `ocr` | OCR runtime, models, leak matching |
-  | `engine` | analysis, verification, render and audit jobs |
-  | `cli` | the `blurrd` command-line tool |
-  | `app` | the Tauri shell (`apps/desktop/src-tauri`) and packaging |
-  | `ui` | the frontend (`apps/desktop/src`) |
-  | `testkit` | synthetic fixtures, golden harness, metrics |
-  | `xtask` | developer tasks (`cargo xtask ...`) |
-  | `docs` | documentation tooling |
-  | `ci` | CI helpers |
-  | `deps` | dependency updates |
-  | `release` | release commits |
-  | `repo` | repository metadata and configuration |
+  | Scope     | Area                                                      |
+  | --------- | --------------------------------------------------------- |
+  | `core`    | shared types, project schema, geometry, settings, errors  |
+  | `blur`    | blur implementation                                       |
+  | `video`   | probing, decoding, encoding, muxing, Windows system calls |
+  | `detect`  | HUD and screen detectors, temporal tracking               |
+  | `ocr`     | OCR runtime, models, leak matching                        |
+  | `engine`  | analysis, verification, render and audit jobs             |
+  | `cli`     | the `blurrd` command-line tool                            |
+  | `app`     | the Tauri shell (`apps/desktop/src-tauri`) and packaging  |
+  | `ui`      | the frontend (`apps/desktop/src`)                         |
+  | `testkit` | synthetic fixtures, golden harness, metrics               |
+  | `xtask`   | developer tasks (`cargo xtask ...`)                       |
+  | `docs`    | documentation tooling                                     |
+  | `ci`      | CI helpers                                                |
+  | `deps`    | dependency updates                                        |
+  | `release` | release commits                                           |
+  | `repo`    | repository metadata and configuration                     |
 
 - Keep one logical change per commit. Every commit builds and passes the
   checks on its own, and a dependency is added in the commit that first

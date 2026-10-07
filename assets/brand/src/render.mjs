@@ -16,7 +16,13 @@ import { join, resolve } from "node:path";
 const [, , depsDir, widthArg, ...pairs] = process.argv;
 const width = Number(widthArg);
 
-if (!depsDir || !Number.isInteger(width) || width <= 0 || pairs.length === 0 || pairs.length % 2 !== 0) {
+if (
+  !depsDir ||
+  !Number.isInteger(width) ||
+  width <= 0 ||
+  pairs.length === 0 ||
+  pairs.length % 2 !== 0
+) {
   console.error("usage: node render.mjs <deps-dir> <width> <input.svg> <output.png> [...]");
   process.exit(2);
 }

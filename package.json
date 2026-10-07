@@ -1,0 +1,20 @@
+{
+  "name": "blurrd",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint --deny-warnings",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt && cargo fmt --all",
+    "fmt:check": "oxfmt --check && cargo fmt --all --check"
+  },
+  "devDependencies": {
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0"
+  },
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "packageManager": "pnpm@12.10.1"
+}
