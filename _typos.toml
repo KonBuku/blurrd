@@ -1,0 +1,8 @@
+# typos configuration, checked with typos 1.51.1.
+# https://github.com/crate-ci/typos/blob/master/docs/reference.md
+
+[files]
+extend-exclude = ["*.lock", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md", "pnpm-lock.yaml"]
+
+# Add false positives (HUD or codec jargon) as `word = "word"`.
+[default.extend-words]

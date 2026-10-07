@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-only"
+repository = "https://github.com/KonBuku/blurrd"
+homepage = "https://github.com/KonBuku/blurrd"
+authors = ["Konrad <wagnerkonrad09@gmail.com>"]
+publish = false
+
+[workspace.lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Pragmatic exceptions for video and pixel arithmetic and for API ergonomics.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# Discipline. CI runs clippy with `-D warnings`, so these are errors there;
+# clippy.toml allows unwrap, expect and printing inside tests.
+dbg_macro = "warn"
+expect_used = "warn"
+print_stdout = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"
+
+# The desktop app catches panics on job threads with `catch_unwind` and reports
+# them as internal errors, so the shared release profile must unwind.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"
+
+# Release builds of the `blurrd` CLI for distribution: nothing catches panics
+# there, so aborting keeps the binary smaller and the failure immediate.
+[profile.dist-cli]
+inherits = "release"
+panic = "abort"
+
+# Keep dependencies (image operations, OCR pre-processing) fast enough to be
+# usable in debug builds.
+[profile.dev.package."*"]
+opt-level = 2

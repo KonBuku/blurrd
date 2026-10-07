@@ -33,18 +33,11 @@ material. They never enter the repository, not even temporarily:
 
 ## Development setup
 
-The Cargo and pnpm workspaces are being set up. You will need:
-
-- Windows 11 x64 with the MSVC build tools and the Windows 11 SDK
-  (Visual Studio 2022).
-- Rust via [rustup](https://rustup.rs). The exact toolchain is pinned in
-  `rust-toolchain.toml` and installed automatically.
-- [LLVM](https://llvm.org) 21 or newer, with `LIBCLANG_PATH` pointing to its
-  `bin` folder (needed by bindgen).
-- Node.js 24 LTS and pnpm 12 (`npm install --global pnpm@12`).
-
-Build, test and run instructions will live in `docs/development.md` once the
-workspace exists.
+You will need Windows 11 x64 with the MSVC build tools, Rust via
+[rustup](https://rustup.rs) (the toolchain is pinned in
+`rust-toolchain.toml`), LLVM 21 or newer and Node.js 24 LTS with pnpm 12.
+[docs/development.md](docs/development.md) lists the exact tools and
+explains how to build, test and check the code.
 
 ## Commit messages
 

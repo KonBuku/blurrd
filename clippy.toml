@@ -1,0 +1,9 @@
+# Tests may unwrap, expect and print; production code may not (see the
+# workspace lints in Cargo.toml).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
+
+# Product and technology names that `clippy::doc_markdown` must not ask to
+# wrap in backticks. ".." keeps clippy's default list.
+doc-valid-idents = ["..", "FFmpeg", "DirectML", "WebView2", "VALORANT"]
