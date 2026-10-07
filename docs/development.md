@@ -102,6 +102,16 @@ change is merged.
 | `rust (windows)` | Windows | clippy with `-D warnings`, cargo-nextest, doctests with `RUSTDOCFLAGS=-D warnings`  |
 | `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)          |
 
+Two more workflows guard pull requests and the workflows themselves:
+
+- `.github/workflows/pr-title.yml` checks the pull request title with
+  commitlint, because the title becomes the squashed commit header on
+  `main`. Pull requests opened by Dependabot are skipped. Check a title
+  locally with `echo "feat(detect): ..." | pnpm exec commitlint`.
+- `.github/workflows/zizmor.yml` runs [zizmor](https://docs.zizmor.sh)
+  1.30.1 on every change under `.github/workflows/`. Run it locally with
+  `uvx zizmor@1.30.1 .github` (set `GH_TOKEN` for the online audits).
+
 The jobs run the same commands as the sections above, so a green local run
 predicts a green CI run. To reproduce the secret scan locally, install
 [gitleaks](https://github.com/gitleaks/gitleaks) 8.30.1 and run
