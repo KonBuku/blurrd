@@ -188,8 +188,6 @@ fn reference_blur(frame: &mut OwnedFrame, boxes: &[PreparedBox], params: &BlurPa
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(48))]
-
     /// The optimised backend matches the reference within one code value.
     #[test]
     fn matches_the_reference(

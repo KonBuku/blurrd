@@ -94,8 +94,6 @@ fn size() -> impl Strategy<Value = (u32, u32)> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
-
     /// Every unpadded pixel gets mask 1 (>= 0.999 required) in luma and in
     /// the max-pooled chroma, and a fixed fill colour replaces every such
     /// sample exactly.
