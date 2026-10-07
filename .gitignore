@@ -1,0 +1,64 @@
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Tauri
+apps/desktop/src-tauri/gen/schemas/
+
+# Media and test data: never commit gameplay footage, excerpts, frames, crops,
+# OCR dictionaries or goldens. They contain other players' names and
+# third-party copyrighted material.
+# Synthetic fixtures are generated at test time.
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.avi
+/test-media/
+*.golden.json
+bench-baselines/
+
+# Models and native runtimes are fetched and checksum-verified by xtask.
+/models/
+*.onnx
+third_party/ffmpeg/
+third_party/ort/
+/tests/fonts/noto/
+
+# Secrets and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.keystore
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.swp
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Logs / profiling
+*.log
+*.nsys-rep
+*.ncu-rep
+flamegraph.svg
+perf.data*

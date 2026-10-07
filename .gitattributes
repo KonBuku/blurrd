@@ -1,0 +1,34 @@
+# Normalize line endings: LF in the repository and the working tree, also on
+# Windows.
+* text=auto eol=lf
+
+# Windows-only scripts need CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.ico   binary
+*.icns  binary
+*.webp  binary
+*.gif   binary
+*.mp4   binary
+*.onnx  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# Generated files: collapsed in GitHub diffs and excluded from language stats.
+Cargo.lock             linguist-generated=true
+pnpm-lock.yaml         linguist-generated=true
+CHANGELOG.md           linguist-generated=true
+THIRD-PARTY-NOTICES.md linguist-generated=true
+docs/schema/**         linguist-generated=true
+apps/desktop/src/bindings/**  linguist-generated=true
+apps/desktop/src-tauri/gen/** linguist-generated=true
+
+# Documentation does not count as code.
+docs/** linguist-documentation=true

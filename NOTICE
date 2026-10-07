@@ -1,0 +1,58 @@
+blurrd
+Copyright 2026 Konrad (KonBuku)
+https://github.com/KonBuku/blurrd
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, version 3 of the License only (GPL-3.0-only),
+with the additional terms below. This program is distributed in the hope
+that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU General Public License in the LICENSE file for more details.
+
+
+ADDITIONAL TERMS UNDER GNU GPL VERSION 3, SECTION 7
+
+1. Author attribution (section 7(b)).
+   Every copy and every modified version of blurrd, in source or object
+   form, must preserve the author attribution
+
+       blurrd by KonBuku (https://github.com/KonBuku/blurrd)
+
+   in the About or credits screen of the application (its Appropriate
+   Legal Notices) and in the accompanying documentation.
+
+2. Marking of modified versions (section 7(c)).
+   A modified version must be marked in reasonable ways as changed from
+   the original, for example in its name, its About screen and its
+   documentation, and must not be presented as the original blurrd or
+   as made or endorsed by its author.
+
+3. Additional permission to link with non-GPL libraries (section 7).
+   If you modify blurrd, or any covered work, by linking or combining it
+   with ONNX Runtime with DirectML (including DirectML.dll), the NVIDIA
+   driver interfaces used for NVDEC and NVENC (for example nvcuvid.dll
+   and nvEncodeAPI64.dll), or components of Microsoft Windows (or
+   modified versions of those libraries), containing parts covered by
+   the terms of their own licences, the licensors of blurrd grant you
+   additional permission to convey the resulting work. The Corresponding
+   Source of such a combination does not need to include the source code
+   of those libraries. You may remove this additional permission from
+   your own modified version.
+
+
+COMMERCIAL LICENCE
+
+blurrd is also available under a separate commercial licence, for
+example to use its code in a closed-source product or to distribute it
+without the obligations of the GPL. Contact the author through the
+GitHub repository (https://github.com/KonBuku/blurrd/issues) or the
+author's GitHub profile (https://github.com/KonBuku).
+
+
+THIRD-PARTY COMPONENTS
+
+Third-party components keep their own licences (for example FFmpeg under
+LGPL-2.1-or-later, linked dynamically; ONNX Runtime under MIT; the OCR
+models under Apache-2.0). They are listed with their full licence texts
+in THIRD-PARTY-NOTICES.md.
