@@ -1,0 +1,18 @@
+[package]
+name = "blurrd-blur"
+description = "Soft-edged, irreversible box blur on YUV 4:2:0 video frames for blurrd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+blurrd-core.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

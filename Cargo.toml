@@ -17,6 +17,7 @@ publish = false
 # uses it; crates inherit it with `dep.workspace = true`.
 [workspace.dependencies]
 anyhow = "=1.0.104"
+blurrd-blur = { path = "crates/blurrd-blur" }
 blurrd-core = { path = "crates/blurrd-core" }
 clap = { version = "=4.6.7", features = ["derive"] }
 schemars = { version = "=1.2.2", features = ["uuid1"] }

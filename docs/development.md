@@ -26,6 +26,7 @@ policy and the commit conventions.
 | Path                 | Contents                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------ |
 | `crates/blurrd-core` | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`. |
+| `crates/blurrd-blur` | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.  |
 | `xtask`              | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).      |
 | `docs`               | Developer and user documentation.                                                    |
 | `scripts`            | Node scripts for repository tasks (`release.mjs`).                                   |
