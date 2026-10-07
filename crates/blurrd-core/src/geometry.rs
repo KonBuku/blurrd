@@ -12,6 +12,7 @@ use ts_rs::TS;
 /// deserialisation reject rectangles without area. In JSON it is written as
 /// `[x0, y0, x1, y1]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "[i32; 4]", into = "[i32; 4]")]
 #[ts(as = "[i32; 4]")]
 pub struct RectI {

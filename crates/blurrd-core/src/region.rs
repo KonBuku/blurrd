@@ -12,6 +12,7 @@ use ts_rs::TS;
 /// applied, whichever regions are enabled. World-space name tags above
 /// players' heads are out of scope and have no region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum Region {
     /// Kill feed rows in the top right corner (killer and victim names).
@@ -75,6 +76,7 @@ impl fmt::Display for Region {
 
 /// What a blurred name is, inside its region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum NameKind {
     /// The killer in a kill feed row.
@@ -99,6 +101,7 @@ pub enum NameKind {
 /// Serialised as a sorted array of region names, for example
 /// `["KillFeed", "Banner"]`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(from = "Vec<Region>", into = "Vec<Region>")]
 #[ts(as = "Vec<Region>")]
 pub struct RegionSet {

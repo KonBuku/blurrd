@@ -30,6 +30,7 @@ pub const ADJUST_MIN_IOU: f32 = 0.5;
 /// Frame ranges are inclusive presentation frame indices; rectangles are in
 /// source pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "op")]
 #[non_exhaustive]
 pub enum Override {
@@ -128,6 +129,7 @@ impl Override {
 
 /// Whether an override is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum BindStatus {
     /// The override is active.
     Bound,
@@ -138,6 +140,7 @@ pub enum BindStatus {
 
 /// The binding state of one override after resolving it against the tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OverrideBinding {
     /// The override's id.
     pub uid: Uuid,

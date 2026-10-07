@@ -16,6 +16,7 @@ use crate::region::{NameKind, Region, RegionSet};
 
 /// Identifier of a track, unique within a plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct TrackId(pub u32);
 
@@ -27,6 +28,7 @@ impl fmt::Display for TrackId {
 
 /// Who created a track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum TrackSource {
     /// The HUD detector.
@@ -39,6 +41,7 @@ pub enum TrackSource {
 
 /// How a segment's rectangle was obtained.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum Confidence {
     /// Tracked on the frame itself.
@@ -73,6 +76,7 @@ impl Confidence {
 
 /// One rectangle of a track, held for the frames `f0..=f1`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Segment {
     /// First frame.
     pub f0: u32,
@@ -99,6 +103,7 @@ impl Segment {
 
 /// The boxes for one name over time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Track {
     /// Identifier, unique within the plan.
     pub id: TrackId,
@@ -283,6 +288,7 @@ pub enum PlanError {
 /// sources (files, IPC) before using them; lookups on invalid plans never
 /// panic but may miss boxes.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BlurPlan {
     /// Number of frames of the media.
     pub frame_count: u32,
@@ -496,6 +502,7 @@ impl FrameBoxTable {
 
 /// Timeline coverage per region, see [`BlurPlan::density`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DensityLanes {
     /// Number of frames of the media.
     pub frame_count: u32,
@@ -507,6 +514,7 @@ pub struct DensityLanes {
 
 /// Coverage of one region over the timeline buckets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DensityLane {
     /// The region.
     pub region: Region,
