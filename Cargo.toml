@@ -36,6 +36,8 @@ tracing = "=0.1.44"
 ts-rs = { version = "=12.0.1", features = ["no-serde-warnings", "uuid-impl"] }
 uuid = { version = "=1.27.0", features = ["serde"] }
 wide = "=1.7.1"
+# Windows system APIs, used only in blurrd-video's `sys` module.
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dxgi"] }
 # xtask only: unpacking the pinned FFmpeg archive.
 zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Development only.

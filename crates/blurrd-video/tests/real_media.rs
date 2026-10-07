@@ -88,3 +88,44 @@ fn real_media_decodes_every_frame_in_order() {
         }
     }
 }
+
+#[test]
+#[ignore = "needs BLURRD_TEST_MEDIA and an NVIDIA GPU"]
+fn real_media_nvdec_matches_software_and_is_fast() {
+    use blurrd_video::{DecodePurpose, DecoderChoice, HwDecode, PixelLayout};
+
+    let path = media(CLIPS[1]);
+    let info = probe(&path).unwrap();
+    let decode = |hw: HwDecode| {
+        let mut decoder = Decoder::open(&path, &DecodeOptions::with_hw(hw)).unwrap();
+        let start = Instant::now();
+        let mut pts = Vec::new();
+        while let Some(frame) = decoder.next_frame().unwrap() {
+            if hw == HwDecode::Nvdec {
+                assert_eq!(frame.layout(), PixelLayout::Nv12);
+            }
+            pts.push(frame.pts());
+        }
+        let fps = pts.len() as f64 / start.elapsed().as_secs_f64();
+        (pts, fps, decoder.hardware_frames())
+    };
+    let (sw_pts, sw_fps, _) = decode(HwDecode::Software);
+    let (hw_pts, hw_fps, hw_frames) = decode(HwDecode::Nvdec);
+    println!("software {sw_fps:.0} fps, NVDEC {hw_fps:.0} fps (with download)");
+    assert_eq!(
+        hw_pts, sw_pts,
+        "NVDEC and software must give the same frames"
+    );
+    assert_eq!(hw_frames as usize, hw_pts.len());
+    if !cfg!(debug_assertions) {
+        assert!(hw_fps >= 650.0, "NVDEC {hw_fps:.0} fps < 650");
+    }
+
+    let cache = std::env::temp_dir().join(format!("blurrd-caps-{}", std::process::id()));
+    let first = DecoderChoice::resolve(&info, &cache, DecodePurpose::Throughput);
+    let spare = DecoderChoice::resolve(&info, &cache, DecodePurpose::SpareCpu);
+    println!("decoder choice: throughput {first:?}, spare CPU {spare:?}");
+    assert!(cache.join("decoders.json").is_file());
+    assert_eq!(spare, HwDecode::Nvdec);
+    std::fs::remove_dir_all(&cache).unwrap();
+}

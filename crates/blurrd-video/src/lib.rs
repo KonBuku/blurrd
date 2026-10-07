@@ -14,6 +14,10 @@
 //!   lists and the keyframes as presentation frame indices.
 //! - [`Decoder`]: decodes the video stream in presentation order. Every
 //!   [`VideoFrame`] carries its presentation index and PTS.
+//! - [`DecoderChoice`]: picks software decoding, NVDEC or D3D11VA per video
+//!   from a cached micro-benchmark; hardware frames are downloaded as NV12
+//!   or P010.
+//! - [`sys::gpu`]: the machine's GPUs from DXGI, identified by LUID.
 //! - [`PtsTable`]: the PTS of every presentation frame, persisted as
 //!   `pts.bin` in the project cache. Rendering and seeking compare decoded
 //!   frames against it, so a frame index always means the same picture.
@@ -25,18 +29,22 @@
 //! crafted file (a playlist, a reference movie) can never make FFmpeg open a
 //! network connection or another protocol.
 
+mod choice;
 mod colour;
 mod decode;
 mod error;
+mod hw;
 mod input;
 mod log_bridge;
 mod mp4;
 mod probe;
 mod pts;
+pub mod sys;
 
 use std::sync::OnceLock;
 
-pub use decode::{DecodeOptions, Decoder, PixelLayout, VideoFrame};
+pub use choice::{DecodePurpose, DecoderChoice};
+pub use decode::{DecodeOptions, Decoder, HwDecode, PixelLayout, VideoFrame};
 pub use error::VideoError;
 pub use probe::probe;
 pub use pts::PtsTable;

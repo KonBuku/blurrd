@@ -64,6 +64,10 @@ builds so the throughput checks apply, with
 BLURRD_TEST_MEDIA=<folder> cargo nextest run --release --run-ignored all real_media --no-capture
 ```
 
+Tests that need a GPU (NVDEC, D3D11VA, NVENC) are ignored too, because CI
+runners have none; their names start with `gpu_`. Run them with
+`cargo nextest run --run-ignored all gpu`.
+
 Lints are configured once in the root `Cargo.toml` (`[workspace.lints]`) and
 inherited by every crate with `[lints] workspace = true`. Production code must
 not use `unwrap`, `expect`, `dbg!`, `todo!` or `println!`; tests may unwrap,

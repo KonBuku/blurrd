@@ -5,16 +5,61 @@ use std::path::Path;
 use blurrd_core::Rational;
 use ffmpeg_the_third::{codec, decoder, ffi, format, frame, media};
 
+use crate::hw::{self, Backend};
 use crate::probe::positive_rational;
 use crate::{VideoError, input};
 
+/// Where frames are decoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum HwDecode {
+    /// NVDEC if the stream is supported there, then D3D11VA, then
+    /// software. [`crate::DecoderChoice`] picks a concrete option from a
+    /// benchmark instead.
+    Auto,
+    /// FFmpeg's software decoders with frame threads.
+    #[default]
+    Software,
+    /// NVIDIA NVDEC (through CUDA); frames are downloaded as NV12 or P010.
+    Nvdec,
+    /// Direct3D 11 video decoding; frames are downloaded as NV12 or P010.
+    D3d11va,
+}
+
 /// Decoder settings.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DecodeOptions {
-    /// Number of decoder threads; `None` lets FFmpeg choose (one per
-    /// logical core, at most 16).
+    /// Where to decode.
+    pub hw: HwDecode,
+    /// Number of decoder threads; `None` lets FFmpeg choose for software
+    /// decoding (one per logical core, at most 16) and uses
+    /// four frame threads for hardware decoding.
     pub threads: Option<u32>,
+    /// Extra hardware surfaces beyond what the codec needs, so frames can
+    /// wait in queues while the decoder keeps going. At least the depth of
+    /// the frame queue plus the frames in flight.
+    pub extra_hw_frames: u32,
+}
+
+impl Default for DecodeOptions {
+    fn default() -> Self {
+        Self {
+            hw: HwDecode::Software,
+            threads: None,
+            extra_hw_frames: 16,
+        }
+    }
+}
+
+impl DecodeOptions {
+    /// Options for the given decoding back end, defaults otherwise.
+    pub fn with_hw(hw: HwDecode) -> Self {
+        Self {
+            hw,
+            ..Self::default()
+        }
+    }
 }
 
 /// How the samples of a decoded frame are stored. All layouts are 4:2:0.
@@ -139,6 +184,10 @@ pub struct Decoder {
     input: format::context::Input,
     stream: usize,
     codec: decoder::Video,
+    /// Hardware surface format, when a hardware device is attached.
+    surface: Option<ffi::AVPixelFormat>,
+    active: HwDecode,
+    hardware_frames: u32,
     time_base: Rational,
     next_index: u32,
     last_pts: Option<i64>,
@@ -150,6 +199,7 @@ impl std::fmt::Debug for Decoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Decoder")
             .field("stream", &self.stream)
+            .field("active", &self.active)
             .field("time_base", &self.time_base)
             .field("next_index", &self.next_index)
             .finish_non_exhaustive()
@@ -163,6 +213,9 @@ impl Decoder {
     ///
     /// [`VideoError::Io`] for unreadable files, [`VideoError::NoVideoStream`]
     /// or [`VideoError::Ffmpeg`] when there is no decodable video.
+    /// [`VideoError::Unsupported`] when [`HwDecode::Nvdec`] or
+    /// [`HwDecode::D3d11va`] was requested and cannot decode this stream
+    /// (no such device, or the codec has no such hardware path).
     pub fn open(path: &Path, options: &DecodeOptions) -> Result<Self, VideoError> {
         crate::init()?;
         let mut input = input::open(path)?;
@@ -186,15 +239,23 @@ impl Decoder {
         })?;
         let mut context = codec::Context::from_parameters(stream.parameters())
             .map_err(VideoError::ffmpeg("reading the codec parameters"))?;
-        context.set_threading(codec::threading::Config {
-            kind: codec::threading::Type::Frame,
-            count: options.threads.map_or(0, |n| n as usize),
-        });
         // SAFETY: `pkt_timebase` is a plain field the decoder reads to
         // compute best-effort timestamps; the context is not open yet.
         unsafe {
             (*context.as_mut_ptr()).pkt_timebase = stream.time_base().into();
         }
+        let (surface, active) = Self::attach_hw(&mut context, options)?;
+        context.set_threading(codec::threading::Config {
+            kind: codec::threading::Type::Frame,
+            count: match (options.threads, surface) {
+                (Some(n), _) => n as usize,
+                // Frame threads keep several surfaces in flight, so decoding
+                // and downloading overlap: one thread reaches ~480 fps on
+                // 1080p H.264, four reach ~830 fps; more do not help.
+                (None, Some(_)) => HW_FRAME_THREADS,
+                (None, None) => 0,
+            },
+        });
         let decoder = context
             .decoder()
             .video()
@@ -203,12 +264,81 @@ impl Decoder {
             input,
             stream: stream_index,
             codec: decoder,
+            surface,
+            active,
+            hardware_frames: 0,
             time_base,
             next_index: 0,
             last_pts: None,
             draining: false,
             finished: false,
         })
+    }
+
+    /// Attaches the hardware device the options ask for. Returns the
+    /// surface format and the back end actually used.
+    fn attach_hw(
+        context: &mut codec::Context,
+        options: &DecodeOptions,
+    ) -> Result<(Option<ffi::AVPixelFormat>, HwDecode), VideoError> {
+        let candidates: &[(Backend, HwDecode)] = match options.hw {
+            HwDecode::Software => &[],
+            HwDecode::Nvdec => &[(Backend::Nvdec, HwDecode::Nvdec)],
+            HwDecode::D3d11va => &[(Backend::D3d11va, HwDecode::D3d11va)],
+            HwDecode::Auto => &[
+                (Backend::Nvdec, HwDecode::Nvdec),
+                (Backend::D3d11va, HwDecode::D3d11va),
+            ],
+        };
+        // SAFETY: reading the codec id of the valid, unopened context.
+        let codec_id = unsafe { (*context.as_ptr()).codec_id };
+        // SAFETY: plain lookup in FFmpeg's static decoder table.
+        let codec = unsafe { ffi::avcodec_find_decoder(codec_id) };
+        if codec.is_null() {
+            return Err(VideoError::Ffmpeg {
+                context: "finding a decoder",
+                source: ffmpeg_the_third::Error::DecoderNotFound,
+            });
+        }
+        let mut last_error = None;
+        for &(backend, choice) in candidates {
+            let Some(surface) = hw::surface_format(codec, backend) else {
+                last_error = Some(VideoError::Unsupported(format!(
+                    "{} cannot decode this codec",
+                    backend.name()
+                )));
+                continue;
+            };
+            // SAFETY: the context is valid and not open yet.
+            match unsafe {
+                hw::attach_device(context.as_mut_ptr(), backend, options.extra_hw_frames)
+            } {
+                Ok(()) => return Ok((Some(surface), choice)),
+                Err(error) => {
+                    tracing::debug!(backend = backend.name(), %error, "hardware decoding unavailable");
+                    last_error = Some(VideoError::Unsupported(format!(
+                        "{}: {error}",
+                        backend.name()
+                    )));
+                }
+            }
+        }
+        match (options.hw, last_error) {
+            (HwDecode::Nvdec | HwDecode::D3d11va, Some(error)) => Err(error),
+            _ => Ok((None, HwDecode::Software)),
+        }
+    }
+
+    /// The back end in use. Hardware decoders can still fall back to
+    /// software per stream (unsupported profile); frames are then decoded
+    /// in software and [`Decoder::hardware_frames`] stays zero.
+    pub fn active(&self) -> HwDecode {
+        self.active
+    }
+
+    /// Number of frames so far that were decoded on the GPU.
+    pub fn hardware_frames(&self) -> u32 {
+        self.hardware_frames
     }
 
     /// Time base of the PTS values.
@@ -277,6 +407,8 @@ impl Decoder {
     /// Turns a decoded frame into a [`VideoFrame`] with the next index.
     fn emit(&mut self, decoded: frame::Video) -> Result<VideoFrame, VideoError> {
         let index = self.next_index;
+        let (decoded, on_gpu) = hw::download(decoded, self.surface)?;
+        self.hardware_frames += u32::from(on_gpu);
         let pts = decoded
             .timestamp()
             .ok_or_else(|| VideoError::Timestamps(format!("frame {index} has no timestamp")))?;
@@ -303,6 +435,9 @@ impl Decoder {
         })
     }
 }
+
+/// Frame threads for hardware decoding (see [`DecodeOptions::threads`]).
+const HW_FRAME_THREADS: usize = 4;
 
 /// `EAGAIN` as returned by `avcodec_receive_frame` (`AVERROR(EAGAIN)`).
 const EAGAIN: i32 = 11;
