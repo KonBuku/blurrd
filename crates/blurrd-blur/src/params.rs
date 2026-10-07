@@ -122,11 +122,12 @@ impl YuvColour {
 /// What a blurred box is filled with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Fill {
-    /// Area downsample, bilinear upsample, separable gaussian with this
-    /// sigma (in luma pixels).
+    /// Area downsample, bilinear upsample, separable gaussian whose sigma
+    /// is this fraction of each box's block size (so it grows with the
+    /// box's block scale).
     Smooth {
-        /// Gaussian sigma in luma pixels.
-        sigma: f32,
+        /// Gaussian sigma per block size.
+        sigma_per_block: f32,
     },
     /// Area downsample, nearest-neighbour upsample (hard blocks).
     Blocks,
@@ -189,7 +190,7 @@ impl PixelParams {
         let radius = (f32::from(params.radius) * sy).min(max_radius).max(0.0);
         let fill = match params.style {
             BlurStyle::Gaussian => Fill::Smooth {
-                sigma: GAUSSIAN_SIGMA_PER_BLOCK * block,
+                sigma_per_block: GAUSSIAN_SIGMA_PER_BLOCK,
             },
             BlurStyle::Pixelate => Fill::Blocks,
             BlurStyle::Solid {
@@ -198,7 +199,7 @@ impl PixelParams {
             BlurStyle::Solid { .. } => Fill::BoxMean,
             // `PixelBlur` and styles added later.
             _ => Fill::Smooth {
-                sigma: PIXEL_BLUR_SIGMA_PER_BLOCK * block,
+                sigma_per_block: PIXEL_BLUR_SIGMA_PER_BLOCK,
             },
         };
         Ok(Self {
@@ -304,7 +305,12 @@ mod tests {
         let p = PixelParams::new(&solid, 1.0, YuvColour::default()).unwrap();
         assert_eq!(p.fill, Fill::BoxMean);
         let pixel = PixelParams::new(&BlurParams::default(), 1.0, YuvColour::default()).unwrap();
-        assert_eq!(pixel.fill, Fill::Smooth { sigma: 3.5 });
+        assert_eq!(
+            pixel.fill,
+            Fill::Smooth {
+                sigma_per_block: 0.35
+            }
+        );
     }
 
     #[test]

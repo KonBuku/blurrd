@@ -48,6 +48,16 @@ impl PreparedBox {
         self.block
     }
 
+    /// Origin of the block grid in luma pixels (follows the text).
+    pub fn grid_origin(&self) -> (i32, i32) {
+        self.grid_origin
+    }
+
+    /// Seed of the deterministic per-block noise (constant over a track).
+    pub fn seed(&self) -> u32 {
+        self.seed
+    }
+
     /// Mask value of luma pixel `(x, y)` in `0.0..=1.0`: how much of the
     /// blurred value replaces the source there.
     ///
@@ -55,20 +65,80 @@ impl PreparedBox {
     /// across the padding (see [`mask_value`]) and 0.0 outside
     /// [`PreparedBox::padded`].
     pub fn coverage(&self, x: i32, y: i32) -> f32 {
-        if contains(&self.core, x, y) {
-            return 1.0;
+        self.pixel_mask(self.column(x), self.row(y))
+    }
+
+    /// The mask terms of column `x` (see [`AxisMask`]).
+    pub(crate) fn column(&self, x: i32) -> AxisMask {
+        let [x0, _, x1, _] = self.shape;
+        self.axis(
+            x,
+            (self.padded.x0, self.padded.x1),
+            (self.core.x0, self.core.x1),
+            (x0, x1),
+        )
+    }
+
+    /// The mask terms of row `y` (see [`AxisMask`]).
+    pub(crate) fn row(&self, y: i32) -> AxisMask {
+        let [_, y0, _, y1] = self.shape;
+        self.axis(
+            y,
+            (self.padded.y0, self.padded.y1),
+            (self.core.y0, self.core.y1),
+            (y0, y1),
+        )
+    }
+
+    /// The mask terms of sample `v` along one axis, given the padded, core
+    /// and shape extents along that axis.
+    fn axis(&self, v: i32, padded: (i32, i32), core: (i32, i32), shape: (f32, f32)) -> AxisMask {
+        if v < padded.0 || v >= padded.1 {
+            return AxisMask::OUTSIDE;
         }
-        if !contains(&self.padded, x, y) {
-            return 0.0;
+        // Distance from the shape's centre minus the half length of its
+        // straight part: positive in the corner bands.
+        let q = (v as f32 + 0.5 - f32::midpoint(shape.0, shape.1)).abs()
+            - ((shape.1 - shape.0) * 0.5 - self.radius);
+        let core = v >= core.0 && v < core.1;
+        AxisMask {
+            mask: if core {
+                1.0
+            } else {
+                mask_value(q - self.radius, self.feather)
+            },
+            q,
+            corner: q > 0.0,
+            core,
         }
-        let [x0, y0, x1, y1] = self.shape;
-        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-        let (cx, cy) = (f32::midpoint(x0, x1), f32::midpoint(y0, y1));
-        let qx = (px - cx).abs() - ((x1 - x0) * 0.5 - self.radius);
-        let qy = (py - cy).abs() - ((y1 - y0) * 0.5 - self.radius);
-        let outside = qx.max(0.0).hypot(qy.max(0.0));
-        let sdf = outside + qx.max(qy).min(0.0) - self.radius;
-        mask_value(sdf, self.feather)
+    }
+
+    /// The mask of the pixel at a column and a row.
+    ///
+    /// Away from the rounded corners the signed distance of a rounded
+    /// rectangle is the larger of the two axis distances, so the mask is
+    /// the smaller of the column and row masks there; only pixels in both a
+    /// corner column and a corner row need the full distance. Pixels of the
+    /// unpadded box are always 1.0.
+    pub(crate) fn pixel_mask(&self, column: AxisMask, row: AxisMask) -> f32 {
+        if column.core && row.core {
+            1.0
+        } else if column.corner && row.corner {
+            // Most corner pixels lie fully outside the rounded corner or
+            // fully inside its soft edge; decide those without a square
+            // root.
+            let squared = column.q * column.q + row.q * row.q;
+            let inner = self.radius - self.feather;
+            if squared >= self.radius * self.radius {
+                0.0
+            } else if inner >= 0.0 && squared <= inner * inner {
+                1.0
+            } else {
+                mask_value(squared.sqrt() - self.radius, self.feather)
+            }
+        } else {
+            column.mask.min(row.mask)
+        }
     }
 
     /// Mask value of chroma pixel `(cx, cy)`: the maximum of the luma mask
@@ -85,9 +155,28 @@ impl PreparedBox {
     }
 }
 
-/// Whether `(x, y)` lies inside the half-open rectangle.
-const fn contains(rect: &RectI, x: i32, y: i32) -> bool {
-    x >= rect.x0 && x < rect.x1 && y >= rect.y0 && y < rect.y1
+/// The terms of a box's mask along one axis at one column or row.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AxisMask {
+    /// The mask along this axis alone (1.0 inside the unpadded box).
+    pub(crate) mask: f32,
+    /// Distance from the shape's centre minus the half length of the
+    /// shape's straight part.
+    q: f32,
+    /// Whether the sample lies in a corner band (`q > 0`).
+    pub(crate) corner: bool,
+    /// Whether the sample lies inside the unpadded box along this axis.
+    core: bool,
+}
+
+impl AxisMask {
+    /// A column or row outside the padded box: mask 0.
+    pub(crate) const OUTSIDE: Self = Self {
+        mask: 0.0,
+        q: f32::INFINITY,
+        corner: false,
+        core: false,
+    };
 }
 
 /// The soft edge: mask value for a signed distance `sdf` to the edge of the
@@ -100,7 +189,7 @@ pub fn mask_value(sdf: f32, feather: f32) -> f32 {
         return if sdf < 0.0 { 1.0 } else { 0.0 };
     }
     let t = (-sdf / feather).clamp(0.0, 1.0);
-    t * t * 2.0f32.mul_add(-t, 3.0)
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Resolves boxes for a `frame_w` × `frame_h` frame.

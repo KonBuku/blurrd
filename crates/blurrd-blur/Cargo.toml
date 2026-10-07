@@ -13,9 +13,15 @@ publish.workspace = true
 [dependencies]
 blurrd-core.workspace = true
 thiserror.workspace = true
+wide.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
+
+[[bench]]
+name = "blur"
+harness = false
 
 [lints]
 workspace = true

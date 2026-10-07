@@ -40,7 +40,7 @@ All commands run from the repository root.
 cargo build --workspace                               # debug build
 cargo nextest run --workspace                         # unit and integration tests
 cargo test --doc --workspace                          # doctests (nextest does not run them)
-cargo bench -p blurrd-core                            # criterion benchmarks (release build)
+cargo bench -p blurrd-core -p blurrd-blur             # criterion benchmarks (release build)
 cargo clippy --workspace --all-targets -- -D warnings # lints, as in CI
 cargo fmt --all                                       # format Rust code
 cargo deny check                                      # advisories, licenses, bans, sources

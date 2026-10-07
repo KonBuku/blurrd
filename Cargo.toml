@@ -29,6 +29,7 @@ thiserror = "=2.0.21"
 # ts-rs's notes about serde attributes it does not parse are noise.
 ts-rs = { version = "=12.0.1", features = ["no-serde-warnings", "uuid-impl"] }
 uuid = { version = "=1.27.0", features = ["serde"] }
+wide = "=1.7.1"
 # Development only.
 criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
 proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
