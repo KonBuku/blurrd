@@ -12,6 +12,22 @@ homepage = "https://github.com/KonBuku/blurrd"
 authors = ["Konrad <wagnerkonrad09@gmail.com>"]
 publish = false
 
+# Shared dependency versions, pinned exactly (see the stack in the
+# architecture plan). A dependency is added here by the commit that first
+# uses it; crates inherit it with `dep.workspace = true`.
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+thiserror = "=2.0.21"
+# `no-serde-warnings`: types with a custom serde representation (`try_from`,
+# `into`, `transparent`) state their TypeScript shape with `#[ts(as)]`, so
+# ts-rs's notes about serde attributes it does not parse are noise.
+ts-rs = { version = "=12.0.1", features = ["no-serde-warnings", "uuid-impl"] }
+uuid = { version = "=1.27.0", features = ["serde"] }
+# Development only.
+criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
+proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
+serde_json = "=1.0.151"
+
 [workspace.lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"

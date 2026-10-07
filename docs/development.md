@@ -39,11 +39,19 @@ All commands run from the repository root.
 cargo build --workspace                               # debug build
 cargo nextest run --workspace                         # unit and integration tests
 cargo test --doc --workspace                          # doctests (nextest does not run them)
+cargo bench -p blurrd-core                            # criterion benchmarks (release build)
 cargo clippy --workspace --all-targets -- -D warnings # lints, as in CI
 cargo fmt --all                                       # format Rust code
 cargo deny check                                      # advisories, licenses, bans, sources
 typos                                                 # spelling in code and docs
 ```
+
+Property tests use [proptest](https://proptest-rs.github.io/proptest/).
+They run 256 cases by default; set `PROPTEST_CASES`, for example
+`PROPTEST_CASES=4096 cargo nextest run`, to run more. Benchmarks use
+[criterion](https://bheisler.github.io/criterion.rs/book/) and live in
+`crates/*/benches`; synthetic inputs shared with the tests are in
+`crates/*/tests/support`.
 
 Lints are configured once in the root `Cargo.toml` (`[workspace.lints]`) and
 inherited by every crate with `[lints] workspace = true`. Production code must
