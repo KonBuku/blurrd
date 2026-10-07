@@ -29,6 +29,16 @@ allow = [
   "Unicode-3.0",
   "Zlib",
 ]
+# ffmpeg-the-third and ffmpeg-sys-the-third (the FFmpeg bindings) are
+# WTFPL, a permissive public-domain-like license. Allowed for those two
+# crates only.
+[[licenses.exceptions]]
+allow = ["WTFPL"]
+crate = "ffmpeg-the-third"
+
+[[licenses.exceptions]]
+allow = ["WTFPL"]
+crate = "ffmpeg-sys-the-third"
 
 [bans]
 multiple-versions = "warn"

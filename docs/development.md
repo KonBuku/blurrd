@@ -12,7 +12,7 @@ policy and the commit conventions.
   toolchain (1.99.0 with rustfmt and clippy); rustup installs it on the first
   `cargo` command inside the repository.
 - [LLVM](https://llvm.org) 21 or newer, with `LIBCLANG_PATH` pointing to its
-  `bin` folder (needed by bindgen once the FFmpeg bindings are added).
+  `bin` folder (bindgen generates the FFmpeg bindings with libclang).
 - [cargo-nextest](https://nexte.st) 0.9.146, [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)
   0.20.2 and [typos](https://github.com/crate-ci/typos) 1.51.1, for example
   with `cargo install --locked cargo-nextest@0.9.146 cargo-deny@0.20.2 typos-cli@1.51.1`
@@ -23,14 +23,15 @@ policy and the commit conventions.
 
 ## Repository layout
 
-| Path                 | Contents                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------ |
-| `crates/blurrd-core` | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`. |
-| `crates/blurrd-blur` | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.  |
-| `xtask`              | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).      |
-| `docs`               | Developer and user documentation.                                                    |
-| `scripts`            | Node scripts for repository tasks (`release.mjs`).                                   |
-| `assets/brand`       | Logo and brand assets with their generator.                                          |
+| Path                  | Contents                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `crates/blurrd-core`  | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`. |
+| `crates/blurrd-blur`  | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.  |
+| `crates/blurrd-video` | FFmpeg probing, decoding and seeking; the only crate with `unsafe` code.             |
+| `xtask`               | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).      |
+| `docs`                | Developer and user documentation.                                                    |
+| `scripts`             | Node scripts for repository tasks (`release.mjs`).                                   |
+| `assets/brand`        | Logo and brand assets with their generator.                                          |
 
 ## Rust workspace
 
@@ -53,6 +54,15 @@ They run 256 cases by default; set `PROPTEST_CASES`, for example
 [criterion](https://bheisler.github.io/criterion.rs/book/) and live in
 `crates/*/benches`; synthetic inputs shared with the tests are in
 `crates/*/tests/support`.
+
+Tests that need real recordings are marked `#[ignore]` and read them from
+the folder in `BLURRD_TEST_MEDIA`; recordings are never committed (see the
+media policy in the contributing guide). Run them locally, in release
+builds so the throughput checks apply, with
+
+```sh
+BLURRD_TEST_MEDIA=<folder> cargo nextest run --release --run-ignored all real_media --no-capture
+```
 
 Lints are configured once in the root `Cargo.toml` (`[workspace.lints]`) and
 inherited by every crate with `[lints] workspace = true`. Production code must

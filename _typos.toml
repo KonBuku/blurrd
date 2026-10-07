@@ -6,3 +6,5 @@ extend-exclude = ["*.lock", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md", "pnpm-lock
 
 # Add false positives (HUD or codec jargon) as `word = "word"`.
 [default.extend-words]
+# MP4/QuickTime box names (crates/blurrd-video/src/mp4.rs).
+trak = "trak"
