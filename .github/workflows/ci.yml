@@ -49,6 +49,15 @@ jobs:
         run: rustup toolchain install --no-self-update
       - name: rustfmt
         run: cargo fmt --all --check
+      - name: bindings and schema freshness
+        # The TypeScript bindings and JSON Schemas are generated from the
+        # Rust types and committed; regenerate them and fail on any
+        # difference, including new files.
+        run: |
+          cargo xtask bindings
+          cargo xtask schema
+          git add --intent-to-add crates/blurrd-core/bindings docs/schema
+          git diff --exit-code -- crates/blurrd-core/bindings docs/schema
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

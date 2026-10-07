@@ -5,6 +5,8 @@
     "CODE_OF_CONDUCT.md",
     "THIRD-PARTY-NOTICES.md",
     "pnpm-lock.yaml",
-    "**/src-tauri/gen/**"
+    "**/src-tauri/gen/**",
+    "crates/blurrd-core/bindings/**",
+    "docs/schema/**"
   ]
 }

@@ -1,0 +1,1042 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "blurrd-project/1",
+  "description": "A project file (schema `blurrd-project/1`).",
+  "type": "object",
+  "properties": {
+    "app_version": {
+      "description": "blurrd version that wrote the file.",
+      "type": "string"
+    },
+    "blur": {
+      "description": "Blur parameters.",
+      "$ref": "#/$defs/BlurParams"
+    },
+    "detector": {
+      "description": "How the tracks were produced.",
+      "$ref": "#/$defs/DetectorInfo"
+    },
+    "geometry": {
+      "description": "HUD geometry used by the detector.",
+      "$ref": "#/$defs/HudGeometry"
+    },
+    "media": {
+      "description": "The analysed video.",
+      "$ref": "#/$defs/ProjectMedia"
+    },
+    "overrides": {
+      "description": "User edits. A re-analysis keeps them; they rebind by overlap.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Override"
+      }
+    },
+    "revision": {
+      "description": "Incremented on every change of tracks or overrides.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "schema": {
+      "description": "Always `blurrd-project/1`.",
+      "type": "string"
+    },
+    "tracks": {
+      "description": "Detector and OCR tracks. A re-analysis replaces them.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Track"
+      }
+    },
+    "verify": {
+      "description": "Verification state.",
+      "$ref": "#/$defs/ProjectVerify"
+    },
+    "version": {
+      "description": "Revision within the schema's major version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "version",
+    "app_version",
+    "media",
+    "geometry",
+    "detector",
+    "tracks",
+    "overrides",
+    "revision",
+    "blur",
+    "verify"
+  ],
+  "$defs": {
+    "BlurParams": {
+      "description": "Parameters of the blur applied to every box.",
+      "type": "object",
+      "properties": {
+        "feather": {
+          "description": "Width of the soft edge in reference pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "noise": {
+          "description": "Whether to add deterministic noise inside the box.",
+          "type": "boolean"
+        },
+        "pad": {
+          "description": "Padding around each box in reference pixels, `(x, y)`. The soft edge\nlives in the padding; the unpadded box is always fully covered.",
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            },
+            {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          ]
+        },
+        "radius": {
+          "description": "Corner radius in reference pixels.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "strength": {
+          "description": "Block size.",
+          "$ref": "#/$defs/Strength"
+        },
+        "style": {
+          "description": "Look of the blur.",
+          "$ref": "#/$defs/BlurStyle"
+        }
+      },
+      "required": [
+        "style",
+        "strength",
+        "pad",
+        "radius",
+        "feather",
+        "noise"
+      ]
+    },
+    "BlurStyle": {
+      "description": "Look of the blur inside a box.",
+      "oneOf": [
+        {
+          "description": "Pixelate, then smooth with a gaussian (the default).",
+          "type": "string",
+          "const": "PixelBlur"
+        },
+        {
+          "description": "Gaussian blur on the downsampled box.",
+          "type": "string",
+          "const": "Gaussian"
+        },
+        {
+          "description": "Hard pixel blocks.",
+          "type": "string",
+          "const": "Pixelate"
+        },
+        {
+          "description": "A solid fill.",
+          "type": "object",
+          "properties": {
+            "Solid": {
+              "type": "object",
+              "properties": {
+                "color": {
+                  "description": "The fill colour.",
+                  "$ref": "#/$defs/SolidColor"
+                }
+              },
+              "required": [
+                "color"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Solid"
+          ]
+        }
+      ]
+    },
+    "Confidence": {
+      "description": "How a segment's rectangle was obtained.",
+      "oneOf": [
+        {
+          "description": "Tracked on the frame itself.",
+          "type": "string",
+          "const": "Tracked"
+        },
+        {
+          "description": "Held over a few frames without a fresh detection.",
+          "type": "string",
+          "const": "WeakHold"
+        },
+        {
+          "description": "Interpolated across a gap between two detections.",
+          "type": "string",
+          "const": "GapFill"
+        },
+        {
+          "description": "Extended before the first detection (fade-in, slide-in).",
+          "type": "string",
+          "const": "PreRoll"
+        },
+        {
+          "description": "Extended after the last detection (fade-out).",
+          "type": "string",
+          "const": "PostRoll"
+        },
+        {
+          "description": "Found from colour priors only.",
+          "type": "string",
+          "const": "ColourPrior"
+        },
+        {
+          "description": "Added by the OCR verification.",
+          "type": "string",
+          "const": "OcrFix"
+        }
+      ]
+    },
+    "DetectorInfo": {
+      "description": "How the tracks were produced.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "Box geometry mode.",
+          "$ref": "#/$defs/Mode"
+        },
+        "regions": {
+          "description": "Regions that were analysed.",
+          "$ref": "#/$defs/RegionSet"
+        },
+        "sensitivity": {
+          "description": "Sensitivity.",
+          "$ref": "#/$defs/Sensitivity"
+        },
+        "temporal": {
+          "description": "Temporal parameters.",
+          "$ref": "#/$defs/TemporalParams"
+        },
+        "version": {
+          "description": "Detector version, for example `detect/1.0.0`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "regions",
+        "mode",
+        "sensitivity",
+        "temporal"
+      ]
+    },
+    "Fingerprint": {
+      "description": "Identifies a source file without hashing all of it.\n\nComputed by the engine (size, modification time and a BLAKE3 hash of the\nfirst and last megabytes); `blurrd-core` only defines the type.",
+      "type": "object",
+      "properties": {
+        "blake3_head_tail": {
+          "description": "Hex BLAKE3 hash of the head and tail of the file.",
+          "type": "string"
+        },
+        "mtime": {
+          "description": "Modification time in seconds since the Unix epoch.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "size": {
+          "description": "File size in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "size",
+        "mtime",
+        "blake3_head_tail"
+      ]
+    },
+    "FrameRange": {
+      "description": "An inclusive range of presentation frame indices, written as `[f0, f1]`.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "HudGeometry": {
+      "description": "Mapping of the 1920 × 1080 reference HUD onto the source frame.",
+      "type": "object",
+      "properties": {
+        "anchor_center": {
+          "description": "Source x of the HUD's centre (centred elements).",
+          "type": "number",
+          "format": "float"
+        },
+        "anchor_left": {
+          "description": "Source x of the HUD's left edge (left-anchored elements).",
+          "type": "number",
+          "format": "float"
+        },
+        "anchor_right": {
+          "description": "Source x of the HUD's right edge (right-anchored elements).",
+          "type": "number",
+          "format": "float"
+        },
+        "confidence": {
+          "description": "Overall calibration confidence, from 0.0 to 1.0.",
+          "type": "number",
+          "format": "float"
+        },
+        "layout": {
+          "description": "The detected or chosen layout.",
+          "$ref": "#/$defs/HudLayout"
+        },
+        "oy": {
+          "description": "Vertical offset in source pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "per_region": {
+          "description": "Calibration confidence per region.",
+          "$ref": "#/$defs/RegionCalibration"
+        },
+        "sx": {
+          "description": "Horizontal scale from reference to source pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "sy": {
+          "description": "Vertical scale from reference to source pixels.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "sx",
+        "sy",
+        "anchor_left",
+        "anchor_right",
+        "anchor_center",
+        "oy",
+        "layout",
+        "per_region",
+        "confidence"
+      ]
+    },
+    "HudLayout": {
+      "description": "How the game's HUD is laid out in the recording.",
+      "oneOf": [
+        {
+          "description": "Detect the layout from the frames.",
+          "type": "string",
+          "const": "Auto"
+        },
+        {
+          "description": "16:9 game resolution in a 16:9 recording.",
+          "type": "string",
+          "const": "Wide16x9"
+        },
+        {
+          "description": "Native 4:3 recording (for example 1280 × 960).",
+          "type": "string",
+          "const": "Native4x3"
+        },
+        {
+          "description": "4:3 game resolution stretched to fill a 16:9 recording.",
+          "type": "string",
+          "const": "Stretched4x3"
+        },
+        {
+          "description": "16:10 recording (for example 1920 × 1200).",
+          "type": "string",
+          "const": "Wide16x10"
+        },
+        {
+          "description": "4:3 image with black bars of `bar_px` source pixels on both sides.",
+          "type": "object",
+          "properties": {
+            "Pillarbox": {
+              "type": "object",
+              "properties": {
+                "bar_px": {
+                  "description": "Width of each black bar in source pixels.",
+                  "type": "integer",
+                  "format": "uint16",
+                  "maximum": 65535,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "bar_px"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Pillarbox"
+          ]
+        },
+        {
+          "description": "HUD scaled by the game's HUD scale setting.",
+          "type": "object",
+          "properties": {
+            "Custom": {
+              "type": "object",
+              "properties": {
+                "scale_pct": {
+                  "description": "HUD scale in percent.",
+                  "type": "integer",
+                  "format": "uint16",
+                  "maximum": 65535,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "scale_pct"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Custom"
+          ]
+        }
+      ]
+    },
+    "Mode": {
+      "description": "How tightly boxes follow the names.",
+      "oneOf": [
+        {
+          "description": "Boxes hug the names; low-confidence spans fall back to the whole name\nslot automatically.",
+          "type": "string",
+          "const": "Tight"
+        },
+        {
+          "description": "Every name gets the union of its tight box and its slot box.",
+          "type": "string",
+          "const": "Safe"
+        }
+      ]
+    },
+    "NameKind": {
+      "description": "What a blurred name is, inside its region.",
+      "oneOf": [
+        {
+          "description": "The killer in a kill feed row.",
+          "type": "string",
+          "const": "Killer"
+        },
+        {
+          "description": "The victim in a kill feed row.",
+          "type": "string",
+          "const": "Victim"
+        },
+        {
+          "description": "The player named in a banner.",
+          "type": "string",
+          "const": "Banner"
+        },
+        {
+          "description": "A speaker in the voice-chat list.",
+          "type": "string",
+          "const": "Speaker"
+        },
+        {
+          "description": "The sender of a text-chat line.",
+          "type": "string",
+          "const": "ChatSender"
+        },
+        {
+          "description": "A box drawn by the user.",
+          "type": "string",
+          "const": "Manual"
+        },
+        {
+          "description": "A slot box added by the OCR verification because a name was still\nreadable.",
+          "type": "string",
+          "const": "OcrFix"
+        }
+      ]
+    },
+    "Override": {
+      "description": "A user edit, applied in list order after the detector tracks.\n\nFrame ranges are inclusive presentation frame indices; rectangles are in\nsource pixels.",
+      "oneOf": [
+        {
+          "description": "Adds a box of its own for frames `f0..=f1`.",
+          "type": "object",
+          "properties": {
+            "f0": {
+              "description": "First frame.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "f1": {
+              "description": "Last frame (inclusive).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "op": {
+              "type": "string",
+              "const": "Add"
+            },
+            "rect": {
+              "description": "The box.",
+              "$ref": "#/$defs/RectI"
+            },
+            "region": {
+              "description": "Region the box belongs to, usually [`Region::Manual`].",
+              "$ref": "#/$defs/Region"
+            },
+            "uid": {
+              "description": "Stable id of the edit (for undo, warnings and the UI).",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "op",
+            "uid",
+            "region",
+            "f0",
+            "f1",
+            "rect"
+          ]
+        },
+        {
+          "description": "Hides the detector box at `anchor` for frames `f0..=f1`.\n\nWithin the range, a box of the bound track is hidden on every frame\non which it still overlaps the anchor by at least\n[`SUPPRESS_MIN_IOU`].",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Where the hidden box was when the user hid it.",
+              "$ref": "#/$defs/RectI"
+            },
+            "f0": {
+              "description": "First frame.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "f1": {
+              "description": "Last frame (inclusive).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "op": {
+              "type": "string",
+              "const": "Suppress"
+            },
+            "region": {
+              "description": "Region of the box to hide.",
+              "$ref": "#/$defs/Region"
+            },
+            "uid": {
+              "description": "Stable id of the edit.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "op",
+            "uid",
+            "region",
+            "f0",
+            "f1",
+            "anchor"
+          ]
+        },
+        {
+          "description": "Replaces the detector box at `anchor` with `rect` for frames\n`f0..=f1`.\n\nWithin the range, a box of the bound track is replaced on every frame\non which it still overlaps the anchor by at least [`ADJUST_MIN_IOU`].",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Where the box was when the user changed it.",
+              "$ref": "#/$defs/RectI"
+            },
+            "f0": {
+              "description": "First frame.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "f1": {
+              "description": "Last frame (inclusive).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "op": {
+              "type": "string",
+              "const": "Adjust"
+            },
+            "rect": {
+              "description": "The new box.",
+              "$ref": "#/$defs/RectI"
+            },
+            "region": {
+              "description": "Region of the box to change.",
+              "$ref": "#/$defs/Region"
+            },
+            "uid": {
+              "description": "Stable id of the edit.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "op",
+            "uid",
+            "region",
+            "f0",
+            "f1",
+            "anchor",
+            "rect"
+          ]
+        }
+      ]
+    },
+    "ProjectMedia": {
+      "description": "The analysed video, as recorded in the project.\n\nThe PTS and keyframe hashes let the render detect a changed file\n(`ProjectMismatch`) before it writes anything.",
+      "type": "object",
+      "properties": {
+        "fingerprint": {
+          "description": "Fingerprint of the source file.",
+          "$ref": "#/$defs/Fingerprint"
+        },
+        "fps": {
+          "description": "Average frame rate.",
+          "$ref": "#/$defs/Rational"
+        },
+        "frame_count": {
+          "description": "Number of decoded frames.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "has_b_frames": {
+          "description": "Whether the stream uses B-frames.",
+          "type": "boolean"
+        },
+        "height": {
+          "description": "Height in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "is_vfr": {
+          "description": "Whether the frame rate varies.",
+          "type": "boolean"
+        },
+        "keyframes_sha256": {
+          "description": "Hex SHA-256 of the keyframe list.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path of the source file.",
+          "type": "string"
+        },
+        "pts_sha256": {
+          "description": "Hex SHA-256 of the presentation timestamps (`pts.bin`).",
+          "type": "string"
+        },
+        "time_base": {
+          "description": "Time base of the video stream.",
+          "$ref": "#/$defs/Rational"
+        },
+        "width": {
+          "description": "Width in pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "fingerprint",
+        "width",
+        "height",
+        "fps",
+        "time_base",
+        "frame_count",
+        "pts_sha256",
+        "is_vfr",
+        "has_b_frames",
+        "keyframes_sha256"
+      ]
+    },
+    "ProjectVerify": {
+      "description": "Verification state of the project.",
+      "type": "object",
+      "properties": {
+        "plan_revision": {
+          "description": "Project revision the last verification checked.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "report": {
+          "description": "File name of the last report in the project folder.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "description": "Result of the last verification.",
+          "$ref": "#/$defs/VerifyState"
+        },
+        "unverified_ranges": {
+          "description": "Frame ranges changed by edits since then; verified again before\nexport.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FrameRange"
+          }
+        }
+      },
+      "required": [
+        "plan_revision",
+        "state",
+        "unverified_ranges"
+      ]
+    },
+    "Rational": {
+      "description": "A positive rational number such as a frame rate (`60/1`) or a stream\ntime base (`1/15360`). Written as `[num, den]` in JSON.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "RectI": {
+      "description": "An axis-aligned, half-open rectangle in source pixels.\n\nThe rectangle covers the pixels with `x0 <= x < x1` and `y0 <= y < y1`,\nso `x1 - x0` is its width. A `RectI` is never empty: [`RectI::new`] and\ndeserialisation reject rectangles without area. In JSON it is written as\n`[x0, y0, x1, y1]`.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "int32"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "Region": {
+      "description": "A screen region that can contain player names.\n\nThe detector regions are the gameplay HUD parts that blurrd finds by\nitself. [`Region::Manual`] marks boxes the user drew; they are always\napplied, whichever regions are enabled. World-space name tags above\nplayers' heads are out of scope and have no region.",
+      "oneOf": [
+        {
+          "description": "Kill feed rows in the top right corner (killer and victim names).",
+          "type": "string",
+          "const": "KillFeed"
+        },
+        {
+          "description": "ACE, clutch and similar banners in the top centre.",
+          "type": "string",
+          "const": "Banner"
+        },
+        {
+          "description": "The voice-chat speaker list on the left.",
+          "type": "string",
+          "const": "VoiceChat"
+        },
+        {
+          "description": "Sender names in the text chat on the left.",
+          "type": "string",
+          "const": "TextChat"
+        },
+        {
+          "description": "A box drawn by the user.",
+          "type": "string",
+          "const": "Manual"
+        }
+      ]
+    },
+    "RegionCalibration": {
+      "description": "Calibration confidence per region, from 0.0 to 1.0.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "format": "float"
+      }
+    },
+    "RegionSet": {
+      "description": "A set of [`Region`]s.\n\nSerialised as a sorted array of region names, for example\n`[\"KillFeed\", \"Banner\"]`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Region"
+      }
+    },
+    "Segment": {
+      "description": "One rectangle of a track, held for the frames `f0..=f1`.",
+      "type": "object",
+      "properties": {
+        "conf": {
+          "description": "How the box was obtained.",
+          "$ref": "#/$defs/Confidence"
+        },
+        "f0": {
+          "description": "First frame.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "f1": {
+          "description": "Last frame (inclusive).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "rect": {
+          "description": "The box in source pixels.",
+          "$ref": "#/$defs/RectI"
+        },
+        "text_offset": {
+          "description": "Offset of the name's text from the track anchor (the top-left corner\nof the track's first segment), in source pixels.\n\nThe blur's block grid follows the text, not the box, so that a box\ngrowing during a wipe-in does not shift the pixel grid.",
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer",
+              "format": "int16",
+              "maximum": 32767,
+              "minimum": -32768
+            },
+            {
+              "type": "integer",
+              "format": "int16",
+              "maximum": 32767,
+              "minimum": -32768
+            }
+          ]
+        }
+      },
+      "required": [
+        "f0",
+        "f1",
+        "rect",
+        "conf",
+        "text_offset"
+      ]
+    },
+    "Sensitivity": {
+      "description": "Detector sensitivity.",
+      "oneOf": [
+        {
+          "description": "Fewer false positives, may hold boxes less long.",
+          "type": "string",
+          "const": "Low"
+        },
+        {
+          "description": "The tuned default.",
+          "type": "string",
+          "const": "Balanced"
+        },
+        {
+          "description": "Catch more, accept more false positives.",
+          "type": "string",
+          "const": "High"
+        }
+      ]
+    },
+    "SolidColor": {
+      "description": "Fill colour of [`BlurStyle::Solid`].",
+      "oneOf": [
+        {
+          "description": "The mean colour of the box.",
+          "type": "string",
+          "const": "BoxMean"
+        },
+        {
+          "description": "A fixed sRGB colour `[r, g, b]`.",
+          "type": "object",
+          "properties": {
+            "Rgb": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0
+              },
+              "maxItems": 3,
+              "minItems": 3
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Rgb"
+          ]
+        }
+      ]
+    },
+    "Strength": {
+      "description": "Blur strength, as a block size in reference pixels.",
+      "oneOf": [
+        {
+          "description": "8 px blocks.",
+          "type": "string",
+          "const": "Low"
+        },
+        {
+          "description": "10 px blocks (the default).",
+          "type": "string",
+          "const": "Medium"
+        },
+        {
+          "description": "14 px blocks.",
+          "type": "string",
+          "const": "High"
+        },
+        {
+          "description": "A custom block size, clamped to at least [`MIN_BLOCK_PX`].",
+          "type": "object",
+          "properties": {
+            "Custom": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Custom"
+          ]
+        }
+      ]
+    },
+    "TemporalParams": {
+      "description": "Temporal parameters of the detector, in frames.",
+      "type": "object",
+      "properties": {
+        "max_gap": {
+          "description": "Longest gap between detections that is bridged.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "post_roll_min": {
+          "description": "Minimum frames a box stays after its last detection.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "pre_roll": {
+          "description": "Frames a box starts before its first detection.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "pre_roll",
+        "post_roll_min",
+        "max_gap"
+      ]
+    },
+    "Track": {
+      "description": "The boxes for one name over time.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Identifier, unique within the plan.",
+          "$ref": "#/$defs/TrackId"
+        },
+        "kind": {
+          "description": "What the name is.",
+          "$ref": "#/$defs/NameKind"
+        },
+        "region": {
+          "description": "The region the name is in.",
+          "$ref": "#/$defs/Region"
+        },
+        "segments": {
+          "description": "The boxes, sorted by frame and non-overlapping.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Segment"
+          }
+        },
+        "source": {
+          "description": "Who created the track.",
+          "$ref": "#/$defs/TrackSource"
+        }
+      },
+      "required": [
+        "id",
+        "region",
+        "kind",
+        "source",
+        "segments"
+      ]
+    },
+    "TrackId": {
+      "description": "Identifier of a track, unique within a plan.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "TrackSource": {
+      "description": "Who created a track.",
+      "oneOf": [
+        {
+          "description": "The HUD detector.",
+          "type": "string",
+          "const": "Detector"
+        },
+        {
+          "description": "The OCR verification, after it still read a name.",
+          "type": "string",
+          "const": "OcrFix"
+        },
+        {
+          "description": "The user.",
+          "type": "string",
+          "const": "User"
+        }
+      ]
+    },
+    "VerifyState": {
+      "description": "Overall verification result of a project or report.",
+      "oneOf": [
+        {
+          "description": "Nothing readable remains and every item was checked.",
+          "type": "string",
+          "const": "Clean"
+        },
+        {
+          "description": "Not (fully) checked: never verified, edited since, or items OCR could\nnot read on the source. Outputs are named `*_UNVERIFIED` until the\nuser accepts the report.",
+          "type": "string",
+          "const": "Unverified"
+        },
+        {
+          "description": "At least one name is still readable.",
+          "type": "string",
+          "const": "LeaksRemain"
+        }
+      ]
+    }
+  }
+}

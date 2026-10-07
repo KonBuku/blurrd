@@ -1,60 +1,71 @@
 //! Developer tasks for the blurrd repository.
 //!
 //! Run `cargo xtask <task>` from anywhere inside the repository (the alias is
-//! defined in `.cargo/config.toml`). Tasks are added by the milestones that
-//! need them: fetching the pinned FFmpeg and ONNX Runtime builds, staging
-//! runtime DLLs, generating TypeScript bindings and JSON schemas, and more.
+//! defined in `.cargo/config.toml`); `cargo xtask help` lists the tasks.
+//! Tasks are added by the milestones that need them: generating TypeScript
+//! bindings and JSON schemas, fetching the pinned FFmpeg and ONNX Runtime
+//! builds, staging runtime DLLs, and more.
 
-use std::env;
-use std::fmt::Write as _;
+mod codegen;
+
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// Tasks known to this version of xtask, with a one-line description each.
-const TASKS: &[(&str, &str)] = &[("help", "Print this list of tasks")];
+use clap::{Parser, Subcommand};
+
+/// Developer tasks for the blurrd repository.
+#[derive(Debug, Parser)]
+#[command(name = "cargo xtask", bin_name = "cargo xtask")]
+struct Cli {
+    #[command(subcommand)]
+    task: Task,
+}
+
+#[derive(Debug, Subcommand)]
+enum Task {
+    /// Regenerate the TypeScript bindings of the IPC types (ts-rs).
+    ///
+    /// Writes into `TS_RS_EXPORT_DIR` (set in `.cargo/config.toml`) and
+    /// removes bindings of types that no longer exist.
+    Bindings,
+    /// Regenerate the JSON Schemas of the persisted documents in
+    /// `docs/schema/`.
+    Schema,
+}
 
 fn main() -> ExitCode {
-    let task = env::args().nth(1);
-    match task.as_deref() {
-        None | Some("help" | "-h" | "--help") => {
-            print_help();
+    let cli = Cli::parse();
+    let root = workspace_root();
+    let result = match cli.task {
+        Task::Bindings => codegen::bindings(&codegen::bindings_dir(&root)),
+        Task::Schema => codegen::schemas(&root.join("docs").join("schema")),
+    };
+    match result {
+        Ok(written) => {
+            eprintln!("wrote {written} files");
             ExitCode::SUCCESS
         }
-        Some(other) => {
-            eprintln!("error: unknown task `{other}`\n");
-            eprint!("{}", help_text());
-            ExitCode::from(2)
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            ExitCode::FAILURE
         }
     }
 }
 
-#[allow(clippy::print_stdout, reason = "help output belongs on stdout")]
-fn print_help() {
-    print!("{}", help_text());
-}
-
-/// Renders the usage line and the task list.
-fn help_text() -> String {
-    let width = TASKS.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
-    let mut text = String::from("Usage: cargo xtask <task>\n\nTasks:\n");
-    for (name, description) in TASKS {
-        // Writing into a `String` cannot fail.
-        let _ = writeln!(text, "  {name:<width$}  {description}");
-    }
-    text
+/// The repository root (the parent of the `xtask` package).
+fn workspace_root() -> PathBuf {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir.parent().unwrap_or(manifest_dir).to_path_buf()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{TASKS, help_text};
+    use clap::CommandFactory;
+
+    use super::Cli;
 
     #[test]
-    fn help_lists_every_task() {
-        let text = help_text();
-        for (name, description) in TASKS {
-            assert!(
-                text.contains(name) && text.contains(description),
-                "missing task {name}"
-            );
-        }
+    fn cli_is_consistent() {
+        Cli::command().debug_assert();
     }
 }

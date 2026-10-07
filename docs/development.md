@@ -58,6 +58,25 @@ inherited by every crate with `[lints] workspace = true`. Production code must
 not use `unwrap`, `expect`, `dbg!`, `todo!` or `println!`; tests may unwrap,
 expect and print (`clippy.toml`).
 
+### Generated TypeScript bindings and JSON Schemas
+
+The types in `blurrd-core` are the single source of truth for the IPC
+payloads and the persisted files. Two xtask commands generate files from
+them, and both outputs are committed:
+
+```sh
+cargo xtask bindings   # TypeScript types (ts-rs) into crates/blurrd-core/bindings/
+cargo xtask schema     # JSON Schemas of project, settings, presets and verify reports into docs/schema/
+```
+
+Run both after changing a type that derives `TS` or `JsonSchema` and commit
+the result together with the change. The output folder of the bindings is
+set by `TS_RS_EXPORT_DIR` in `.cargo/config.toml`, where `TS_RS_LARGE_INT`
+also maps 64-bit integers to `number`. The JSON Schemas are derived only
+with the `schema` feature of `blurrd-core`, which xtask enables. The
+generated files are excluded from oxfmt and kept exactly as written; CI
+regenerates them and fails if anything differs.
+
 ### Build profiles
 
 | Profile    | Use                                                                                                                     |
@@ -104,11 +123,11 @@ GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
 every pull request and on manual dispatch. All jobs must pass before a
 change is merged.
 
-| Job              | Runner  | Checks                                                                              |
-| ---------------- | ------- | ----------------------------------------------------------------------------------- |
-| `lint`           | Ubuntu  | rustfmt, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history |
-| `rust (windows)` | Windows | clippy with `-D warnings`, cargo-nextest, doctests with `RUSTDOCFLAGS=-D warnings`  |
-| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)          |
+| Job              | Runner  | Checks                                                                                                             |
+| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `lint`           | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history |
+| `rust (windows)` | Windows | clippy with `-D warnings`, cargo-nextest, doctests with `RUSTDOCFLAGS=-D warnings`                                 |
+| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                         |
 
 Two more workflows guard pull requests and the workflows themselves:
 

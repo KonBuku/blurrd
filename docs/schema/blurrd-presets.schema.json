@@ -1,0 +1,890 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "blurrd-presets/1",
+  "description": "A presets file (`presets.json`, or an exported `.blurrd-preset.json`),\nschema `blurrd-presets/1`.",
+  "type": "object",
+  "properties": {
+    "presets": {
+      "description": "The presets.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Preset"
+      }
+    },
+    "schema": {
+      "description": "Always `blurrd-presets/1`.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Revision within the schema's major version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "version",
+    "presets"
+  ],
+  "$defs": {
+    "AudioMode": {
+      "description": "What happens to the audio streams.",
+      "oneOf": [
+        {
+          "description": "Copy every audio stream unchanged.",
+          "type": "string",
+          "const": "Copy"
+        },
+        {
+          "description": "Re-encode to AAC at the given bit rate in kbit/s.",
+          "type": "object",
+          "properties": {
+            "Aac": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Aac"
+          ]
+        },
+        {
+          "description": "Drop audio.",
+          "type": "string",
+          "const": "Remove"
+        }
+      ]
+    },
+    "Audit": {
+      "description": "Whether the rendered output is read again with OCR.",
+      "oneOf": [
+        {
+          "description": "No output audit.",
+          "type": "string",
+          "const": "Off"
+        },
+        {
+          "description": "Audit sampled frames.",
+          "type": "string",
+          "const": "Sampled"
+        },
+        {
+          "description": "Audit every frame.",
+          "type": "string",
+          "const": "EveryFrame"
+        }
+      ]
+    },
+    "BlurParams": {
+      "description": "Parameters of the blur applied to every box.",
+      "type": "object",
+      "properties": {
+        "feather": {
+          "description": "Width of the soft edge in reference pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "noise": {
+          "description": "Whether to add deterministic noise inside the box.",
+          "type": "boolean"
+        },
+        "pad": {
+          "description": "Padding around each box in reference pixels, `(x, y)`. The soft edge\nlives in the padding; the unpadded box is always fully covered.",
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            },
+            {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          ]
+        },
+        "radius": {
+          "description": "Corner radius in reference pixels.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "strength": {
+          "description": "Block size.",
+          "$ref": "#/$defs/Strength"
+        },
+        "style": {
+          "description": "Look of the blur.",
+          "$ref": "#/$defs/BlurStyle"
+        }
+      },
+      "required": [
+        "style",
+        "strength",
+        "pad",
+        "radius",
+        "feather",
+        "noise"
+      ]
+    },
+    "BlurStyle": {
+      "description": "Look of the blur inside a box.",
+      "oneOf": [
+        {
+          "description": "Pixelate, then smooth with a gaussian (the default).",
+          "type": "string",
+          "const": "PixelBlur"
+        },
+        {
+          "description": "Gaussian blur on the downsampled box.",
+          "type": "string",
+          "const": "Gaussian"
+        },
+        {
+          "description": "Hard pixel blocks.",
+          "type": "string",
+          "const": "Pixelate"
+        },
+        {
+          "description": "A solid fill.",
+          "type": "object",
+          "properties": {
+            "Solid": {
+              "type": "object",
+              "properties": {
+                "color": {
+                  "description": "The fill colour.",
+                  "$ref": "#/$defs/SolidColor"
+                }
+              },
+              "required": [
+                "color"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Solid"
+          ]
+        }
+      ]
+    },
+    "Codec": {
+      "description": "Output video codec.",
+      "oneOf": [
+        {
+          "description": "The source's codec (H.264, HEVC or AV1).",
+          "type": "string",
+          "const": "Source"
+        },
+        {
+          "description": "H.264 / AVC.",
+          "type": "string",
+          "const": "H264"
+        },
+        {
+          "description": "H.265 / HEVC.",
+          "type": "string",
+          "const": "Hevc"
+        },
+        {
+          "description": "AV1.",
+          "type": "string",
+          "const": "Av1"
+        }
+      ]
+    },
+    "ConflictPolicy": {
+      "description": "What to do when the output file already exists.",
+      "oneOf": [
+        {
+          "description": "Append a number: `clip_blurrd (2).mp4`.",
+          "type": "string",
+          "const": "AddNumber"
+        },
+        {
+          "description": "Replace the existing file (never the input).",
+          "type": "string",
+          "const": "Overwrite"
+        },
+        {
+          "description": "Skip the export.",
+          "type": "string",
+          "const": "Skip"
+        }
+      ]
+    },
+    "Container": {
+      "description": "Output container format.",
+      "oneOf": [
+        {
+          "description": "The source's container.",
+          "type": "string",
+          "const": "Source"
+        },
+        {
+          "description": "MP4.",
+          "type": "string",
+          "const": "Mp4"
+        },
+        {
+          "description": "Matroska.",
+          "type": "string",
+          "const": "Mkv"
+        },
+        {
+          "description": "QuickTime.",
+          "type": "string",
+          "const": "Mov"
+        }
+      ]
+    },
+    "Coverage": {
+      "description": "Which frames the verification reads.",
+      "oneOf": [
+        {
+          "description": "Every frame on which a HUD structure signal is on, plus one frame in\nfifteen elsewhere.",
+          "type": "string",
+          "const": "Structure"
+        },
+        {
+          "description": "Every frame.",
+          "type": "string",
+          "const": "EveryFrame"
+        }
+      ]
+    },
+    "EncoderSetting": {
+      "description": "Which encoder to use.",
+      "oneOf": [
+        {
+          "description": "The fallback chain NVENC, AMF, Quick Sync, Media Foundation.",
+          "type": "string",
+          "const": "Auto"
+        },
+        {
+          "description": "A specific FFmpeg encoder, for example `h264_nvenc`.",
+          "type": "object",
+          "properties": {
+            "Named": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Named"
+          ]
+        }
+      ]
+    },
+    "ExportSettings": {
+      "description": "Export settings.",
+      "type": "object",
+      "properties": {
+        "audio": {
+          "description": "Audio handling.",
+          "$ref": "#/$defs/AudioMode"
+        },
+        "codec": {
+          "description": "Output codec.",
+          "$ref": "#/$defs/Codec"
+        },
+        "container": {
+          "description": "Output container.",
+          "$ref": "#/$defs/Container"
+        },
+        "copy_subtitles": {
+          "description": "Copy subtitle streams.",
+          "type": "boolean"
+        },
+        "encoder": {
+          "description": "Encoder choice.",
+          "$ref": "#/$defs/EncoderSetting"
+        },
+        "keyframes": {
+          "description": "Keyframe placement.",
+          "$ref": "#/$defs/KeyframePolicy"
+        },
+        "metadata": {
+          "description": "Container metadata.",
+          "$ref": "#/$defs/MetadataMode"
+        },
+        "moov": {
+          "description": "Index placement for MP4/MOV.",
+          "$ref": "#/$defs/MoovMode"
+        },
+        "nvenc_sessions": {
+          "description": "Parallel NVENC sessions.",
+          "$ref": "#/$defs/NvencSessions"
+        },
+        "output": {
+          "description": "Output file naming.",
+          "$ref": "#/$defs/OutputSettings"
+        },
+        "preset": {
+          "description": "Encoder preset, 1 (fastest) to 7 (best quality).",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "rate": {
+          "description": "Rate control.",
+          "$ref": "#/$defs/RateControl"
+        },
+        "smart_render": {
+          "description": "Stream-copy GOPs without boxes (not available in v0.1).",
+          "type": "boolean"
+        },
+        "split_encode": {
+          "description": "Split-frame encoding for HEVC and AV1.",
+          "$ref": "#/$defs/Toggle"
+        },
+        "ten_bit": {
+          "description": "10-bit output.",
+          "$ref": "#/$defs/Toggle"
+        },
+        "trim": {
+          "description": "Export only these frames, or the whole video.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "codec",
+        "encoder",
+        "rate",
+        "preset",
+        "ten_bit",
+        "split_encode",
+        "nvenc_sessions",
+        "keyframes",
+        "smart_render",
+        "audio",
+        "copy_subtitles",
+        "metadata",
+        "container",
+        "moov",
+        "output"
+      ]
+    },
+    "FrameRange": {
+      "description": "An inclusive range of presentation frame indices, written as `[f0, f1]`.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "KeepNames": {
+      "description": "Names that stay readable.\n\nA kept name applies to a whole track only if every read of the track\nmatches exactly (case-folded, confidence at least 0.9 on at least five\nframes), or if the track is the local player's own row. Never per frame.",
+      "type": "object",
+      "properties": {
+        "names": {
+          "description": "Names to keep. Excluded from exported presets by default.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "own_row": {
+          "description": "Keep the local player's own row readable.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "own_row",
+        "names"
+      ]
+    },
+    "KeyframePolicy": {
+      "description": "Where the output's keyframes go.",
+      "oneOf": [
+        {
+          "description": "An IDR frame wherever the source has a keyframe, closed GOPs.",
+          "type": "string",
+          "const": "MatchSource"
+        },
+        {
+          "description": "The encoder's own keyframe placement.",
+          "type": "string",
+          "const": "EncoderDefault"
+        }
+      ]
+    },
+    "MetadataMode": {
+      "description": "Which container metadata is kept.",
+      "oneOf": [
+        {
+          "description": "Only colour, rotation and timecode; recorder title, comment and\naccount tags are stripped.",
+          "type": "string",
+          "const": "Technical"
+        },
+        {
+          "description": "Everything the source has.",
+          "type": "string",
+          "const": "All"
+        }
+      ]
+    },
+    "Mode": {
+      "description": "How tightly boxes follow the names.",
+      "oneOf": [
+        {
+          "description": "Boxes hug the names; low-confidence spans fall back to the whole name\nslot automatically.",
+          "type": "string",
+          "const": "Tight"
+        },
+        {
+          "description": "Every name gets the union of its tight box and its slot box.",
+          "type": "string",
+          "const": "Safe"
+        }
+      ]
+    },
+    "MoovMode": {
+      "description": "Where the MP4/MOV index (`moov`) is written.",
+      "oneOf": [
+        {
+          "description": "Reserve space up front; fall back to a faststart rewrite if it is\ntoo small.",
+          "type": "string",
+          "const": "Reserve"
+        },
+        {
+          "description": "Rewrite the file to move the index to the front.",
+          "type": "string",
+          "const": "Faststart"
+        },
+        {
+          "description": "Write the index at the end.",
+          "type": "string",
+          "const": "AtEnd"
+        }
+      ]
+    },
+    "NvencSessions": {
+      "description": "Number of parallel NVENC sessions within one export.",
+      "oneOf": [
+        {
+          "description": "Two sessions for H.264 when the GPU supports them, otherwise one.",
+          "type": "string",
+          "const": "Auto"
+        },
+        {
+          "description": "One session.",
+          "type": "string",
+          "const": "One"
+        },
+        {
+          "description": "Two sessions.",
+          "type": "string",
+          "const": "Two"
+        }
+      ]
+    },
+    "OutputFolder": {
+      "description": "Where output files go.",
+      "oneOf": [
+        {
+          "description": "The source file's folder.",
+          "type": "string",
+          "const": "NextToSource"
+        },
+        {
+          "description": "A fixed folder.",
+          "type": "object",
+          "properties": {
+            "Folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Folder"
+          ]
+        }
+      ]
+    },
+    "OutputSettings": {
+      "description": "Output file naming.",
+      "type": "object",
+      "properties": {
+        "folder": {
+          "description": "Output folder.",
+          "$ref": "#/$defs/OutputFolder"
+        },
+        "on_conflict": {
+          "description": "Behaviour when the file exists.",
+          "$ref": "#/$defs/ConflictPolicy"
+        },
+        "template": {
+          "description": "File name template without extension; `{name}` is the source's file\nstem.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folder",
+        "template",
+        "on_conflict"
+      ]
+    },
+    "Preset": {
+      "description": "A named set of region, blur, export and verification settings.",
+      "type": "object",
+      "properties": {
+        "blur": {
+          "description": "Blur parameters.",
+          "$ref": "#/$defs/BlurParams"
+        },
+        "builtin": {
+          "description": "Whether the preset ships with blurrd (read-only).",
+          "type": "boolean"
+        },
+        "export": {
+          "description": "Export settings.",
+          "$ref": "#/$defs/ExportSettings"
+        },
+        "id": {
+          "description": "Stable identifier.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name.",
+          "type": "string"
+        },
+        "regions": {
+          "description": "Region settings.",
+          "$ref": "#/$defs/RegionSettings"
+        },
+        "verify": {
+          "description": "Verification settings.",
+          "$ref": "#/$defs/VerifySettings"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "builtin",
+        "regions",
+        "blur",
+        "export",
+        "verify"
+      ]
+    },
+    "RateControl": {
+      "description": "Rate control of the encoder.",
+      "oneOf": [
+        {
+          "description": "Variable bit rate around the source's bit rate, capped at\n`max_factor` times the source.",
+          "type": "object",
+          "properties": {
+            "MatchSource": {
+              "type": "object",
+              "properties": {
+                "max_factor": {
+                  "description": "Peak bit rate as a multiple of the source bit rate.",
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "required": [
+                "max_factor"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "MatchSource"
+          ]
+        },
+        {
+          "description": "Constant quality.",
+          "type": "object",
+          "properties": {
+            "Cq": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Cq"
+          ]
+        },
+        {
+          "description": "Variable bit rate with explicit targets.",
+          "type": "object",
+          "properties": {
+            "Vbr": {
+              "type": "object",
+              "properties": {
+                "max_kbps": {
+                  "description": "Peak bit rate in kbit/s.",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "target_kbps": {
+                  "description": "Target bit rate in kbit/s.",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "target_kbps",
+                "max_kbps"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Vbr"
+          ]
+        }
+      ]
+    },
+    "Region": {
+      "description": "A screen region that can contain player names.\n\nThe detector regions are the gameplay HUD parts that blurrd finds by\nitself. [`Region::Manual`] marks boxes the user drew; they are always\napplied, whichever regions are enabled. World-space name tags above\nplayers' heads are out of scope and have no region.",
+      "oneOf": [
+        {
+          "description": "Kill feed rows in the top right corner (killer and victim names).",
+          "type": "string",
+          "const": "KillFeed"
+        },
+        {
+          "description": "ACE, clutch and similar banners in the top centre.",
+          "type": "string",
+          "const": "Banner"
+        },
+        {
+          "description": "The voice-chat speaker list on the left.",
+          "type": "string",
+          "const": "VoiceChat"
+        },
+        {
+          "description": "Sender names in the text chat on the left.",
+          "type": "string",
+          "const": "TextChat"
+        },
+        {
+          "description": "A box drawn by the user.",
+          "type": "string",
+          "const": "Manual"
+        }
+      ]
+    },
+    "RegionSet": {
+      "description": "A set of [`Region`]s.\n\nSerialised as a sorted array of region names, for example\n`[\"KillFeed\", \"Banner\"]`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Region"
+      }
+    },
+    "RegionSettings": {
+      "description": "Which regions are blurred, and how.",
+      "type": "object",
+      "properties": {
+        "chat_blur_message": {
+          "description": "Also blur the message text of chat lines.",
+          "type": "boolean"
+        },
+        "chat_blur_system": {
+          "description": "Blur names inside chat system lines (for example \"X joined\").",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Enabled detector regions.",
+          "$ref": "#/$defs/RegionSet"
+        },
+        "keep_names": {
+          "description": "Names that stay readable.",
+          "$ref": "#/$defs/KeepNames"
+        },
+        "mode": {
+          "description": "Box geometry mode.",
+          "$ref": "#/$defs/Mode"
+        }
+      },
+      "required": [
+        "enabled",
+        "mode",
+        "keep_names",
+        "chat_blur_message",
+        "chat_blur_system"
+      ]
+    },
+    "SolidColor": {
+      "description": "Fill colour of [`BlurStyle::Solid`].",
+      "oneOf": [
+        {
+          "description": "The mean colour of the box.",
+          "type": "string",
+          "const": "BoxMean"
+        },
+        {
+          "description": "A fixed sRGB colour `[r, g, b]`.",
+          "type": "object",
+          "properties": {
+            "Rgb": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0
+              },
+              "maxItems": 3,
+              "minItems": 3
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Rgb"
+          ]
+        }
+      ]
+    },
+    "Strength": {
+      "description": "Blur strength, as a block size in reference pixels.",
+      "oneOf": [
+        {
+          "description": "8 px blocks.",
+          "type": "string",
+          "const": "Low"
+        },
+        {
+          "description": "10 px blocks (the default).",
+          "type": "string",
+          "const": "Medium"
+        },
+        {
+          "description": "14 px blocks.",
+          "type": "string",
+          "const": "High"
+        },
+        {
+          "description": "A custom block size, clamped to at least [`MIN_BLOCK_PX`].",
+          "type": "object",
+          "properties": {
+            "Custom": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Custom"
+          ]
+        }
+      ]
+    },
+    "Toggle": {
+      "description": "An on/off setting that can also follow the source or the hardware.",
+      "oneOf": [
+        {
+          "description": "Decide from the source and the encoder's capabilities.",
+          "type": "string",
+          "const": "Auto"
+        },
+        {
+          "description": "Always on.",
+          "type": "string",
+          "const": "On"
+        },
+        {
+          "description": "Always off.",
+          "type": "string",
+          "const": "Off"
+        }
+      ]
+    },
+    "VerifyMode": {
+      "description": "What the OCR verification does with a leak.",
+      "oneOf": [
+        {
+          "description": "Add slot boxes over every readable name and check again.",
+          "type": "string",
+          "const": "DetectAndFix"
+        },
+        {
+          "description": "Only report leaks.",
+          "type": "string",
+          "const": "ReportOnly"
+        }
+      ]
+    },
+    "VerifySettings": {
+      "description": "OCR verification settings.",
+      "type": "object",
+      "properties": {
+        "audit_output": {
+          "description": "Output audit.",
+          "$ref": "#/$defs/Audit"
+        },
+        "coverage": {
+          "description": "Which frames are read.",
+          "$ref": "#/$defs/Coverage"
+        },
+        "enabled": {
+          "description": "Run the verification during analysis.",
+          "type": "boolean"
+        },
+        "full_frame_sample_ms": {
+          "description": "Interval of the full-frame sample for names outside every region, in\nmilliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "ignore_words": {
+          "description": "Words that never count as names (callouts, places).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "min_conf": {
+          "description": "Minimum recognition confidence of a dictionary-free leak.",
+          "type": "number",
+          "format": "float"
+        },
+        "mode": {
+          "description": "Fix or only report.",
+          "$ref": "#/$defs/VerifyMode"
+        }
+      },
+      "required": [
+        "enabled",
+        "mode",
+        "coverage",
+        "full_frame_sample_ms",
+        "min_conf",
+        "audit_output",
+        "ignore_words"
+      ]
+    }
+  }
+}

@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "blurrd-verify/1",
+  "description": "A verification report (`verify-*.json`, schema `blurrd-verify/1`).",
+  "type": "object",
+  "properties": {
+    "coverage": {
+      "description": "Which frames were read.",
+      "$ref": "#/$defs/Coverage"
+    },
+    "frames_checked": {
+      "description": "Number of frames read.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "leaks": {
+      "description": "Leaks, in frame order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Leak"
+      }
+    },
+    "output_sha256": {
+      "description": "SHA-256 of the audited output, for output audits.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "per_region": {
+      "description": "Counts per region.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/RegionVerify"
+      }
+    },
+    "plan_revision": {
+      "description": "Project revision the report checked.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "schema": {
+      "description": "Always `blurrd-verify/1`.",
+      "type": "string"
+    },
+    "source_fingerprint": {
+      "description": "The source file.",
+      "$ref": "#/$defs/Fingerprint"
+    },
+    "summary": {
+      "description": "Derived counts; always equal to [`VerifySummary::compute`].",
+      "$ref": "#/$defs/VerifySummary"
+    },
+    "version": {
+      "description": "Revision within the schema's major version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema",
+    "version",
+    "plan_revision",
+    "source_fingerprint",
+    "coverage",
+    "frames_checked",
+    "per_region",
+    "leaks",
+    "summary"
+  ],
+  "$defs": {
+    "Coverage": {
+      "description": "Which frames the verification reads.",
+      "oneOf": [
+        {
+          "description": "Every frame on which a HUD structure signal is on, plus one frame in\nfifteen elsewhere.",
+          "type": "string",
+          "const": "Structure"
+        },
+        {
+          "description": "Every frame.",
+          "type": "string",
+          "const": "EveryFrame"
+        }
+      ]
+    },
+    "Fingerprint": {
+      "description": "Identifies a source file without hashing all of it.\n\nComputed by the engine (size, modification time and a BLAKE3 hash of the\nfirst and last megabytes); `blurrd-core` only defines the type.",
+      "type": "object",
+      "properties": {
+        "blake3_head_tail": {
+          "description": "Hex BLAKE3 hash of the head and tail of the file.",
+          "type": "string"
+        },
+        "mtime": {
+          "description": "Modification time in seconds since the Unix epoch.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "size": {
+          "description": "File size in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "size",
+        "mtime",
+        "blake3_head_tail"
+      ]
+    },
+    "FrameRange": {
+      "description": "An inclusive range of presentation frame indices, written as `[f0, f1]`.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "Leak": {
+      "description": "One leak, merged over the frames on which it was readable.",
+      "type": "object",
+      "properties": {
+        "conf": {
+          "description": "Detection or recognition confidence, 0.0 to 1.0.",
+          "type": "number",
+          "format": "float"
+        },
+        "dedup": {
+          "description": "Optional deduplication key: an 8-character HMAC with a random\nper-install key. Present only when deduplication is enabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frame_range": {
+          "description": "Frames on which the text was readable.",
+          "$ref": "#/$defs/FrameRange"
+        },
+        "kind": {
+          "description": "How it was found.",
+          "$ref": "#/$defs/LeakKind"
+        },
+        "rect": {
+          "description": "Where the text was, in source pixels.",
+          "$ref": "#/$defs/RectI"
+        },
+        "region": {
+          "description": "The region, or `None` outside every region.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "description": "What happened to it.",
+          "$ref": "#/$defs/LeakStatus"
+        },
+        "zone": {
+          "description": "Where it was found.",
+          "$ref": "#/$defs/LeakZone"
+        }
+      },
+      "required": [
+        "frame_range",
+        "zone",
+        "rect",
+        "conf",
+        "kind",
+        "status"
+      ]
+    },
+    "LeakKind": {
+      "description": "How a leak was found.",
+      "oneOf": [
+        {
+          "description": "The read text matches a name seen elsewhere in the video.",
+          "type": "string",
+          "const": "Dictionary"
+        },
+        {
+          "description": "Text was detected or read with enough confidence in a name slot.",
+          "type": "string",
+          "const": "DictionaryFree"
+        },
+        {
+          "description": "A known name outside every supported region (in practice a name tag\nabove a player's head). Information only: never blurred, never\ncounted.",
+          "type": "string",
+          "const": "OutOfScope"
+        }
+      ]
+    },
+    "LeakStatus": {
+      "description": "What happened to a leak.",
+      "oneOf": [
+        {
+          "description": "Covered by a fix box and checked again.",
+          "type": "string",
+          "const": "Fixed"
+        },
+        {
+          "description": "Still readable.",
+          "type": "string",
+          "const": "Open"
+        },
+        {
+          "description": "Still readable; the user accepted the report.",
+          "type": "string",
+          "const": "Accepted"
+        },
+        {
+          "description": "Information only (out-of-scope names).",
+          "type": "string",
+          "const": "Info"
+        }
+      ]
+    },
+    "LeakZone": {
+      "description": "Where in the frame a leak was found.",
+      "oneOf": [
+        {
+          "description": "Inside a name slot of a region.",
+          "type": "string",
+          "const": "NameSlot"
+        },
+        {
+          "description": "Inside a region's protected zone, outside the known name slots.",
+          "type": "string",
+          "const": "ProtectedZone"
+        },
+        {
+          "description": "In the full-frame sample, outside every protected zone.",
+          "type": "string",
+          "const": "FullFrame"
+        }
+      ]
+    },
+    "RectI": {
+      "description": "An axis-aligned, half-open rectangle in source pixels.\n\nThe rectangle covers the pixels with `x0 <= x < x1` and `y0 <= y < y1`,\nso `x1 - x0` is its width. A `RectI` is never empty: [`RectI::new`] and\ndeserialisation reject rectangles without area. In JSON it is written as\n`[x0, y0, x1, y1]`.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "int32"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "Region": {
+      "description": "A screen region that can contain player names.\n\nThe detector regions are the gameplay HUD parts that blurrd finds by\nitself. [`Region::Manual`] marks boxes the user drew; they are always\napplied, whichever regions are enabled. World-space name tags above\nplayers' heads are out of scope and have no region.",
+      "oneOf": [
+        {
+          "description": "Kill feed rows in the top right corner (killer and victim names).",
+          "type": "string",
+          "const": "KillFeed"
+        },
+        {
+          "description": "ACE, clutch and similar banners in the top centre.",
+          "type": "string",
+          "const": "Banner"
+        },
+        {
+          "description": "The voice-chat speaker list on the left.",
+          "type": "string",
+          "const": "VoiceChat"
+        },
+        {
+          "description": "Sender names in the text chat on the left.",
+          "type": "string",
+          "const": "TextChat"
+        },
+        {
+          "description": "A box drawn by the user.",
+          "type": "string",
+          "const": "Manual"
+        }
+      ]
+    },
+    "RegionVerify": {
+      "description": "Verification counts of one region.",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "Number of items (names over their lifetime) checked.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "positive_control": {
+          "description": "Fraction of items whose name OCR read on the clean source, 0.0 to 1.0.",
+          "type": "number",
+          "format": "float"
+        },
+        "unverifiable_items": {
+          "description": "Items OCR could not read on the source; covered only by the\ngeometric guarantee.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "positive_control",
+        "items",
+        "unverifiable_items"
+      ]
+    },
+    "VerifyState": {
+      "description": "Overall verification result of a project or report.",
+      "oneOf": [
+        {
+          "description": "Nothing readable remains and every item was checked.",
+          "type": "string",
+          "const": "Clean"
+        },
+        {
+          "description": "Not (fully) checked: never verified, edited since, or items OCR could\nnot read on the source. Outputs are named `*_UNVERIFIED` until the\nuser accepts the report.",
+          "type": "string",
+          "const": "Unverified"
+        },
+        {
+          "description": "At least one name is still readable.",
+          "type": "string",
+          "const": "LeaksRemain"
+        }
+      ]
+    },
+    "VerifySummary": {
+      "description": "Counts derived from the leaks and regions of a report.",
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "description": "Leaks the user accepted.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "fixed": {
+          "description": "Leaks fixed.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "open": {
+          "description": "Leaks still readable.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "out_of_scope": {
+          "description": "Out-of-scope names listed as information.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "state": {
+          "description": "The result.",
+          "$ref": "#/$defs/VerifyState"
+        },
+        "unverifiable_items": {
+          "description": "Items OCR could not read on the source, over all regions.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "state",
+        "open",
+        "fixed",
+        "accepted",
+        "out_of_scope",
+        "unverifiable_items"
+      ]
+    }
+  }
+}

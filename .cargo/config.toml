@@ -1,3 +1,10 @@
 [alias]
 # Developer tasks (`cargo xtask help`), see docs/development.md.
 xtask = "run --quiet --package xtask --"
+
+[env]
+# TypeScript bindings written by `cargo xtask bindings` (ts-rs). They move
+# into apps/desktop/src/bindings/ when the desktop app exists.
+TS_RS_EXPORT_DIR = { value = "crates/blurrd-core/bindings", relative = true }
+# u64/i64 fields (sizes, revisions, milliseconds) arrive as JSON numbers.
+TS_RS_LARGE_INT = "number"
