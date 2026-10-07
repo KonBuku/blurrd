@@ -28,6 +28,7 @@ policy and the commit conventions.
 | `crates/blurrd-core` | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`. |
 | `xtask`              | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).      |
 | `docs`               | Developer and user documentation.                                                    |
+| `scripts`            | Node scripts for repository tasks (`release.mjs`).                                   |
 | `assets/brand`       | Logo and brand assets with their generator.                                          |
 
 ## Rust workspace
@@ -74,3 +75,35 @@ pnpm fmt:check        # check formatting without writing, as in CI
 oxlint is configured in `.oxlintrc.json` and oxfmt in `.oxfmtrc.json`.
 `CODE_OF_CONDUCT.md` is excluded from formatting because it is the verbatim
 Contributor Covenant text.
+
+## Git hooks
+
+`pnpm install` installs the Git hooks with [lefthook](https://lefthook.dev)
+(`lefthook.yml`):
+
+| Hook         | Checks                                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pre-commit` | rustfmt, oxfmt and oxlint on the staged files, typos                                                                                                   |
+| `commit-msg` | commitlint (`commitlint.config.js`): Conventional Commits, header at most 72 characters, body lines at most 72 characters, scopes from CONTRIBUTING.md |
+| `pre-push`   | clippy on the whole workspace with `-D warnings`                                                                                                       |
+
+The `pre-commit` hook needs `cargo` and `typos` on `PATH`. To skip the hooks
+for a single command, for example while rebasing, set `LEFTHOOK=0`.
+
+## Changelog and releases
+
+`CHANGELOG.md` and the release notes are generated from the commit history by
+[git-cliff](https://git-cliff.org) (`cliff.toml`); never edit the changelog by
+hand.
+
+```sh
+pnpm changelog            # preview the unreleased section
+pnpm release --dry-run    # show the next version and its changelog section
+pnpm release              # bump, regenerate CHANGELOG.md, commit and tag
+```
+
+`pnpm release` runs on a clean `main` only. It bumps the single version in
+`[workspace.package]` of `Cargo.toml`, syncs `Cargo.lock`, regenerates
+`CHANGELOG.md`, and creates an unsigned commit `chore(release): vX.Y.Z` with
+an annotated, unsigned tag `vX.Y.Z`. It does not push; run
+`git push --follow-tags origin main` afterwards.

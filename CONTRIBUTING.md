@@ -86,6 +86,8 @@ blurrd follows [Conventional Commits 1.0.0](https://www.conventionalcommits.org/
   checks on its own, and a dependency is added in the commit that first
   uses it.
 - Do not add tool-generated trailers or "Generated with" lines.
+- The `commit-msg` hook that `pnpm install` sets up checks these rules
+  with commitlint before the commit is created.
 
 ## Pull requests
 

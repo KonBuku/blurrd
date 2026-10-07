@@ -4,12 +4,19 @@
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
+    "prepare": "lefthook install",
     "lint": "oxlint --deny-warnings",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt && cargo fmt --all",
-    "fmt:check": "oxfmt --check && cargo fmt --all --check"
+    "fmt:check": "oxfmt --check && cargo fmt --all --check",
+    "changelog": "git-cliff --unreleased",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
+    "@commitlint/cli": "21.2.3",
+    "@commitlint/config-conventional": "21.2.3",
+    "git-cliff": "2.14.2",
+    "lefthook": "2.1.17",
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0"
   },

@@ -1,0 +1,28 @@
+# Git hooks, installed by `pnpm install` (the `prepare` script runs
+# `lefthook install`). Configuration reference: https://lefthook.dev
+# Skip them for a single command with `LEFTHOOK=0 git commit ...`.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: rustfmt
+      glob: "*.rs"
+      run: cargo fmt --all --check
+    - name: oxfmt
+      glob: "*.{js,mjs,cjs,ts,tsx,json,jsonc,css,md,yml,yaml,toml}"
+      run: pnpm exec oxfmt --check --no-error-on-unmatched-pattern {staged_files}
+    - name: oxlint
+      glob: "*.{js,mjs,cjs,ts,tsx}"
+      run: pnpm exec oxlint --deny-warnings {staged_files}
+    - name: typos
+      run: typos --force-exclude {staged_files}
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}
+
+pre-push:
+  jobs:
+    - name: clippy
+      run: cargo clippy --workspace --all-targets --locked -- -D warnings

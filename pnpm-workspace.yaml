@@ -1,2 +1,8 @@
 packages:
   - apps/*
+
+# pnpm does not run dependency lifecycle scripts unless they are allowed here.
+# lefthook's postinstall installs the Git hooks (the root `prepare` script
+# does the same, so hooks are installed either way).
+allowBuilds:
+  lefthook: true
