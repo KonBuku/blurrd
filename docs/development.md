@@ -133,6 +133,14 @@ Pinning rules:
 - Workflows request `contents: read` only; a job asks for more permissions
   only when it needs them.
 
+Dependabot (`.github/dependabot.yml`) opens grouped weekly updates for
+Cargo, npm and GitHub Actions, one week after a release at the earliest.
+Its commits use `build(deps): ...` for Cargo and npm and `ci(deps): ...`
+for actions, so `cliff.toml` lists the crate and package updates under
+"Dependencies". Shorten a generated title to 72 characters when squashing.
+Review the Rust `tauri*` and the `@tauri-apps/*` updates together so both
+stay on the same minor version.
+
 ## Changelog and releases
 
 `CHANGELOG.md` and the release notes are generated from the commit history by

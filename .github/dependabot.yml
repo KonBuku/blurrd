@@ -1,0 +1,59 @@
+# Dependabot version updates. Commit messages and pull request titles use
+# the Conventional Commits types from CONTRIBUTING.md: `build(deps)` for
+# Cargo and npm, `ci(deps)` for GitHub Actions (Dependabot adds the colon).
+# Updates are grouped and wait a week after a release (cooldown) before a
+# pull request is opened.
+#
+# Keep the Rust `tauri*` crates and the `@tauri-apps/*` packages on the same
+# minor version: review and merge their two pull requests together. The
+# first group that matches a dependency wins, so the specific groups come
+# before the catch-all minor/patch groups.
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build(deps)
+    groups:
+      tauri:
+        patterns: ["tauri", "tauri-*"]
+      rust-minor:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build(deps)
+    groups:
+      tauri-js:
+        patterns: ["@tauri-apps/*"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      js-minor:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions:
+        patterns: ["*"]

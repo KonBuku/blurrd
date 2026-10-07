@@ -1,5 +1,5 @@
-# Static security analysis of the GitHub Actions workflows with zizmor
-# (https://docs.zizmor.sh).
+# Static security analysis of the GitHub Actions workflows and the
+# Dependabot configuration with zizmor (https://docs.zizmor.sh).
 #
 # Findings are reported as workflow annotations and fail the job. Uploading
 # SARIF to code scanning (`advanced-security: true`) needs GitHub Advanced
@@ -13,9 +13,11 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/**"
+      - ".github/dependabot.yml"
   pull_request:
     paths:
       - ".github/workflows/**"
+      - ".github/dependabot.yml"
   workflow_dispatch:
 
 permissions:

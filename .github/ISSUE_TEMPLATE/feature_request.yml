@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest an improvement or a new feature
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "**Never upload footage, frames or screenshots in which other players' names are readable.**"
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How should blurrd behave?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other solutions or workarounds you have considered.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Kill feed
+        - Round / ACE banner
+        - Voice chat
+        - Text chat
+        - Scoreboard / tab screen
+        - Death recap / killed-by panel
+        - Spectating banner
+        - Match-end / MVP / round-end screen
+        - Export / video
+        - OCR verification
+        - Desktop app UI
+        - CLI
+        - Other
+    validations:
+      required: true

@@ -1,0 +1,72 @@
+name: Bug report
+description: Something does not work, or a name stays readable
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never upload footage, frames or screenshots in which other players' names are readable, and do not paste OCR output that contains names.** Give the timestamp, the region and the resolution instead, or attach a still in which the name has been covered by hand.
+
+        Name tags above players' heads in the game world are not blurred by design; please do not report them as bugs.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Kill feed
+        - Round / ACE banner
+        - Voice chat
+        - Text chat
+        - Scoreboard / tab screen
+        - Death recap / killed-by panel
+        - Spectating banner
+        - Match-end / MVP / round-end screen
+        - Export / video
+        - OCR verification
+        - Desktop app UI
+        - CLI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import ...
+        2. Select ...
+        3. Export ...
+    validations:
+      required: true
+  - type: input
+    id: timestamp
+    attributes:
+      label: Timestamps in the output video
+      placeholder: "00:12.48"
+  - type: input
+    id: version
+    attributes:
+      label: blurrd version
+      placeholder: "0.1.0 (Help → About, or blurrd --version)"
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Windows version, GPU and driver, source video (resolution, frame rate, codec; `ffprobe` output helps) and the in-game HUD scale.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Help → Open log folder. Logs are designed not to contain player names; please check them before you paste.
+      render: text
