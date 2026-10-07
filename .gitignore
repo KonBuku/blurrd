@@ -62,3 +62,9 @@ desktop.ini
 *.ncu-rep
 flamegraph.svg
 perf.data*
+
+# Brand generator: review sheet, scratch renders and Python caches
+assets/brand/final-sheet.png
+assets/brand/.render/
+__pycache__/
+*.pyc

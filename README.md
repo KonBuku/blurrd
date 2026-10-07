@@ -1,6 +1,11 @@
-# blurrd
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/blurrd-lockup-on-dark.svg">
+    <img src="assets/brand/blurrd-lockup-on-light.svg" height="64" alt="blurrd">
+  </picture>
+</p>
 
-Blur player names in gameplay recordings: fast, on your GPU, fully offline.
+<p align="center">Blur player names in gameplay recordings: fast, on your GPU, fully offline.</p>
 
 > **Status: in development.** There is no release yet. Nothing in this
 > repository is ready for use, and file formats, the CLI and the user
