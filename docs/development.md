@@ -207,7 +207,13 @@ written to `target/release/bundle/nsis/`.
 `pnpm dev:mock` (inside `apps/desktop`) serves the frontend for a plain
 browser: an in-memory mock backend (`src/ipc/mock`) answers the IPC calls
 the Tauri shell would handle. Unit tests use the same mock; production
-builds never include it.
+builds never include it. The Playwright end-to-end tests in `e2e/` run the
+frontend in Chromium against this mock:
+
+```sh
+pnpm --filter @blurrd/desktop exec playwright install chromium   # once
+pnpm --filter @blurrd/desktop e2e                                # starts `pnpm dev:mock` itself
+```
 
 The window has no native title bar (`decorations: false`); the frontend
 draws its own with window controls. `src-tauri/capabilities/default.json`
