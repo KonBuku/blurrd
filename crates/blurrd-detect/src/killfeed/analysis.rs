@@ -7,8 +7,8 @@ use blurrd_core::{NameKind, RectI};
 
 use super::tones::{self, Sample, Tone};
 use super::{
-    FEED_ROI, FEED_X0, INNER_MARGIN, RIGHT_ALIGN, ROW_H, Scratch, VICTIM_COLOUR_X0, VICTIM_TEXT_X1,
-    VICTIM_X1,
+    BarEvidence, FEED_ROI, FEED_X0, FeedRow, INNER_MARGIN, RIGHT_ALIGN, ROW_H, Scratch,
+    VICTIM_COLOUR_X0, VICTIM_TEXT_X1, VICTIM_X1,
 };
 use crate::classes::{Class, PixelClasses};
 use crate::components::{Component, Connectivity, components};
@@ -43,6 +43,11 @@ const ICON_MIN_H: i32 = 22;
 /// touches the row band above or below the bar; the prototype took them
 /// for icons and dropped every name of the row.
 const ICON_MAX_W: i32 = 40;
+/// ... and at most this tall. A white component over the whole row height
+/// is the bar itself: in greyscale video a light bar passes as white, and
+/// the strip between the victim name and the portrait would pass as an
+/// icon and drop the name's last glyph.
+const ICON_MAX_H: i32 = 30;
 /// Margin around such an icon in which glyphs are dropped.
 const ICON_MARGIN: i32 = 3;
 /// The victim text starts this far right of the colour boundary.
@@ -273,18 +278,25 @@ fn profiles(classes: &PixelClasses, top: i32, p: &mut Profile) {
     }
 }
 
-/// Finds the names in the row at `top` and reports each as
-/// `(kind, text bounds)`, victims first (`analyze_row`).
+/// Finds the names in `row` and reports each as `(kind, text bounds)`,
+/// victims first (`analyze_row`).
 ///
 /// The killer and victim sides are told apart by the default team colours
 /// if they explain the bar next to the victim name, otherwise by colours
-/// learned from the row ([`learned_sides`]).
+/// learned from the row ([`learned_sides`]). A row found from luminance
+/// alone has no colours to tell the sides apart and is read as a
+/// one-colour row.
 pub(super) fn analyze_row(
     classes: &PixelClasses,
-    top: i32,
+    row: FeedRow,
     s: &mut Scratch,
     mut emit: impl FnMut(NameKind, RectI),
 ) {
+    let top = row.top;
+    if row.evidence == BarEvidence::Luminance {
+        one_colour_row(classes, top, s, &mut emit);
+        return;
+    }
     let mut p = std::mem::take(&mut s.profile);
     profiles(classes, top, &mut p);
     // The default colours decide wherever they explain the victim side;
@@ -468,7 +480,10 @@ fn one_colour_row(
         .found
         .iter()
         .map(to_comp)
-        .filter(|c| c.bottom - c.top >= ICON_MIN_H && c.x1 - c.x0 <= ICON_MAX_W)
+        .filter(|c| {
+            let (w, h) = (c.x1 - c.x0, c.bottom - c.top);
+            (ICON_MIN_H..=ICON_MAX_H).contains(&h) && w <= ICON_MAX_W
+        })
         .map(|c| (c.x0 - ICON_MARGIN, c.x1 + ICON_MARGIN))
         .collect();
     text_comps(classes, top, FEED_X0, VICTIM_TEXT_X1, s);

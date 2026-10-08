@@ -19,7 +19,15 @@
 //! not explain a row's bar (colour-blind modes, custom colours, GPU colour
 //! filters such as Digital Vibrance or hue and saturation changes), the
 //! bar colours are learned from the frame and drive the row score and the
-//! killer | victim boundary instead.
+//! killer | victim boundary instead. A bar without usable chroma (a
+//! black-and-white filter, saturation near 0) is accepted from luminance
+//! structure alone; such a row is read as a one-colour row and marked
+//! low confidence ([`BarEvidence::Luminance`]).
+//!
+//! The brightness thresholds of the white and text classes follow the
+//! frame: the white level of the victim names is measured first, and a
+//! darkening filter (brightness, contrast, gamma) lowers the thresholds
+//! with it ([`ClassParams::for_white_level`]).
 //!
 //! Only the bands the detector reads are classified: the columns that find
 //! the rows over the whole crop height, then the full width of every row
@@ -88,6 +96,22 @@ pub enum RowAnchor {
     BarEdge,
 }
 
+/// What showed that a row's band is a kill-feed bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BarEvidence {
+    /// The default team colours of the port spec.
+    DefaultColour,
+    /// Bar colours learned from the frame (a colour-blind palette, custom
+    /// team colours, a hue or saturation filter).
+    LearnedColour,
+    /// Luminance structure only: a vertically flat band behind the victim
+    /// text line, next to a textured victim portrait. The bar shows no
+    /// usable chroma (a black-and-white filter or saturation near 0), so
+    /// the killer and victim sides cannot be told apart: the row is read as
+    /// a one-colour row, which reports every name as a victim.
+    Luminance,
+}
+
 /// One kill-feed row of a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FeedRow {
@@ -96,6 +120,17 @@ pub struct FeedRow {
     pub top: i32,
     /// How the row was found.
     pub anchor: RowAnchor,
+    /// What showed that the band is a bar.
+    pub evidence: BarEvidence,
+}
+
+impl FeedRow {
+    /// Whether the row was found with low confidence: from luminance
+    /// structure only ([`BarEvidence::Luminance`]). The health check and
+    /// escalation of later stages act on it (plan 7.3).
+    pub fn is_low_confidence(&self) -> bool {
+        self.evidence == BarEvidence::Luminance
+    }
 }
 
 /// Reusable buffers of the row analysis.
@@ -176,6 +211,13 @@ impl KillFeedDetector {
             y1: FEED_ROI.y1,
         });
         self.classes.compute_rect(crop, score, &self.params);
+        // A darkening filter: classify again with thresholds that follow
+        // the white level of the names.
+        let params = rows::white_level(&self.classes, &self.params)
+            .map_or(self.params, |white| self.params.for_white_level(white));
+        if params != self.params {
+            self.classes.compute_rect(crop, score, &params);
+        }
         rows::find_rows(
             crop,
             &self.classes,
@@ -187,26 +229,25 @@ impl KillFeedDetector {
         // Then every row band at full width. Bands closer than the top-hat
         // margin are classified together, so that no band's margin clears
         // the text flags of another.
-        let margin = 2 * (self.params.tophat_size / 2) as i32;
+        let margin = 2 * (params.tophat_size / 2) as i32;
         let mut pending: Option<(i32, i32)> = None;
         for row in &self.rows {
             let (y0, y1) = (row.top, row.top + ROW_H);
             pending = match pending {
                 Some((a, b)) if y0 <= b + margin => Some((a, y1.max(b))),
                 Some((a, b)) => {
-                    classify_band(&mut self.classes, crop, &self.params, a, b);
+                    classify_band(&mut self.classes, crop, &params, a, b);
                     Some((y0, y1))
                 }
                 None => Some((y0, y1)),
             };
         }
         if let Some((a, b)) = pending {
-            classify_band(&mut self.classes, crop, &self.params, a, b);
+            classify_band(&mut self.classes, crop, &params, a, b);
         }
         for row in &self.rows {
-            analysis::analyze_row(&self.classes, row.top, &mut self.scratch, |kind, text| {
-                out.push(name_detection(kind, text, row.top));
-            });
+            let emit = |kind, text| out.push(name_detection(kind, text, row.top));
+            analysis::analyze_row(&self.classes, *row, &mut self.scratch, emit);
         }
         Ok(())
     }

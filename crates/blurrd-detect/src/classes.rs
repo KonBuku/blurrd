@@ -182,6 +182,47 @@ impl Default for ClassParams {
 }
 
 impl ClassParams {
+    /// The white level of HUD text the brightness thresholds were tuned
+    /// for: the brightest strokes of kill-feed names reach 229 to 249 in
+    /// unfiltered recordings (measured on the parity excerpts).
+    pub const REFERENCE_WHITE: u8 = 225;
+
+    /// The thresholds shift down by at most this much.
+    const MAX_WHITE_SHIFT: u8 = 60;
+
+    /// The thresholds for a frame whose white HUD text only reaches
+    /// `white`, for example under a darkening brightness, contrast or
+    /// gamma filter of the GPU driver.
+    ///
+    /// The minimum `mn` of [`Class::White`], [`Class::PureWhite`] and
+    /// [`Class::Text`] moves down by `REFERENCE_WHITE − white` (at most
+    /// 60), which follows a brightness offset exactly and the top of a
+    /// contrast or gamma curve closely; the minimum top-hat response scales
+    /// by the same ratio as the white level, which follows a contrast
+    /// change. At or above [`ClassParams::REFERENCE_WHITE`] nothing
+    /// changes, so unfiltered and brightened frames keep the tuned
+    /// thresholds.
+    #[must_use]
+    pub fn for_white_level(&self, white: u8) -> Self {
+        let shift = Self::REFERENCE_WHITE
+            .saturating_sub(white)
+            .min(Self::MAX_WHITE_SHIFT);
+        if shift == 0 {
+            return *self;
+        }
+        let level = u16::from(Self::REFERENCE_WHITE - shift);
+        let tophat = u16::from(self.text_min_tophat) * level / u16::from(Self::REFERENCE_WHITE);
+        Self {
+            white_min: self.white_min.saturating_sub(shift),
+            pure_white_min: self.pure_white_min.saturating_sub(shift),
+            text_min_mn: self.text_min_mn.saturating_sub(shift),
+            // `level < REFERENCE_WHITE`, so the result is below the old
+            // minimum and fits.
+            text_min_tophat: u8::try_from(tophat).unwrap_or(self.text_min_tophat),
+            ..*self
+        }
+    }
+
     /// The colour flags of one pixel (everything except [`Class::Text`],
     /// which needs the neighbourhood).
     pub fn colour_flags(&self, rgb: [u8; 3]) -> u8 {
@@ -563,6 +604,25 @@ mod tests {
         assert_eq!(white, Class::White.bit() | Class::PureWhite.bit());
         assert_eq!(p.colour_flags([180, 180, 200]), Class::White.bit());
         assert_eq!(p.colour_flags([90, 90, 90]), 0);
+    }
+
+    #[test]
+    fn a_lower_white_level_lowers_the_brightness_thresholds() {
+        let p = ClassParams::default();
+        assert_eq!(p.for_white_level(ClassParams::REFERENCE_WHITE), p);
+        assert_eq!(p.for_white_level(250), p);
+        // A brightness offset of about −25.
+        let dark = p.for_white_level(200);
+        assert_eq!(
+            (dark.white_min, dark.pure_white_min, dark.text_min_mn),
+            (145, 190, 140)
+        );
+        assert_eq!(dark.text_min_tophat, 31);
+        assert_eq!((dark.teal_hue, dark.red_min_v), (p.teal_hue, p.red_min_v));
+        // The shift is capped.
+        let black = p.for_white_level(0);
+        assert_eq!(black.text_min_mn, 105);
+        assert_eq!(black.text_min_tophat, 25);
     }
 
     #[test]

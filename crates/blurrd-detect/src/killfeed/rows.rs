@@ -1,20 +1,24 @@
 //! Finding the kill-feed rows of a frame (port spec 3.1).
 //!
 //! Two signals find rows. The text line of the right-aligned victim names
-//! (white strokes in fixed columns) does not depend on colour at all. The
+//! (white strokes in fixed columns) does not depend on hue; its brightness
+//! thresholds follow the white level of the frame ([`white_level`]). The
 //! bar score of each pixel row, the share of bar-coloured pixels in the
 //! score columns, needs the bar colour: the default teal and red first,
 //! and where a text line sits on a bar the defaults do not explain, the
-//! colour learned from that bar ([`tones`]).
+//! colour learned from that bar ([`tones`]). A text line on a bar without
+//! a learnable colour (greyscale or nearly greyscale video) is accepted
+//! from luminance structure instead: a vertically flat band next to a
+//! textured victim portrait ([`BarEvidence::Luminance`]).
 
 use blurrd_core::RectI;
 
 use super::tones::{self, Sample, Tone};
 use super::{
-    FEED_ROI, FEED_Y_TOP, FeedRow, INNER_MARGIN, ROW_H, RowAnchor, SCORE_X, VICTIM_COLOUR_X0,
-    VICTIM_TEXT_X1,
+    BarEvidence, FEED_ROI, FEED_Y_TOP, FeedRow, INNER_MARGIN, ROW_H, RowAnchor, SCORE_X,
+    VICTIM_COLOUR_X0, VICTIM_TEXT_X1,
 };
-use crate::classes::{Class, PixelClasses};
+use crate::classes::{Class, ClassParams, PixelClasses};
 use crate::components::runs;
 use crate::image::RgbView;
 
@@ -69,33 +73,111 @@ const KILLER_TONE_PIXELS: u32 = 100;
 /// At most this many bar colours are learned per frame (two teams, plus
 /// room for a wall that passes as a bar).
 const MAX_TONES: usize = 4;
+/// Two vertically neighbouring bar pixels differ in value by at most this
+/// much ...
+const FLAT_STEP: u8 = 4;
+/// ... in at least this share of the neighbouring pairs of a luminance
+/// anchor's inner band (text pixels left out). Measured on greyscale
+/// versions of the parity excerpts: rows with names 0.80 and more (1st
+/// percentile), the bright sky and walls behind the victim text columns
+/// that pass as a text line 0.63 to 0.70.
+const MIN_FLAT: f32 = 0.75;
+/// A luminance anchor's band needs at least this many such pairs (of
+/// about 4,250).
+const MIN_FLAT_PAIRS: u32 = 200;
+/// Pixels with at least this top-hat response (thin bright strokes) and
+/// text chroma measure the white level.
+const WHITE_SAMPLE_TOPHAT: u8 = 20;
+/// The white level is the value of the 40th brightest such pixel: a
+/// single short victim name has a few hundred stroke pixels in the anchor
+/// columns, isolated specular highlights a few.
+const WHITE_RANK: u32 = 40;
+/// A white level below this is no white text (a dark scene without a kill
+/// feed): the thresholds stay as they are.
+const MIN_WHITE_LEVEL: u8 = 150;
 
 /// Reusable buffers of [`find_rows`].
 #[derive(Debug, Clone, Default)]
 pub(super) struct RowScratch {
     /// Prefix sums of the row score `q`.
     sums: Vec<f64>,
+    /// The same with the default bar classes only, when colours were
+    /// learned (`sums` then includes them).
+    default_sums: Vec<f64>,
+    /// Whether `sums` includes learned colours.
+    learned: bool,
     /// Bar-edge candidates `(score, crop row)`.
     candidates: Vec<(f64, i32)>,
     /// Whether each crop row has enough text strokes in the anchor
     /// columns.
     text_rows: Vec<bool>,
-    /// Accepted row tops in crop rows.
-    tops: Vec<i32>,
-    /// The tops that came from text-line anchors.
-    anchored: Vec<i32>,
+    /// Accepted rows with their top in crop rows.
+    tops: Vec<(i32, RowAnchor, BarEvidence)>,
     /// Text-line anchors (crop rows, clamped) before acceptance.
     lines: Vec<i32>,
+    /// `min(R, G, B)` of two neighbouring portrait rows (wall guard).
+    portrait: [Vec<u8>; 2],
 }
 
 impl RowScratch {
     /// Mean row score over crop rows `a..b`, clipped to the crop, as the
     /// prototype computes it (`(cs[b] − cs[a]) / max(1, b − a)`).
     fn mean(&self, a: i32, b: i32) -> f64 {
-        let n = self.sums.len() as i32 - 1;
-        let (a, b) = (a.max(0), b.min(n));
-        (self.sums[b as usize] - self.sums[a as usize]) / f64::from((b - a).max(1))
+        mean_of(&self.sums, a, b)
     }
+
+    /// Which colours make the band at crop row `y` a bar, given that all
+    /// known colours give it a mean score of at least `min`.
+    fn colour_evidence(&self, y: i32, min: f64) -> BarEvidence {
+        if !self.learned || mean_of(&self.default_sums, y, y + ROW_H) >= min {
+            BarEvidence::DefaultColour
+        } else {
+            BarEvidence::LearnedColour
+        }
+    }
+}
+
+/// Mean row score over crop rows `a..b` from prefix sums, clipped to the
+/// crop.
+fn mean_of(sums: &[f64], a: i32, b: i32) -> f64 {
+    let n = sums.len() as i32 - 1;
+    let (a, b) = (a.max(0), b.min(n));
+    (sums[b as usize] - sums[a as usize]) / f64::from((b - a).max(1))
+}
+
+/// The white level of the frame's HUD text: the value of the
+/// [`WHITE_RANK`]th brightest thin bright stroke pixel in the victim text
+/// columns, or `None` if there is no white text there.
+///
+/// `classes` must hold the classified score columns over the whole crop
+/// height.
+pub(super) fn white_level(classes: &PixelClasses, params: &ClassParams) -> Option<u8> {
+    let width = classes.width() as usize;
+    let (x0, x1) = (
+        (ANCHOR_X.0 - FEED_ROI.x0) as usize,
+        (ANCHOR_X.1 - FEED_ROI.x0) as usize,
+    );
+    let mut hist = [0u32; 256];
+    for y in 0..classes.height() as usize {
+        let range = y * width + x0..y * width + x1;
+        let pixels = classes.tophat().data()[range.clone()]
+            .iter()
+            .zip(&classes.mn().data()[range.clone()])
+            .zip(&classes.chroma().data()[range]);
+        for ((&tophat, &mn), &chroma) in pixels {
+            if tophat >= WHITE_SAMPLE_TOPHAT && chroma <= params.text_max_chroma {
+                hist[usize::from(mn)] += 1;
+            }
+        }
+    }
+    let mut seen = 0;
+    for (level, &n) in (0..=255u8).zip(&hist).rev() {
+        seen += n;
+        if seen >= WHITE_RANK {
+            return (level >= MIN_WHITE_LEVEL).then_some(level);
+        }
+    }
+    None
 }
 
 /// Finds the rows of the kill-feed stack, top to bottom, and the bar
@@ -136,7 +218,9 @@ pub(super) fn find_rows(
             learn_row_tones(classes, y + FEED_ROI.y0, tones);
         }
     }
-    if !tones.is_empty() {
+    s.learned = !tones.is_empty();
+    if s.learned {
+        std::mem::swap(&mut s.sums, &mut s.default_sums);
         score_rows(classes, tones, s);
     }
     // Bar-edge candidates.
@@ -156,15 +240,23 @@ pub(super) fn find_rows(
             s.candidates.push((score, y));
         }
     }
-    // Text-line anchors first: they do not depend on the background.
+    // Text-line anchors first: they do not depend on the background. A
+    // band without a known bar colour still counts if its luminance looks
+    // like a bar next to a portrait.
     s.tops.clear();
-    s.anchored.clear();
     for i in 0..s.lines.len() {
         let y = s.lines[i];
-        if s.mean(y, y + ROW_H) >= MIN_ANCHOR_INNER && far_from(&s.tops, y) {
-            s.tops.push(y);
-            s.anchored.push(y);
+        if !far_from(&s.tops, y) {
+            continue;
         }
+        let evidence = if s.mean(y, y + ROW_H) >= MIN_ANCHOR_INNER {
+            s.colour_evidence(y, MIN_ANCHOR_INNER)
+        } else if is_flat_band(classes, y) && has_portrait(crop, y + FEED_ROI.y0, &mut s.portrait) {
+            BarEvidence::Luminance
+        } else {
+            continue;
+        };
+        s.tops.push((y, RowAnchor::TextLine, evidence));
     }
     s.candidates
         .sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)));
@@ -172,25 +264,25 @@ pub(super) fn find_rows(
     // victim portrait. A wall in a bar colour behind the feed has edges
     // too, but no portrait art.
     for &(_, y) in &s.candidates {
-        if far_from(&s.tops, y) && has_portrait(crop, y + FEED_ROI.y0) {
-            s.tops.push(y);
+        if far_from(&s.tops, y) && has_portrait(crop, y + FEED_ROI.y0, &mut s.portrait) {
+            let evidence = s.colour_evidence(y, MIN_INNER);
+            s.tops.push((y, RowAnchor::BarEdge, evidence));
         }
     }
-    s.tops.sort_unstable();
+    s.tops.sort_unstable_by_key(|&(y, ..)| y);
     // The feed is a stack from the top.
-    for &y in &s.tops {
+    for &(y, anchor, evidence) in &s.tops {
         let top = y + FEED_ROI.y0;
         let fits = match out.last() {
             None => top <= MAX_FIRST_TOP,
             Some(last) => top - last.top <= MAX_STACK_STEP,
         };
         if fits {
-            let anchor = if s.anchored.contains(&y) {
-                RowAnchor::TextLine
-            } else {
-                RowAnchor::BarEdge
-            };
-            out.push(FeedRow { top, anchor });
+            out.push(FeedRow {
+                top,
+                anchor,
+                evidence,
+            });
         }
     }
 }
@@ -287,46 +379,78 @@ fn score_rows(classes: &PixelClasses, tones: &[Tone], s: &mut RowScratch) {
     }
 }
 
+/// Whether the band of the row at crop row `y` is vertically flat in
+/// luminance, as an opaque bar is: at least [`MIN_FLAT`] of the vertically
+/// neighbouring pixel pairs of its inner band in the score columns differ
+/// in value by at most [`FLAT_STEP`]. Text pixels (the name) are left out;
+/// white pixels are not, because a light bar passes as white in greyscale
+/// video.
+fn is_flat_band(classes: &PixelClasses, y: i32) -> bool {
+    let inner = RectI {
+        x0: SCORE_X.0,
+        y0: y + FEED_ROI.y0 + INNER_MARGIN,
+        x1: SCORE_X.1,
+        y1: y + FEED_ROI.y0 + ROW_H - INNER_MARGIN,
+    };
+    let skip = Class::Text.bit();
+    let (mut pairs, mut flat) = (0u32, 0u32);
+    let mut rows = tones::plane_rows(classes, inner);
+    let Some(mut above) = rows.next() else {
+        return false;
+    };
+    for row in rows {
+        for i in 0..row.flags.len() {
+            if (above.flags[i] | row.flags[i]) & skip == 0 {
+                pairs += 1;
+                flat += u32::from(above.value(i).abs_diff(row.value(i)) <= FLAT_STEP);
+            }
+        }
+        above = row;
+    }
+    pairs >= MIN_FLAT_PAIRS && flat as f32 >= MIN_FLAT * pairs as f32
+}
+
 /// Whether the row at reference row `top` has the textured art of a
 /// victim portrait: the mean absolute difference of `min(R, G, B)` between
 /// neighbouring pixels of [`PORTRAIT`] is at least
-/// [`MIN_PORTRAIT_TEXTURE`].
-fn has_portrait(crop: &RgbView<'_>, top: i32) -> bool {
+/// [`MIN_PORTRAIT_TEXTURE`]. `buffers` hold two portrait rows.
+fn has_portrait(crop: &RgbView<'_>, top: i32, buffers: &mut [Vec<u8>; 2]) -> bool {
     let (x0, x1) = (
         (PORTRAIT.0 - FEED_ROI.x0) as usize,
         (PORTRAIT.1 - FEED_ROI.x0) as usize,
     );
     let rows =
         (top + PORTRAIT_ROWS.0 - FEED_ROI.y0) as u32..(top + PORTRAIT_ROWS.1 - FEED_ROI.y0) as u32;
-    let mn = |row: &[u8]| -> Vec<i16> {
-        row.as_chunks::<3>().0[x0..x1]
-            .iter()
-            .map(|p| i16::from(p[0].min(p[1]).min(p[2])))
-            .collect()
-    };
+    let [above, row] = buffers;
+    above.clear();
     let (mut sum, mut count) = (0u32, 0u32);
-    let mut above: Option<Vec<i16>> = None;
     for y in rows {
         if y >= crop.height() {
             return false;
         }
-        let row = mn(crop.row(y));
+        row.clear();
+        row.extend(
+            crop.row(y).as_chunks::<3>().0[x0..x1]
+                .iter()
+                .map(|p| p[0].min(p[1]).min(p[2])),
+        );
         for pair in row.windows(2) {
             sum += u32::from(pair[0].abs_diff(pair[1]));
         }
         count += row.len().saturating_sub(1) as u32;
-        if let Some(prev) = &above {
-            for (a, b) in prev.iter().zip(&row) {
+        if !above.is_empty() {
+            for (a, b) in above.iter().zip(row.iter()) {
                 sum += u32::from(a.abs_diff(*b));
             }
             count += row.len() as u32;
         }
-        above = Some(row);
+        std::mem::swap(above, row);
     }
     count > 0 && sum as f32 >= MIN_PORTRAIT_TEXTURE * count as f32
 }
 
 /// Whether `y` is at least [`MIN_ROW_DISTANCE`] from every accepted row.
-fn far_from(tops: &[i32], y: i32) -> bool {
-    tops.iter().all(|&t| (y - t).abs() >= MIN_ROW_DISTANCE)
+fn far_from(tops: &[(i32, RowAnchor, BarEvidence)], y: i32) -> bool {
+    tops.iter()
+        .all(|&(t, ..)| (y - t).abs() >= MIN_ROW_DISTANCE)
 }

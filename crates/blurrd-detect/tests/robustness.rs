@@ -11,7 +11,10 @@ mod support;
 
 use blurrd_testkit::{Background, Palette};
 
-use support::{Filter, check_frame, settled_feed, settled_fixture};
+use blurrd_detect::KillFeedDetector;
+use blurrd_detect::killfeed::BarEvidence;
+
+use support::{Filter, check_frame, check_with, settled_feed, settled_fixture};
 
 /// Backgrounds for the robustness checks: textured, dark and bright.
 const BACKGROUNDS: [Background; 3] = [
@@ -21,20 +24,40 @@ const BACKGROUNDS: [Background; 3] = [
 ];
 
 /// Filters with realistic strengths: hue shifts, desaturated and vivid
-/// colours, Digital Vibrance, dark and bright gamma, washed-out and punchy
-/// levels.
-const FILTERS: [Filter; 9] = [
+/// colours down to black and white (NVIDIA Freestyle's Black & White
+/// filter, saturation sliders near 0), Digital Vibrance, dark and bright
+/// gamma, washed-out, darkened and punchy levels. The rendered name
+/// strokes are sharper than recorded ones, so only the darkest levels push
+/// them below the tuned text thresholds (recordings cross them from a
+/// brightness offset of about −0.10); that case fails without the
+/// white-level adjustment.
+const FILTERS: [Filter; 15] = [
     Filter::Hue(40.0),
     Filter::Hue(120.0),
     Filter::Hue(-90.0),
+    Filter::Saturation(0.0),
+    Filter::Saturation(0.1),
     Filter::Saturation(0.4),
     Filter::Saturation(1.8),
     Filter::Vibrance(1.0),
     Filter::Gamma(0.8),
     Filter::Gamma(1.3),
+    Filter::Gamma(1.5),
     Filter::Levels {
         brightness: 0.06,
         contrast: 0.85,
+    },
+    Filter::Levels {
+        brightness: -0.10,
+        contrast: 1.0,
+    },
+    Filter::Levels {
+        brightness: -0.12,
+        contrast: 0.85,
+    },
+    Filter::Levels {
+        brightness: -0.3,
+        contrast: 0.9,
     },
 ];
 
@@ -72,14 +95,47 @@ fn gpu_colour_filters_leave_no_name_readable() {
             }
         }
     }
-    assert!(names >= 500, "{names} names checked");
+    assert!(names >= 800, "{names} names checked");
+}
+
+#[test]
+fn rows_report_what_showed_the_bar() {
+    // Default colours, learned colours, and luminance alone in black and
+    // white video, which is the low-confidence case.
+    let cases = [
+        (Palette::DEFAULT, None, BarEvidence::DefaultColour),
+        (Palette::TRITANOPIA, None, BarEvidence::LearnedColour),
+        (
+            Palette::DEFAULT,
+            Some(Filter::Saturation(0.0)),
+            BarEvidence::Luminance,
+        ),
+    ];
+    for (palette, filter, evidence) in cases {
+        let fx = settled_fixture(300, 4, Background::noise(5), palette);
+        let fx = filter.map_or_else(|| fx.clone(), |f| f.fixture(&fx));
+        let mut detector = KillFeedDetector::new();
+        let context = format!("{}, {filter:?}", palette.name);
+        check_with(&mut detector, &fx).assert_clean(&context);
+        let rows = detector.rows();
+        assert_eq!(rows.len(), 4, "{context}");
+        assert!(
+            rows.iter().all(|r| r.evidence == evidence),
+            "{context}: {rows:?}"
+        );
+        let low = evidence == BarEvidence::Luminance;
+        assert!(
+            rows.iter().all(|r| r.is_low_confidence() == low),
+            "{context}"
+        );
+    }
 }
 
 #[test]
 fn filters_keep_white_text_and_change_the_bars() {
     // The filters are strong enough to move the bars out of the default
-    // classes, and keep the names white (the detector's colour-free
-    // anchor).
+    // classes, and keep the names white (the detector's hue-free anchor;
+    // darkening filters lower the white level the thresholds follow).
     let teal = [100, 186, 162];
     let white = [245, 245, 245];
     let params = blurrd_detect::ClassParams::default();
