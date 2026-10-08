@@ -78,7 +78,7 @@ pub use encode::{
     EncodeOptions, EncodedPacket, EncoderFallback, EncoderInput, VideoEncoder, probe_encoders,
 };
 pub use error::VideoError;
-pub use probe::probe;
+pub use probe::{probe, pts_table};
 pub use pts::PtsTable;
 pub use rgb::{RgbConverter, RgbImage};
 pub use roi::{RoiLayout, YuvRoi};

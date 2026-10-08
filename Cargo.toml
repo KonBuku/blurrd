@@ -19,8 +19,11 @@ publish = false
 anyhow = "=1.0.104"
 blurrd-blur = { path = "crates/blurrd-blur" }
 blurrd-core = { path = "crates/blurrd-core" }
+blurrd-video = { path = "crates/blurrd-video" }
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"
+# Ctrl+C handling in the CLI (cancels the job and removes partial output).
+ctrlc = "=3.5.2"
 # FFmpeg 9.0 bindings, linked against the pinned build in third_party/ffmpeg
 # (FFMPEG_DIR). Only the libraries blurrd uses are enabled.
 ffmpeg-the-third = { version = "=6.0.0", default-features = false, features = [
@@ -35,6 +38,13 @@ sha2 = "=0.11.0"
 thiserror = "=2.0.21"
 toml = "=1.1.6"
 tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = [
+  "env-filter",
+  "fmt",
+  "json",
+  "ansi",
+  "std",
+] }
 # `no-serde-warnings`: types with a custom serde representation (`try_from`,
 # `into`, `transparent`) state their TypeScript shape with `#[ts(as)]`, so
 # ts-rs's notes about serde attributes it does not parse are noise.

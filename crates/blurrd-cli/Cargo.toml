@@ -1,0 +1,35 @@
+[package]
+name = "blurrd-cli"
+description = "The blurrd command-line tool: probe recordings and render blurred exports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "blurrd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+blurrd-blur.workspace = true
+blurrd-core.workspace = true
+blurrd-video.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid = { workspace = true, features = ["v7"] }
+
+[dev-dependencies]
+ffmpeg-the-third.workspace = true
+
+[lints]
+workspace = true

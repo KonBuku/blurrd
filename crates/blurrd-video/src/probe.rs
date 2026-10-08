@@ -8,7 +8,7 @@ use ffmpeg_the_third::codec::packet::Ref as _;
 use ffmpeg_the_third::{ffi, format, media};
 
 use crate::colour::{color_info, hdr_kind};
-use crate::{VideoError, input, mp4};
+use crate::{PtsTable, VideoError, input, mp4};
 
 /// Reads everything blurrd needs to know about a video file.
 ///
@@ -93,6 +93,34 @@ pub fn probe(path: &Path) -> Result<MediaInfo, VideoError> {
         has_subtitles: streams.has_subtitles,
         is_vfr: scan.variable_rate,
     })
+}
+
+/// The PTS table of a video as its container lists it: the presentation
+/// timestamps of every video packet the demuxer presents, in order (one
+/// demux pass, no decoding).
+///
+/// For files whose decoder output keeps the packet timestamps (every
+/// common recording format) this is the table an analysis stores in
+/// `pts.bin`. A render checks every decoded frame against its table, so a
+/// file where the two differ fails with [`VideoError::PtsMismatch`]
+/// instead of drawing boxes on the wrong frames.
+///
+/// # Errors
+///
+/// As [`probe()`]; [`VideoError::Timestamps`] for packets without
+/// increasing timestamps.
+pub fn pts_table(path: &Path) -> Result<PtsTable, VideoError> {
+    crate::init()?;
+    let mut input = input::open(path)?;
+    let video = input::video_stream(&input)?;
+    let time_base = input
+        .stream(video)
+        .and_then(|stream| positive_rational(stream.time_base()))
+        .ok_or_else(|| {
+            VideoError::Unsupported(String::from("the video stream has no time base"))
+        })?;
+    let scan = scan_packets(&mut input, video)?;
+    PtsTable::new(time_base, scan.pts)
 }
 
 /// Facts read from the stream headers.
@@ -241,6 +269,8 @@ struct Scan {
     reordered: bool,
     discarded: u32,
     variable_rate: bool,
+    /// Presentation timestamps of the presented packets, sorted.
+    pts: Vec<i64>,
 }
 
 fn scan_packets(input: &mut format::context::Input, video: usize) -> Result<Scan, VideoError> {
@@ -284,6 +314,7 @@ fn scan_packets(input: &mut format::context::Input, video: usize) -> Result<Scan
         reordered,
         discarded,
         variable_rate: is_variable_rate(&order),
+        pts: order,
     })
 }
 

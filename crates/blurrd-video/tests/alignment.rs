@@ -15,7 +15,7 @@ use std::sync::Arc;
 use blurrd_core::RectI;
 use blurrd_video::{
     DecodeOptions, Decoder, FrameSeeker, HwDecode, PtsTable, SeekerOptions, VideoFrame, YuvRoi,
-    probe,
+    probe, pts_table,
 };
 use support::{BITS, BLOCK, ClipSpec, TempClip, presented_packets, read_number, write_clip};
 
@@ -126,6 +126,11 @@ fn check_clip(path: &Path, hw: HwDecode, written: u32) -> Decoded {
         info.keyframes.as_deref(),
         Some(&decoded.keyframes[..]),
         "probe keyframes"
+    );
+    assert_eq!(
+        pts_table(path).unwrap(),
+        decoded.table,
+        "the container's PTS table is the decoded one"
     );
     check_seeking(path, &decoded, hw);
     decoded

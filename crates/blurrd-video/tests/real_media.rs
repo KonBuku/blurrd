@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use blurrd_video::{DecodeOptions, Decoder, PtsTable, probe};
+use blurrd_video::{DecodeOptions, Decoder, PtsTable, probe, pts_table};
 
 /// Clips used by the M6 acceptance: one with dropped frames (VFR) and the
 /// 3601-frame benchmark clip of the stack research.
@@ -65,6 +65,11 @@ fn real_media_decodes_every_frame_in_order() {
         }
         let elapsed = start.elapsed().as_secs_f64();
         let table = PtsTable::new(info.time_base, pts).unwrap();
+        assert_eq!(
+            pts_table(&path).unwrap(),
+            table,
+            "{name}: the container's PTS table is the decoded one"
+        );
         let fps = f64::from(table.len()) / elapsed;
         println!(
             "{name}: {} frames, software decode {fps:.0} fps, {} keyframes, vfr {}",

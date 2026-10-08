@@ -23,15 +23,16 @@ policy and the commit conventions.
 
 ## Repository layout
 
-| Path                  | Contents                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------ |
-| `crates/blurrd-core`  | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`. |
-| `crates/blurrd-blur`  | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.  |
-| `crates/blurrd-video` | FFmpeg probing, decoding and seeking; the only crate with `unsafe` code.             |
-| `xtask`               | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).      |
-| `docs`                | Developer and user documentation.                                                    |
-| `scripts`             | Node scripts for repository tasks (`release.mjs`).                                   |
-| `assets/brand`        | Logo and brand assets with their generator.                                          |
+| Path                  | Contents                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `crates/blurrd-core`  | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`.     |
+| `crates/blurrd-blur`  | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.      |
+| `crates/blurrd-video` | FFmpeg probing, decoding, seeking and the render (encode, mux); the only `unsafe` crate. |
+| `crates/blurrd-cli`   | The `blurrd` command-line tool (see [cli.md](cli.md)).                                   |
+| `xtask`               | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).          |
+| `docs`                | Developer and user documentation.                                                        |
+| `scripts`             | Node scripts for repository tasks (`release.mjs`).                                       |
+| `assets/brand`        | Logo and brand assets with their generator.                                              |
 
 ## Rust workspace
 
@@ -61,12 +62,12 @@ media policy in the contributing guide). Run them locally, in release
 builds so the throughput checks apply, with
 
 ```sh
-BLURRD_TEST_MEDIA=<folder> cargo nextest run --release --run-ignored all real_media --no-capture
+BLURRD_TEST_MEDIA=<folder> cargo nextest run --release --run-ignored all real_ --no-capture
 ```
 
-Tests that need a GPU (NVDEC, D3D11VA, NVENC) are ignored too, because CI
-runners have none; their names start with `gpu_`. Run them with
-`cargo nextest run --run-ignored all gpu`.
+Tests that need a GPU or a hardware encoder (NVDEC, D3D11VA, NVENC, Media
+Foundation) are ignored too, because CI runners have none; their names
+start with `gpu_`. Run them with `cargo nextest run --run-ignored all gpu`.
 
 Lints are configured once in the root `Cargo.toml` (`[workspace.lints]`) and
 inherited by every crate with `[lints] workspace = true`. Production code must
