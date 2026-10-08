@@ -38,6 +38,7 @@
 mod choice;
 mod colour;
 mod decode;
+mod encode;
 mod error;
 mod hw;
 mod input;
@@ -53,8 +54,11 @@ pub mod sys;
 use std::sync::OnceLock;
 
 pub use choice::{DecodePurpose, DecoderChoice};
-pub use colour::{ColourTransfer, VideoColour};
+pub use colour::{ColourTransfer, VideoColour, output_color};
 pub use decode::{DecodeOptions, Decoder, HwDecode, PixelLayout, VideoFrame};
+pub use encode::{
+    EncodeOptions, EncodedPacket, EncoderFallback, EncoderInput, VideoEncoder, probe_encoders,
+};
 pub use error::VideoError;
 pub use probe::probe;
 pub use pts::PtsTable;

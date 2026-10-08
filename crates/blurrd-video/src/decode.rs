@@ -145,9 +145,25 @@ impl VideoFrame {
         unsafe { (*self.frame.as_ptr()).flags & ffi::AV_FRAME_FLAG_KEY != 0 }
     }
 
+    /// A frame from an FFmpeg frame whose pixel format matches `layout`.
+    pub(crate) fn wrap(index: u32, pts: i64, layout: PixelLayout, frame: frame::Video) -> Self {
+        Self {
+            index,
+            pts,
+            layout,
+            frame,
+        }
+    }
+
     /// The underlying FFmpeg frame.
     pub(crate) fn raw(&self) -> &frame::Video {
         &self.frame
+    }
+
+    /// The underlying FFmpeg frame, for changing its properties (never its
+    /// pixels, which may be shared with the decoder).
+    pub(crate) fn raw_mut(&mut self) -> &mut frame::Video {
+        &mut self.frame
     }
 
     /// Another handle to the same pixels (an FFmpeg frame reference, no

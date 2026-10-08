@@ -89,12 +89,47 @@ pub enum VideoError {
         /// Number of frames in the video.
         count: u32,
     },
+    /// An encoder failed while encoding.
+    #[error("{context}: {source}")]
+    Encode {
+        /// What blurrd was doing.
+        context: &'static str,
+        /// The FFmpeg error.
+        #[source]
+        source: ffmpeg_the_third::Error,
+    },
+    /// No encoder of the fallback chain could be opened.
+    #[error("no video encoder could be opened ({})", describe_tried(tried))]
+    EncoderUnavailable {
+        /// Every encoder that was tried, with FFmpeg's reason.
+        tried: Vec<(String, String)>,
+        /// Whether NVENC refused because the driver is older than the API
+        /// FFmpeg was built against.
+        driver_too_old: bool,
+    },
+}
+
+/// `name: reason` pairs for [`VideoError::EncoderUnavailable`].
+fn describe_tried(tried: &[(String, String)]) -> String {
+    if tried.is_empty() {
+        return String::from("none was tried");
+    }
+    tried
+        .iter()
+        .map(|(name, reason)| format!("{name}: {reason}"))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 impl VideoError {
     /// Wraps an FFmpeg error with what blurrd was doing.
     pub(crate) fn ffmpeg(context: &'static str) -> impl FnOnce(ffmpeg_the_third::Error) -> Self {
         move |source| Self::Ffmpeg { context, source }
+    }
+
+    /// Wraps an encoder's FFmpeg error with what blurrd was doing.
+    pub(crate) fn encode(context: &'static str) -> impl FnOnce(ffmpeg_the_third::Error) -> Self {
+        move |source| Self::Encode { context, source }
     }
 
     /// The category shown to the user.
@@ -122,6 +157,12 @@ impl VideoError {
             | Self::PtsMismatch { .. }
             | Self::FrameNotFound { .. } => ErrorKind::ProjectMismatch,
             Self::LibraryVersion { .. } | Self::SeekerStopped => ErrorKind::Internal,
+            Self::Encode { .. } => ErrorKind::Encode,
+            Self::EncoderUnavailable {
+                driver_too_old: true,
+                ..
+            } => ErrorKind::DriverTooOld,
+            Self::EncoderUnavailable { .. } => ErrorKind::EncoderUnavailable,
         }
     }
 }
@@ -139,6 +180,11 @@ impl From<VideoError> for AppError {
             ErrorKind::ProjectMismatch => "The video changed since it was analysed.",
             ErrorKind::Io => "The file could not be read.",
             ErrorKind::Internal => "blurrd is installed incorrectly; reinstall it.",
+            ErrorKind::Encode => "The video could not be encoded.",
+            ErrorKind::EncoderUnavailable => "No video encoder works on this computer.",
+            ErrorKind::DriverTooOld => {
+                "The graphics driver is too old for hardware encoding; update it."
+            }
             _ => "The video could not be decoded.",
         };
         Self::new(error.kind(), message).with_detail(error.to_string())
