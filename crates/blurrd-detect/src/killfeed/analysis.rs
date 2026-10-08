@@ -5,7 +5,11 @@
 
 use blurrd_core::{NameKind, RectI};
 
-use super::{FEED_ROI, FEED_X0, RIGHT_ALIGN, ROW_H, Scratch, VICTIM_TEXT_X1, VICTIM_X1};
+use super::tones::{self, Sample, Tone};
+use super::{
+    FEED_ROI, FEED_X0, INNER_MARGIN, RIGHT_ALIGN, ROW_H, Scratch, VICTIM_COLOUR_X0, VICTIM_TEXT_X1,
+    VICTIM_X1,
+};
 use crate::classes::{Class, PixelClasses};
 use crate::components::{Component, Connectivity, components};
 
@@ -27,10 +31,6 @@ const GAP_NAME: i32 = 12;
 const GAP_VICTIM: i32 = 14;
 /// Words of one victim name are at most this far apart.
 const GAP_WORDS: i32 = 25;
-/// Rows of the inner band used for the colour profiles, from each edge.
-const INNER_MARGIN: i32 = 4;
-/// The victim colour is measured from this column to [`VICTIM_X1`].
-const VICTIM_COLOUR_X0: i32 = 1790;
 /// Share of the non-white pixels of a column that must have a team
 /// colour to classify the column.
 const COLOUR_SHARE: f64 = 0.45;
@@ -54,6 +54,21 @@ const WEAPON_GAP: i32 = 6;
 /// Without a weapon blob, the killer text search stops this far left of
 /// the colour boundary (knife and ability icons sit in between).
 const ICON_ZONE: i32 = 40;
+/// A learned victim colour must cover at least this share of the
+/// non-white pixels next to the victim name...
+const VICTIM_TONE_SHARE: f32 = 0.5;
+/// ... and at least this many pixels (of about 1,200).
+const VICTIM_TONE_PIXELS: u32 = 300;
+/// The killer colour is learned from this column to [`VICTIM_COLOUR_X0`]:
+/// the colour boundary of a 16-character victim name lies at about x 1680,
+/// and the killer bar shows between its name, weapon and icons.
+const KILLER_TONE_X0: i32 = 1490;
+/// A learned killer colour must cover at least this share of the coloured
+/// pixels there that do not have the victim colour (the killer portrait
+/// and the background left of the bar take the rest)...
+const KILLER_TONE_SHARE: f32 = 0.35;
+/// ... and at least this many pixels.
+const KILLER_TONE_PIXELS: u32 = 120;
 
 /// A text component in reference pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,12 +91,14 @@ pub(super) struct Cluster {
 }
 
 /// Column profiles of a row's inner band: pixels per column with each
-/// class.
+/// class, and with the learned victim and killer colours.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Profile {
     teal: Vec<u32>,
     red: Vec<u32>,
     white: Vec<u32>,
+    victim: Vec<u32>,
+    killer: Vec<u32>,
 }
 
 /// Finds the components of `class` inside reference rectangle `r`, with
@@ -258,16 +275,33 @@ fn profiles(classes: &PixelClasses, top: i32, p: &mut Profile) {
 
 /// Finds the names in the row at `top` and reports each as
 /// `(kind, text bounds)`, victims first (`analyze_row`).
+///
+/// The killer and victim sides are told apart by the default team colours
+/// if they explain the bar next to the victim name, otherwise by colours
+/// learned from the row ([`learned_sides`]).
 pub(super) fn analyze_row(
     classes: &PixelClasses,
     top: i32,
     s: &mut Scratch,
     mut emit: impl FnMut(NameKind, RectI),
 ) {
-    let mut profile = std::mem::take(&mut s.profile);
-    profiles(classes, top, &mut profile);
-    let boundary = colour_boundary(&profile);
-    s.profile = profile;
+    let mut p = std::mem::take(&mut s.profile);
+    profiles(classes, top, &mut p);
+    // The default colours decide wherever they explain the victim side;
+    // otherwise the learned colours (a colour-blind palette, custom team
+    // colours, a GPU filter), and the defaults again if those find no
+    // boundary. A row without a boundary is read as a one-colour row,
+    // which still reports every name.
+    let explained = explains_victim(default_sides(&p).0, &p.white);
+    let mut boundary = None;
+    if !explained && learned_sides(classes, top, &s.tones, &mut p) {
+        boundary = colour_boundary(&p.victim, &p.killer, &p.white);
+    }
+    if boundary.is_none() {
+        let (own, other) = default_sides(&p);
+        boundary = colour_boundary(own, other, &p.white);
+    }
+    s.profile = p;
     let Some(xb) = boundary else {
         one_colour_row(classes, top, s, &mut emit);
         return;
@@ -311,24 +345,96 @@ pub(super) fn analyze_row(
     killer(classes, top, xb, s, &mut emit);
 }
 
-/// The victim | killer colour boundary: walking left from the victim
-/// portrait, the first place with three killer-colour columns since the
-/// last victim-colour column. Columns of neither colour do not reset the
-/// count (port spec 3.3, kept exactly).
-fn colour_boundary(p: &Profile) -> Option<i32> {
-    let col = |x: i32| (x - FEED_X0) as usize;
+/// Profile column of reference column `x`.
+const fn col(x: i32) -> usize {
+    (x - FEED_X0) as usize
+}
+
+/// The default victim and killer colour profiles of a row: the default
+/// team colour with more pixels next to the victim name is the victim's.
+fn default_sides(p: &Profile) -> (&[u32], &[u32]) {
     let sum = |v: &[u32]| -> u32 { v[col(VICTIM_COLOUR_X0)..col(VICTIM_X1)].iter().sum() };
-    let (own, other) = if sum(&p.teal) >= sum(&p.red) {
+    if sum(&p.teal) >= sum(&p.red) {
         (&p.teal, &p.red)
     } else {
         (&p.red, &p.teal)
+    }
+}
+
+/// Whether the victim colour profile `own` covers enough of the non-white
+/// pixels next to the victim name to be the bar colour (the column test
+/// of [`colour_boundary`], over the whole victim area).
+fn explains_victim(own: &[u32], white: &[u32]) -> bool {
+    let zone = col(VICTIM_COLOUR_X0)..col(VICTIM_X1);
+    let pixels = zone.len() as u32 * (ROW_H - 2 * INNER_MARGIN) as u32;
+    let own: u32 = own[zone.clone()].iter().sum();
+    let white: u32 = white[zone].iter().sum();
+    f64::from(own) >= COLOUR_SHARE * f64::from(pixels - white)
+}
+
+/// Learns the victim colour from the bar next to the victim name and finds
+/// the killer colour: a bar colour the row finder learned in this frame
+/// (`frame`) that differs from the victim's, or else the main colour of
+/// the bar left of the victim area. Fills the victim and killer profiles.
+/// Returns `false` if the victim or the killer colour cannot be found.
+fn learned_sides(classes: &PixelClasses, top: i32, frame: &[Tone], p: &mut Profile) -> bool {
+    let band = |x0: i32, x1: i32| RectI {
+        x0,
+        y0: top + INNER_MARGIN,
+        x1,
+        y1: top + ROW_H - INNER_MARGIN,
     };
+    let Some(victim) = tones::learn(
+        classes,
+        &Sample {
+            rect: band(VICTIM_COLOUR_X0, VICTIM_X1),
+            exclude: None,
+            min_share: VICTIM_TONE_SHARE,
+            min_pixels: VICTIM_TONE_PIXELS,
+            count_grey: true,
+        },
+    ) else {
+        return false;
+    };
+    let other_team = |t: &Tone| t.hue_gap(victim) >= tones::MIN_TEAM_HUE_GAP;
+    let killer = frame.iter().copied().find(other_team).or_else(|| {
+        tones::learn(
+            classes,
+            &Sample {
+                rect: band(KILLER_TONE_X0, VICTIM_COLOUR_X0),
+                exclude: Some(victim),
+                min_share: KILLER_TONE_SHARE,
+                min_pixels: KILLER_TONE_PIXELS,
+                count_grey: false,
+            },
+        )
+        .filter(other_team)
+    });
+    let Some(killer) = killer else {
+        return false;
+    };
+    let row = band(FEED_X0, VICTIM_X1);
+    for (profile, tone) in [(&mut p.victim, victim), (&mut p.killer, killer)] {
+        profile.clear();
+        profile.resize(col(VICTIM_X1), 0);
+        tone.count_columns(classes, row, profile);
+    }
+    true
+}
+
+/// The victim | killer colour boundary: walking left from the victim
+/// portrait, the first place with three killer-colour columns since the
+/// last victim-colour column. Columns of neither colour do not reset the
+/// count (port spec 3.3, kept exactly): the victim side of some rows is a
+/// gradient that the victim colour measured next to the portrait does not
+/// cover everywhere.
+fn colour_boundary(own: &[u32], other: &[u32], white: &[u32]) -> Option<i32> {
     let rows = f64::from(ROW_H - 2 * INNER_MARGIN);
     let mut count = 0;
     for x in (FEED_X0 + 1..VICTIM_X1).rev() {
         let i = col(x);
         let (own, other) = (f64::from(own[i]) / rows, f64::from(other[i]) / rows);
-        let non_white = (1.0 - f64::from(p.white[i]) / rows).max(1e-3);
+        let non_white = (1.0 - f64::from(white[i]) / rows).max(1e-3);
         if own >= COLOUR_SHARE * non_white && own > other {
             count = 0;
         } else if other >= COLOUR_SHARE * non_white && other > own {

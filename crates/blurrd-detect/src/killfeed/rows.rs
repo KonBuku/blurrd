@@ -1,6 +1,19 @@
 //! Finding the kill-feed rows of a frame (port spec 3.1).
+//!
+//! Two signals find rows. The text line of the right-aligned victim names
+//! (white strokes in fixed columns) does not depend on colour at all. The
+//! bar score of each pixel row, the share of bar-coloured pixels in the
+//! score columns, needs the bar colour: the default teal and red first,
+//! and where a text line sits on a bar the defaults do not explain, the
+//! colour learned from that bar ([`tones`]).
 
-use super::{FEED_ROI, FEED_Y_TOP, FeedRow, ROW_H, RowAnchor, SCORE_X, VICTIM_TEXT_X1};
+use blurrd_core::RectI;
+
+use super::tones::{self, Sample, Tone};
+use super::{
+    FEED_ROI, FEED_Y_TOP, FeedRow, INNER_MARGIN, ROW_H, RowAnchor, SCORE_X, VICTIM_COLOUR_X0,
+    VICTIM_TEXT_X1,
+};
 use crate::classes::{Class, PixelClasses};
 use crate::components::runs;
 
@@ -31,6 +44,20 @@ const ANCHOR_MIN_STROKES: usize = 2;
 const ANCHOR_RUN: (u32, u32) = (6, 17);
 /// The row top lies this far above the start of its text line.
 const ANCHOR_TO_TOP: i32 = 11;
+/// A bar colour is learned from a text line's band if its tone covers at
+/// least this share of the non-white pixels next to the name...
+const TONE_SHARE: f32 = 0.6;
+/// ... and at least this many pixels (of about 1,100).
+const TONE_PIXELS: u32 = 300;
+/// The killer colour must cover at least this share of the coloured
+/// pixels in the score columns left of the victim area that do not have
+/// the victim colour...
+const KILLER_TONE_SHARE: f32 = 0.35;
+/// ... and at least this many pixels (of about 3,250).
+const KILLER_TONE_PIXELS: u32 = 100;
+/// At most this many bar colours are learned per frame (two teams, plus
+/// room for a wall that passes as a bar).
+const MAX_TONES: usize = 4;
 
 /// Reusable buffers of [`find_rows`].
 #[derive(Debug, Clone, Default)]
@@ -46,6 +73,8 @@ pub(super) struct RowScratch {
     tops: Vec<i32>,
     /// The tops that came from text-line anchors.
     anchored: Vec<i32>,
+    /// Text-line anchors (crop rows, clamped) before acceptance.
+    lines: Vec<i32>,
 }
 
 impl RowScratch {
@@ -58,41 +87,45 @@ impl RowScratch {
     }
 }
 
-/// Finds the rows of the kill-feed stack, top to bottom.
+/// Finds the rows of the kill-feed stack, top to bottom, and the bar
+/// colours learned on the way.
 ///
 /// `classes` must hold the classified score columns over the whole crop
 /// height. A row is a 33 px band whose score columns are mostly bar
 /// colour, with edges above and below; the right-aligned victim text line
 /// anchors rows whose edges a wall in the bar colour hides. The rows must
 /// form a stack from the top.
-pub(super) fn find_rows(classes: &PixelClasses, s: &mut RowScratch, out: &mut Vec<FeedRow>) {
+pub(super) fn find_rows(
+    classes: &PixelClasses,
+    s: &mut RowScratch,
+    tones: &mut Vec<Tone>,
+    out: &mut Vec<FeedRow>,
+) {
     out.clear();
-    let width = classes.width() as usize;
+    tones.clear();
     let n = classes.height() as i32;
-    let (sx0, sx1) = (
-        (SCORE_X.0 - FEED_ROI.x0) as usize,
-        (SCORE_X.1 - FEED_ROI.x0) as usize,
-    );
-    let (ax0, ax1) = (
-        (ANCHOR_X.0 - FEED_ROI.x0) as usize,
-        (ANCHOR_X.1 - FEED_ROI.x0) as usize,
-    );
-    let columns = (sx1 - sx0) as f64;
-    let bar = Class::Bar.bit();
-    let covered = bar | Class::White.bit();
-    let text = Class::Text.bit();
-    s.sums.clear();
-    s.sums.push(0.0);
-    s.text_rows.clear();
-    let mut acc = 0.0;
-    for row in classes.flags().chunks_exact(width) {
-        let score = &row[sx0..sx1];
-        let fb = score.iter().filter(|&&f| f & bar != 0).count() as f64 / columns;
-        let fa = score.iter().filter(|&&f| f & covered != 0).count() as f64 / columns;
-        acc += if fa >= MIN_COVERED { fb } else { 0.0 };
-        s.sums.push(acc);
-        let strokes = row[ax0..ax1].iter().filter(|&&f| f & text != 0).count();
-        s.text_rows.push(strokes >= ANCHOR_MIN_STROKES);
+    score_rows(classes, tones, s);
+    // Text-line anchors, before any colour check.
+    s.lines.clear();
+    for run in runs(s.text_rows.iter().copied()) {
+        if run.len() < ANCHOR_RUN.0 || run.len() > ANCHOR_RUN.1 {
+            continue;
+        }
+        let y = run.start as i32 - ANCHOR_TO_TOP;
+        if y < FEED_Y_TOP - FEED_ROI.y0 - 2 || y + ROW_H > n {
+            continue;
+        }
+        s.lines.push(y.max(FEED_Y_TOP - FEED_ROI.y0));
+    }
+    // A text line on a bar the default colours do not explain: learn the
+    // bar's colour from the pixels around the name and score again.
+    for &y in &s.lines {
+        if s.mean(y, y + ROW_H) < MIN_ANCHOR_INNER {
+            learn_row_tones(classes, y + FEED_ROI.y0, tones);
+        }
+    }
+    if !tones.is_empty() {
+        score_rows(classes, tones, s);
     }
     // Bar-edge candidates.
     s.candidates.clear();
@@ -114,15 +147,8 @@ pub(super) fn find_rows(classes: &PixelClasses, s: &mut RowScratch, out: &mut Ve
     // Text-line anchors first: they do not depend on the background.
     s.tops.clear();
     s.anchored.clear();
-    for run in runs(s.text_rows.iter().copied()) {
-        if run.len() < ANCHOR_RUN.0 || run.len() > ANCHOR_RUN.1 {
-            continue;
-        }
-        let y = run.start as i32 - ANCHOR_TO_TOP;
-        if y < FEED_Y_TOP - FEED_ROI.y0 - 2 || y + ROW_H > n {
-            continue;
-        }
-        let y = y.max(FEED_Y_TOP - FEED_ROI.y0);
+    for i in 0..s.lines.len() {
+        let y = s.lines[i];
         if s.mean(y, y + ROW_H) >= MIN_ANCHOR_INNER && far_from(&s.tops, y) {
             s.tops.push(y);
             s.anchored.push(y);
@@ -151,6 +177,98 @@ pub(super) fn find_rows(classes: &PixelClasses, s: &mut RowScratch, out: &mut Ve
             };
             out.push(FeedRow { top, anchor });
         }
+    }
+}
+
+/// Learns the colours of the row at reference row `top`: the victim's
+/// from the bar next to the name, then the killer's from the score
+/// columns left of it (they show the killer side when the victim name is
+/// short). A colour already known widens the known tone.
+fn learn_row_tones(classes: &PixelClasses, top: i32, tones: &mut Vec<Tone>) {
+    let band = |x0: i32, x1: i32| RectI {
+        x0,
+        y0: top + INNER_MARGIN,
+        x1,
+        y1: top + ROW_H - INNER_MARGIN,
+    };
+    let victim = Sample {
+        rect: band(VICTIM_COLOUR_X0, SCORE_X.1),
+        exclude: None,
+        min_share: TONE_SHARE,
+        min_pixels: TONE_PIXELS,
+        count_grey: true,
+    };
+    let Some(victim) = tones::learn(classes, &victim) else {
+        return;
+    };
+    add_tone(tones, victim);
+    let killer = Sample {
+        rect: band(SCORE_X.0, VICTIM_COLOUR_X0),
+        exclude: Some(victim),
+        min_share: KILLER_TONE_SHARE,
+        min_pixels: KILLER_TONE_PIXELS,
+        count_grey: false,
+    };
+    if let Some(killer) = tones::learn(classes, &killer)
+        && killer.hue_gap(victim) >= tones::MIN_TEAM_HUE_GAP
+    {
+        add_tone(tones, killer);
+    }
+}
+
+/// Adds `tone` to `tones`, or widens the known tone of its colour.
+fn add_tone(tones: &mut Vec<Tone>, tone: Tone) {
+    if let Some(known) = tones.iter_mut().find(|t| t.same_colour(tone)) {
+        *known = known.widened(tone);
+    } else if tones.len() < MAX_TONES {
+        tones.push(tone);
+    }
+}
+
+/// Scores every crop row: the prefix sums of `q` (the share of bar pixels
+/// in the score columns, 0 unless at least [`MIN_COVERED`] of them are bar
+/// or white) and whether the row has text strokes in the anchor columns.
+/// A pixel is a bar pixel if it has the default bar class or one of
+/// `tones`.
+fn score_rows(classes: &PixelClasses, tones: &[Tone], s: &mut RowScratch) {
+    let width = classes.width() as usize;
+    let (sx0, sx1) = (
+        (SCORE_X.0 - FEED_ROI.x0) as usize,
+        (SCORE_X.1 - FEED_ROI.x0) as usize,
+    );
+    let (ax0, ax1) = (
+        (ANCHOR_X.0 - FEED_ROI.x0) as usize,
+        (ANCHOR_X.1 - FEED_ROI.x0) as usize,
+    );
+    let columns = (sx1 - sx0) as f64;
+    let (bar, white, text) = (Class::Bar.bit(), Class::White.bit(), Class::Text.bit());
+    s.sums.clear();
+    s.sums.push(0.0);
+    s.text_rows.clear();
+    let mut acc = 0.0;
+    let score = RectI {
+        x0: SCORE_X.0,
+        y0: FEED_ROI.y0,
+        x1: SCORE_X.1,
+        y1: FEED_ROI.y1,
+    };
+    let rows = classes.flags().chunks_exact(width);
+    for (row, planes) in rows.zip(tones::plane_rows(classes, score)) {
+        let (mut bars, mut covered) = (0u32, 0u32);
+        for (i, &f) in planes.flags.iter().enumerate() {
+            let is_bar = f & bar != 0
+                || (!tones.is_empty() && {
+                    let (h, s, v) = (planes.hue[i], planes.sat[i], planes.value(i));
+                    tones.iter().any(|t| t.matches(h, s, v))
+                });
+            bars += u32::from(is_bar);
+            covered += u32::from(is_bar || f & white != 0);
+        }
+        let (fb, fa) = (f64::from(bars) / columns, f64::from(covered) / columns);
+        acc += if fa >= MIN_COVERED { fb } else { 0.0 };
+        s.sums.push(acc);
+        let strokes = row[ax0..ax1].iter().filter(|&&f| f & text != 0).count();
+        s.text_rows.push(strokes >= ANCHOR_MIN_STROKES);
     }
 }
 

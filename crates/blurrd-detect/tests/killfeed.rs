@@ -11,52 +11,10 @@ mod support;
 
 use blurrd_core::{NameKind, Region};
 use blurrd_detect::KillFeedDetector;
-use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
-use blurrd_testkit::{Background, FontSet, Layout, NameStyle, Palette, Rng, Scene, synth_name};
+use blurrd_testkit::hud::killfeed::KillFeedSpec;
+use blurrd_testkit::{Background, FontSet, Layout, Palette, Rng, Scene};
 
-use support::{Check, check_frame, feed_view};
-
-/// Frames after its birth until a row has slid into place.
-const SETTLED: u32 = 4;
-
-/// A kill with every visual variant chosen from `rng`.
-fn random_kill(rng: &mut Rng, birth: u32) -> Kill {
-    let killer_style = *rng.pick(&NameStyle::LATIN_MIX);
-    let victim_style = *rng.pick(&NameStyle::LATIN_MIX);
-    let killer_team = *rng.pick(&[Team::Ally, Team::Enemy]);
-    let victim_team = match (rng.chance(0.2), killer_team) {
-        (true, team) => team,
-        (false, Team::Ally) => Team::Enemy,
-        (false, Team::Enemy) => Team::Ally,
-    };
-    Kill {
-        killer: synth_name(rng, killer_style),
-        victim: synth_name(rng, victim_style),
-        killer_team,
-        victim_team,
-        weapon: *rng.pick(&[
-            Weapon::Rifle,
-            Weapon::Pistol,
-            Weapon::Knife,
-            Weapon::Ability,
-        ]),
-        badge: rng.chance(0.25).then(|| 2 + rng.below(4) as u8),
-        own: rng.chance(0.25),
-        headshot: rng.chance(0.5),
-        birth,
-    }
-}
-
-/// A scene with `rows` rows born one frame apart, rendered when all of
-/// them have settled.
-fn settled_feed(seed: u64, rows: u32, background: Background, palette: Palette) -> Check {
-    let fonts = FontSet::latin();
-    let mut rng = Rng::new(seed);
-    let kills = (0..rows).map(|i| random_kill(&mut rng, i)).collect();
-    let scene = Scene::new(Layout::reference(), background, palette, rows + SETTLED + 2)
-        .with_kill_feed(&fonts, KillFeedSpec::new(kills));
-    check_frame(&scene.render(rows - 1 + SETTLED))
-}
+use support::{feed_view, random_kill, settled_feed};
 
 #[test]
 fn finds_every_settled_name() {

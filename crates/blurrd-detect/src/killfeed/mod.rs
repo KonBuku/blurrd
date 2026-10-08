@@ -14,6 +14,13 @@
 //! ([`FEED_ROI`]) and reports reference-pixel boxes; following names across
 //! frames is the temporal model's job.
 //!
+//! Nothing depends on the default team colours alone. Rows are anchored on
+//! the right-aligned white victim name; where the default teal and red do
+//! not explain a row's bar (colour-blind modes, custom colours, GPU colour
+//! filters such as Digital Vibrance or hue and saturation changes), the
+//! bar colours are learned from the frame and drive the row score and the
+//! killer | victim boundary instead.
+//!
 //! Only the bands the detector reads are classified: the columns that find
 //! the rows over the whole crop height, then the full width of every row
 //! found. Classifying the whole crop would cost about as much as the
@@ -21,6 +28,7 @@
 
 mod analysis;
 mod rows;
+mod tones;
 
 use blurrd_core::{NameKind, RectI, Region};
 
@@ -53,6 +61,11 @@ const VICTIM_TEXT_X1: i32 = 1834;
 const VICTIM_X1: i32 = 1838;
 /// Left end of the searched part of a row (`FEED_X0`).
 const FEED_X0: i32 = 1250;
+/// The victim's bar colour is measured from this column to
+/// [`VICTIM_X1`].
+const VICTIM_COLOUR_X0: i32 = 1790;
+/// Rows of a row's inner band (used for colours), from each edge.
+const INNER_MARGIN: i32 = 4;
 /// The first row's top is never above this line (`FEED_Y_TOP`).
 const FEED_Y_TOP: i32 = 88;
 /// Horizontal padding of a name's blur box around its text.
@@ -94,6 +107,8 @@ struct Scratch {
     clusters: Vec<analysis::Cluster>,
     profile: analysis::Profile,
     rows: rows::RowScratch,
+    /// Bar colours learned by the row finder in the current frame.
+    tones: Vec<tones::Tone>,
 }
 
 /// Finds the killer and victim names in the kill-feed rows of one frame.
@@ -161,7 +176,13 @@ impl KillFeedDetector {
             y1: FEED_ROI.y1,
         });
         self.classes.compute_rect(crop, score, &self.params);
-        rows::find_rows(&self.classes, &mut self.scratch.rows, &mut self.rows);
+        rows::find_rows(
+            &self.classes,
+            &mut self.scratch.rows,
+            &mut self.scratch.tones,
+            &mut self.rows,
+        );
+
         // Then every row band at full width. Bands closer than the top-hat
         // margin are classified together, so that no band's margin clears
         // the text flags of another.

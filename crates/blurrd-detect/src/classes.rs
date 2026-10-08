@@ -235,14 +235,21 @@ struct RowScratch {
     sdiv: Vec<i32>,
     /// `HDIV[chroma]`.
     hdiv: Vec<i32>,
-    /// Hue.
-    h: Vec<u8>,
-    /// Saturation.
-    s: Vec<u8>,
+}
+
+/// The output rows of [`RowScratch::classify_row`], all of the input's
+/// length.
+struct RowOut<'a> {
+    mn: &'a mut [u8],
+    chroma: &'a mut [u8],
+    hue: &'a mut [u8],
+    sat: &'a mut [u8],
+    flags: &'a mut [u8],
 }
 
 impl RowScratch {
-    /// Classifies one row: fills `mn`, `chroma` and the colour `flags`.
+    /// Classifies one row: fills `mn`, `chroma`, hue, saturation and the
+    /// colour flags.
     #[allow(
         clippy::needless_range_loop,
         reason = "indexing parallel arrays keeps each pass vectorisable"
@@ -251,14 +258,16 @@ impl RowScratch {
         &mut self,
         pixels: &[[u8; 3]],
         params: &ClassParams,
-        mn: &mut [u8],
-        chroma: &mut [u8],
-        flags: &mut [u8],
+        RowOut {
+            mn,
+            chroma,
+            hue,
+            sat,
+            flags,
+        }: RowOut<'_>,
     ) {
         let n = pixels.len();
-        for buf in [&mut self.v, &mut self.h, &mut self.s] {
-            buf.resize(n, 0);
-        }
+        self.v.resize(n, 0);
         self.num.resize(n, 0);
         self.sdiv.resize(n, 0);
         self.hdiv.resize(n, 0);
@@ -283,7 +292,8 @@ impl RowScratch {
             *dst = HDIV[usize::from(d)];
         }
         let (sdiv, hdiv) = (&self.sdiv[..n], &self.hdiv[..n]);
-        let (h, s) = (&mut self.h[..n], &mut self.s[..n]);
+        let (h, s) = (&mut hue[..n], &mut sat[..n]);
+
         let round = 1 << (HSV_SHIFT - 1);
         for i in 0..n {
             s[i] = ((i32::from(chroma[i]) * sdiv[i] + round) >> HSV_SHIFT) as u8;
@@ -306,6 +316,8 @@ pub struct PixelClasses {
     height: u32,
     mn: GrayImage,
     chroma: GrayImage,
+    hue: GrayImage,
+    sat: GrayImage,
     tophat: GrayImage,
     flags: Vec<u8>,
     rows: RowScratch,
@@ -327,18 +339,22 @@ impl PixelClasses {
         let (w, h) = (view.width(), view.height());
         self.width = w;
         self.height = h;
-        self.mn.resize(w, h);
-        self.chroma.resize(w, h);
+        for plane in [&mut self.mn, &mut self.chroma, &mut self.hue, &mut self.sat] {
+            plane.resize(w, h);
+        }
         self.flags.clear();
         self.flags.resize(w as usize * h as usize, 0);
         for y in 0..h {
             let row = view.row(y);
-            let start = y as usize * w as usize;
-            let mn = &mut self.mn.data_mut()[start..start + w as usize];
-            let chroma = &mut self.chroma.data_mut()[start..start + w as usize];
-            let flags = &mut self.flags[start..start + w as usize];
-            let pixels = row.as_chunks::<3>().0;
-            self.rows.classify_row(pixels, params, mn, chroma, flags);
+            let range = y as usize * w as usize..(y as usize + 1) * w as usize;
+            let out = RowOut {
+                mn: &mut self.mn.data_mut()[range.clone()],
+                chroma: &mut self.chroma.data_mut()[range.clone()],
+                hue: &mut self.hue.data_mut()[range.clone()],
+                sat: &mut self.sat.data_mut()[range.clone()],
+                flags: &mut self.flags[range],
+            };
+            self.rows.classify_row(row.as_chunks::<3>().0, params, out);
         }
         let k = params.tophat_size;
         white_tophat(&self.mn, k, k, &mut self.tophat, &mut self.scratch);
@@ -367,7 +383,8 @@ impl PixelClasses {
     /// for the whole view (the top-hat sees the same neighbourhood, and the
     /// borders of the view stay borders). In a margin of
     /// `2 × (tophat_size / 2)` pixels around `rect` the colour flags, `mn` and
-    /// the chroma are set as well, but the [`Class::Text`] flag is cleared
+    /// the chroma (and hue and saturation) are set as well, but the
+    /// [`Class::Text`] flag is cleared
     /// and the top-hat is unspecified. Pixels further away keep the values
     /// of earlier calls (0 after the view size changed), so a caller that
     /// classifies several areas of one frame must not let the margin of
@@ -377,7 +394,13 @@ impl PixelClasses {
         if (w, h) != (self.width, self.height) {
             self.width = w;
             self.height = h;
-            for plane in [&mut self.mn, &mut self.chroma, &mut self.tophat] {
+            for plane in [
+                &mut self.mn,
+                &mut self.chroma,
+                &mut self.hue,
+                &mut self.sat,
+                &mut self.tophat,
+            ] {
                 plane.resize(w, h);
                 plane.data_mut().fill(0);
             }
@@ -405,13 +428,19 @@ impl PixelClasses {
         self.part_mn.resize(outer.width(), outer.height());
         for y in outer.y0..outer.y1 {
             let start = y as usize * width;
+            let range = start + ox0..start + ox1;
             let pixels = &view.row(y as u32).as_chunks::<3>().0[ox0..ox1];
-            let mn = &mut self.mn.data_mut()[start + ox0..start + ox1];
-            let chroma = &mut self.chroma.data_mut()[start + ox0..start + ox1];
-            let flags = &mut self.flags[start + ox0..start + ox1];
-            self.rows.classify_row(pixels, params, mn, chroma, flags);
+            let out = RowOut {
+                mn: &mut self.mn.data_mut()[range.clone()],
+                chroma: &mut self.chroma.data_mut()[range.clone()],
+                hue: &mut self.hue.data_mut()[range.clone()],
+                sat: &mut self.sat.data_mut()[range.clone()],
+                flags: &mut self.flags[range.clone()],
+            };
+            self.rows.classify_row(pixels, params, out);
             let part_row = (y - outer.y0) as usize * (ox1 - ox0);
-            self.part_mn.data_mut()[part_row..part_row + ox1 - ox0].copy_from_slice(mn);
+            self.part_mn.data_mut()[part_row..part_row + ox1 - ox0]
+                .copy_from_slice(&self.mn.data()[range]);
         }
         white_tophat(
             &self.part_mn,
@@ -462,6 +491,17 @@ impl PixelClasses {
     /// `max(R, G, B) − min(R, G, B)` per pixel.
     pub const fn chroma(&self) -> &GrayImage {
         &self.chroma
+    }
+
+    /// OpenCV's 8-bit hue (`0..180`) per pixel.
+    pub const fn hue(&self) -> &GrayImage {
+        &self.hue
+    }
+
+    /// OpenCV's 8-bit saturation per pixel. The value (`max(R, G, B)`) is
+    /// [`PixelClasses::mn`] plus [`PixelClasses::chroma`].
+    pub const fn saturation(&self) -> &GrayImage {
+        &self.sat
     }
 
     /// The white top-hat of [`PixelClasses::mn`] (spec `TH7`).
@@ -651,6 +691,8 @@ mod tests {
                         assert_eq!(part.flags()[i], whole.flags()[i], "k {k} at ({x}, {y})");
                         assert_eq!(part.tophat().get(x, y), whole.tophat().get(x, y));
                         assert_eq!(part.mn().get(x, y), whole.mn().get(x, y));
+                        assert_eq!(part.hue().get(x, y), whole.hue().get(x, y));
+                        assert_eq!(part.saturation().get(x, y), whole.saturation().get(x, y));
                         text += u32::from(whole.has(x, y, Class::Text));
                     }
                 }
@@ -660,6 +702,28 @@ mod tests {
                 );
             }
             assert_eq!((part.width(), part.height()), (w, h));
+        }
+    }
+
+    #[test]
+    fn hue_and_saturation_planes_hold_opencv_hsv() {
+        let colours: [[u8; 3]; 6] = [
+            [100, 186, 162],
+            [230, 98, 93],
+            [245, 245, 245],
+            [0, 0, 0],
+            [70, 130, 230],
+            [222, 80, 170],
+        ];
+        let data: Vec<u8> = colours.iter().flatten().copied().collect();
+        let view = RgbView::new(&data, 6, 1, 18).unwrap();
+        let mut classes = PixelClasses::new();
+        classes.compute(&view, &ClassParams::default());
+        for (x, &rgb) in (0..).zip(&colours) {
+            let [h, s, v] = hsv(rgb);
+            assert_eq!(classes.hue().get(x, 0), h, "{rgb:?}");
+            assert_eq!(classes.saturation().get(x, 0), s, "{rgb:?}");
+            assert_eq!(classes.mn().get(x, 0) + classes.chroma().get(x, 0), v);
         }
     }
 

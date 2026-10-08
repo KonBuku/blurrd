@@ -1,4 +1,5 @@
-//! Shared helpers of the detector tests: crops of synthetic frames and the
+//! Shared helpers of the detector tests: synthetic kill feeds, crops of
+//! synthetic frames, colour filters like those of GPU drivers, and the
 //! checks of a frame's detections against its ground truth.
 
 #![allow(
@@ -10,8 +11,161 @@ use blurrd_blur::{PixelParams, PreparedBox, YuvColour, prepare_boxes};
 use blurrd_core::{BlurBox, BlurParams, Region};
 use blurrd_detect::killfeed::FEED_ROI;
 use blurrd_detect::{Detection, KillFeedDetector, RgbView};
+use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
 use blurrd_testkit::metrics::item_coverage;
-use blurrd_testkit::{Fixture, RgbFrame};
+use blurrd_testkit::truth::ContentKind;
+use blurrd_testkit::{
+    Background, Fixture, FontSet, Layout, NameStyle, Palette, RgbFrame, Rng, Scene, synth_name,
+};
+
+/// Frames after its birth until a row has slid into place.
+const SETTLED: u32 = 4;
+
+/// A kill with every visual variant chosen from `rng`.
+pub(crate) fn random_kill(rng: &mut Rng, birth: u32) -> Kill {
+    let killer_style = *rng.pick(&NameStyle::LATIN_MIX);
+    let victim_style = *rng.pick(&NameStyle::LATIN_MIX);
+    let killer_team = *rng.pick(&[Team::Ally, Team::Enemy]);
+    let victim_team = match (rng.chance(0.2), killer_team) {
+        (true, team) => team,
+        (false, Team::Ally) => Team::Enemy,
+        (false, Team::Enemy) => Team::Ally,
+    };
+    Kill {
+        killer: synth_name(rng, killer_style),
+        victim: synth_name(rng, victim_style),
+        killer_team,
+        victim_team,
+        weapon: *rng.pick(&[
+            Weapon::Rifle,
+            Weapon::Pistol,
+            Weapon::Knife,
+            Weapon::Ability,
+        ]),
+        badge: rng.chance(0.25).then(|| 2 + rng.below(4) as u8),
+        own: rng.chance(0.25),
+        headshot: rng.chance(0.5),
+        birth,
+    }
+}
+
+/// A frame of a scene with `rows` random rows born one frame apart, when
+/// all of them have settled.
+pub(crate) fn settled_fixture(
+    seed: u64,
+    rows: u32,
+    background: Background,
+    palette: Palette,
+) -> Fixture {
+    let fonts = FontSet::latin();
+    let mut rng = Rng::new(seed);
+    let kills = (0..rows).map(|i| random_kill(&mut rng, i)).collect();
+    let scene = Scene::new(Layout::reference(), background, palette, rows + SETTLED + 2)
+        .with_kill_feed(&fonts, KillFeedSpec::new(kills));
+    scene.render(rows - 1 + SETTLED)
+}
+
+/// [`settled_fixture`], checked with a fresh detector.
+pub(crate) fn settled_feed(
+    seed: u64,
+    rows: u32,
+    background: Background,
+    palette: Palette,
+) -> Check {
+    check_frame(&settled_fixture(seed, rows, background, palette))
+}
+
+/// A colour change applied to a whole frame, like the post-processing
+/// filters of GPU drivers (NVIDIA Digital Vibrance and Freestyle, AMD
+/// colour settings) or an edited video.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Filter {
+    /// Rotates every hue by this many degrees (luminance-preserving
+    /// matrix, as CSS `hue-rotate`).
+    Hue(f32),
+    /// Scales the saturation: 0 is grey, 1 unchanged, 2 doubled.
+    Saturation(f32),
+    /// Boosts the saturation of dull colours more than of vivid ones
+    /// (Digital Vibrance); 0 is unchanged.
+    Vibrance(f32),
+    /// `255 · (c / 255)^gamma`.
+    Gamma(f32),
+    /// Adds `brightness · 255`, then scales the distance from mid-grey by
+    /// `contrast`.
+    Levels {
+        /// Brightness offset (−1 to 1).
+        brightness: f32,
+        /// Contrast factor.
+        contrast: f32,
+    },
+}
+
+impl Filter {
+    /// The filtered colour of one pixel.
+    fn apply(self, rgb: [u8; 3]) -> [u8; 3] {
+        let c = rgb.map(f32::from);
+        let luma = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let out = match self {
+            Self::Hue(degrees) => {
+                let (sin, cos) = degrees.to_radians().sin_cos();
+                let m = [
+                    [
+                        0.213 + cos * 0.787 - sin * 0.213,
+                        0.715 - cos * 0.715 - sin * 0.715,
+                        0.072 - cos * 0.072 + sin * 0.928,
+                    ],
+                    [
+                        0.213 - cos * 0.213 + sin * 0.143,
+                        0.715 + cos * 0.285 + sin * 0.140,
+                        0.072 - cos * 0.072 - sin * 0.283,
+                    ],
+                    [
+                        0.213 - cos * 0.213 - sin * 0.787,
+                        0.715 - cos * 0.715 + sin * 0.715,
+                        0.072 + cos * 0.928 + sin * 0.072,
+                    ],
+                ];
+                m.map(|row| row[0] * c[0] + row[1] * c[1] + row[2] * c[2])
+            }
+            Self::Saturation(s) => c.map(|v| luma + s * (v - luma)),
+            Self::Vibrance(amount) => {
+                let (mx, mn) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
+                let saturation = if mx > 0.0 { (mx - mn) / mx } else { 0.0 };
+                let s = 1.0 + amount * (1.0 - saturation);
+                c.map(|v| luma + s * (v - luma))
+            }
+            Self::Gamma(g) => c.map(|v| 255.0 * (v / 255.0).powf(g)),
+            Self::Levels {
+                brightness,
+                contrast,
+            } => c.map(|v| (v + brightness * 255.0 - 128.0) * contrast + 128.0),
+        };
+        out.map(|v| v.round().clamp(0.0, 255.0) as u8)
+    }
+
+    /// A copy of a reference-size frame with the kill-feed crop
+    /// ([`FEED_ROI`], all the detector reads) filtered.
+    pub(crate) fn frame(self, frame: &RgbFrame) -> RgbFrame {
+        let mut data = frame.data().to_vec();
+        let stride = 3 * frame.width() as usize;
+        let (x0, x1) = (FEED_ROI.x0 as usize, FEED_ROI.x1 as usize);
+        for y in FEED_ROI.y0 as usize..(FEED_ROI.y1 as usize).min(frame.height() as usize) {
+            let row = &mut data[y * stride + 3 * x0..y * stride + 3 * x1];
+            for pixel in row.as_chunks_mut::<3>().0 {
+                *pixel = self.apply(*pixel);
+            }
+        }
+        RgbFrame::from_raw(frame.width(), frame.height(), data).unwrap()
+    }
+
+    /// The fixture with its frame filtered (the truth does not change).
+    pub(crate) fn fixture(self, fx: &Fixture) -> Fixture {
+        Fixture {
+            frame: self.frame(&fx.frame),
+            truth: fx.truth.clone(),
+        }
+    }
+}
 
 /// The [`FEED_ROI`] of a reference-size frame, without copying.
 pub(crate) fn feed_view(frame: &RgbFrame) -> RgbView<'_> {
@@ -60,8 +214,12 @@ pub(crate) struct Check {
     pub(crate) leaks: Vec<String>,
     /// Names no detection overlaps.
     pub(crate) missed: Vec<String>,
-    /// Detections that overlap no kill-feed name.
+    /// Detections that overlap no kill-feed name and no multikill badge.
     pub(crate) false_positives: Vec<String>,
+    /// Detections on a multikill badge: the roman numeral of a badge in
+    /// front of a one-colour row passes as a name (as in the prototype).
+    /// Over-blur only; the temporal model (M10) can drop them.
+    pub(crate) badges: Vec<String>,
 }
 
 impl Check {
@@ -116,11 +274,21 @@ pub(crate) fn check_with(detector: &mut KillFeedDetector, fx: &Fixture) -> Check
         .collect();
     // One-colour rows report both names as victims (port spec 3.3), so
     // only the region has to match.
-    let false_positives = detections
+    let on_badge = |d: &Detection| {
+        fx.truth
+            .content
+            .iter()
+            .any(|c| c.kind == ContentKind::Badge && c.rect.intersection(&d.text).is_some())
+    };
+    let (badges, false_positives): (Vec<_>, Vec<_>) = detections
         .iter()
         .filter(|d| !items.iter().any(|i| i.text.intersection(&d.text).is_some()))
-        .map(|d| format!("{:?} {}", d.kind, d.text))
-        .collect();
+        .partition(|d| on_badge(d));
+    let describe = |d: &&Detection| format!("{:?} {}", d.kind, d.text);
+    let (badges, false_positives) = (
+        badges.iter().map(describe).collect(),
+        false_positives.iter().map(describe).collect(),
+    );
     let missed = items
         .iter()
         .filter(|i| {
@@ -138,5 +306,6 @@ pub(crate) fn check_with(detector: &mut KillFeedDetector, fx: &Fixture) -> Check
         leaks,
         missed,
         false_positives,
+        badges,
     }
 }

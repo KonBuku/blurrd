@@ -110,3 +110,9 @@ opt-level = 2
 # it fast in debug builds too.
 [profile.dev.package.blurrd-testkit]
 opt-level = 2
+
+# The detectors classify every pixel of their crops; the synthetic
+# detector suites run hundreds of frames, so keep them fast in debug
+# builds as well.
+[profile.dev.package.blurrd-detect]
+opt-level = 2
