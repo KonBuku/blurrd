@@ -241,13 +241,15 @@ for a single command, for example while rebasing, set `LEFTHOOK=0`.
 
 GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
 every pull request and on manual dispatch. All jobs must pass before a
-change is merged.
+change is merged; the installer job runs only after a merge.
 
-| Job              | Runner  | Checks                                                                                                                                                                                                                                               |
-| ---------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`           | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history                                                                                                                                   |
-| `rust (windows)` | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
-| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                           |
+| Job                | Runner  | Checks                                                                                                                                                                                                                                               |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`             | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history                                                                                                                                   |
+| `frontend`         | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, Playwright end-to-end tests in Chromium against the mock backend (report uploaded on failure)                                                                                                 |
+| `rust (windows)`   | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
+| `deny`             | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                           |
+| `bundle (windows)` | Windows | pushes to `main` and manual runs only, after `frontend` and `rust (windows)`: `pnpm build` (release app + NSIS installer), uploaded as the `blurrd-windows-<sha>` artifact for 14 days                                                               |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
 (see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the

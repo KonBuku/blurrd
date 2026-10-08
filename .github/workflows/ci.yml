@@ -1,6 +1,7 @@
-# Continuous integration: formatting, lints, secret scan, Rust tests on
-# Windows and the cargo-deny policy. Each step lands together with the code
-# it checks; see docs/development.md ("Continuous integration").
+# Continuous integration: formatting, lints, secret scan, frontend checks,
+# Rust tests on Windows, the cargo-deny policy and, on main, the Windows
+# installer. Each step lands together with the code it checks; see
+# docs/development.md ("Continuous integration").
 #
 # Every action is pinned to a full commit SHA with its tag as a comment, so
 # Dependabot can update both. Tools that are installed by version (nextest,
@@ -79,6 +80,43 @@ jobs:
           echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose .
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+      - name: typecheck
+        run: pnpm typecheck
+      - name: unit tests
+        run: pnpm test
+      - name: vite build
+        run: pnpm --filter @blurrd/desktop build
+      - name: playwright browser
+        # Chromium is the engine of WebView2; the end-to-end tests run the
+        # frontend against the mock backend, so no Tauri shell is needed.
+        run: pnpm --filter @blurrd/desktop exec playwright install --with-deps chromium
+      - name: end-to-end tests
+        run: pnpm --filter @blurrd/desktop e2e
+      - name: playwright report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: |
+            apps/desktop/playwright-report
+            apps/desktop/test-results
+          retention-days: 7
 
   rust:
     name: rust (windows)
@@ -170,3 +208,36 @@ jobs:
           tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
       - name: cargo-deny
         run: cargo deny --locked check advisories bans licenses sources
+
+  bundle:
+    name: bundle (windows)
+    # Installers are built for main only; pull requests stop at the checks.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [frontend, rust]
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: rust toolchain
+        # Installs the toolchain, components and targets pinned in
+        # rust-toolchain.toml with the rustup that ships on the runner.
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+      - name: tauri build
+        # Release build of the app and its NSIS installer (unsigned, D3).
+        run: pnpm build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: blurrd-windows-${{ github.sha }}
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
