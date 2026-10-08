@@ -21,6 +21,26 @@ export interface MockBackend {
   maximized: boolean;
   /** Whether the mocked main window was closed. */
   closed: boolean;
+  /** The settings file as last saved, or `null` before the first save. */
+  readonly settingsFile: () => Record<string, unknown> | null;
+}
+
+/** Name of the settings file, as opened by the real shell. */
+const SETTINGS_FILE = "settings.json";
+/** Resource id of the settings store. */
+const SETTINGS_RID = 1;
+/**
+ * Session storage key of the mocked settings file: it survives reloads of
+ * the same tab, like the real file survives restarts.
+ */
+const DISK_KEY = "blurrd.mock.settings";
+
+/** The object members of a store command's arguments. */
+interface StoreArgs {
+  readonly rid?: number;
+  readonly path?: string;
+  readonly key?: string;
+  readonly value?: unknown;
 }
 
 /** Window size reported in mocked resize events, in physical pixels. */
@@ -34,7 +54,36 @@ const MAXIMIZED_SIZE = { width: 2560, height: 1392 };
 export function installMockBackend(): MockBackend {
   clearMocks();
   mockWindows("main");
-  const backend: MockBackend = { calls: [], maximized: false, closed: false };
+  const saved = sessionStorage.getItem(DISK_KEY);
+  // The store's in-memory entries; written to session storage on save.
+  const settings = new Map<string, unknown>(
+    Object.entries(saved === null ? {} : (JSON.parse(saved) as Record<string, unknown>)),
+  );
+  const backend: MockBackend = {
+    calls: [],
+    maximized: false,
+    closed: false,
+    settingsFile: () => {
+      const text = sessionStorage.getItem(DISK_KEY);
+      return text === null ? null : (JSON.parse(text) as Record<string, unknown>);
+    },
+  };
+  const store = (cmd: string, args: StoreArgs) => {
+    if (cmd === "plugin:store|get_store") return args.path === SETTINGS_FILE ? SETTINGS_RID : null;
+    if (args.rid !== SETTINGS_RID) throw new Error(`mock backend: unknown store ${args.rid}`);
+    switch (cmd) {
+      case "plugin:store|get":
+        return [settings.get(args.key ?? ""), settings.has(args.key ?? "")];
+      case "plugin:store|set":
+        settings.set(args.key ?? "", args.value);
+        return null;
+      case "plugin:store|save":
+        sessionStorage.setItem(DISK_KEY, JSON.stringify(Object.fromEntries(settings)));
+        return null;
+      default:
+        throw new Error(`mock backend: unknown command ${cmd}`);
+    }
+  };
 
   const resized = () => emit("tauri://resize", backend.maximized ? MAXIMIZED_SIZE : RESTORED_SIZE);
 
@@ -57,6 +106,7 @@ export function installMockBackend(): MockBackend {
         case "plugin:log|log":
           return null;
         default:
+          if (cmd.startsWith("plugin:store|")) return store(cmd, args as StoreArgs);
           throw new Error(`mock backend: unknown command ${cmd}`);
       }
     },

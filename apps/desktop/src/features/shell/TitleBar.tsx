@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { QUEUE_SIDEBAR_ID } from "@/features/queue/QueueSidebar";
 import { SHORTCUTS } from "@/lib/shortcuts";
 
+import { TitleBarActions } from "./TitleBarActions";
 import { WindowControls } from "./WindowControls";
 
 export interface TitleBarProps {
@@ -24,7 +25,8 @@ export interface TitleBarProps {
  * drag regions.
  *
  * The app mark on the left doubles as the queue sidebar toggle: on hover
- * and keyboard focus it crossfades to the sidebar icon (150 ms).
+ * and keyboard focus it crossfades to the sidebar icon (150 ms). The theme
+ * menu and the settings button sit left of the window controls.
  */
 export function TitleBar({ sidebarOpen, onToggleSidebar }: TitleBarProps) {
   const label = sidebarOpen ? "Hide queue" : "Show queue";
@@ -63,6 +65,8 @@ export function TitleBar({ sidebarOpen, onToggleSidebar }: TitleBarProps) {
         blurrd
       </span>
       <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
+      <TitleBarActions />
+      <div aria-hidden className="mx-1 h-4 w-px bg-border" />
       <WindowControls />
     </header>
   );

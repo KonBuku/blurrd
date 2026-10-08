@@ -13,6 +13,9 @@ export const DropdownMenuTrigger = MenuPrimitive.Trigger;
 /** A labelled group of items. */
 export const DropdownMenuGroup = MenuPrimitive.Group;
 
+/** A group of {@link DropdownMenuRadioItem}s, one of which is selected. */
+export const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
+
 /** The menu panel: menu colour, 8 px radius, 4 px padding, shadow. */
 export function DropdownMenuContent({
   className,
@@ -79,6 +82,26 @@ export function DropdownMenuCheckboxItem({
         <Check aria-hidden className="text-foreground-subtle" />
       </MenuPrimitive.ItemIndicator>
     </MenuPrimitive.CheckboxItem>
+  );
+}
+
+/** One choice of a radio group; the selected one shows a check on the right. */
+export function DropdownMenuRadioItem({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.RadioItem>) {
+  return (
+    <MenuPrimitive.RadioItem
+      data-slot="dropdown-menu-radio-item"
+      className={cn(itemClass, "py-1.5 pr-8", className)}
+      {...props}
+    >
+      {children}
+      <MenuPrimitive.ItemIndicator className="absolute right-2 grid place-items-center">
+        <Check aria-hidden className="text-foreground-subtle" />
+      </MenuPrimitive.ItemIndicator>
+    </MenuPrimitive.RadioItem>
   );
 }
 

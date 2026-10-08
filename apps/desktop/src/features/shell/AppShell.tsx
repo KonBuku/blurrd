@@ -4,6 +4,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { INSPECTOR_ID, InspectorTabs } from "@/features/inspector/Inspector";
 import { INSPECTOR_TOGGLE_ID, PreviewFrame } from "@/features/preview/PreviewFrame";
 import { QUEUE_SIDEBAR_ID, QueueSidebar } from "@/features/queue/QueueSidebar";
+import { SettingsView } from "@/features/settings/SettingsView";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
 import { INSPECTOR, INSPECTOR_SHEET_BREAKPOINT, SIDEBAR, clamp, resolveLayout } from "@/lib/layout";
 import { matchShortcut } from "@/lib/shortcuts";
@@ -18,6 +19,7 @@ import { TitleBar } from "./TitleBar";
  * sidebar on the shell colour, the preview frame and the inspector frame,
  * separated by 4 px gaps that double as resize handles. Below 1180 px the
  * inspector becomes an overlay sheet toggled from the preview header.
+ * The settings view replaces the preview and inspector frames.
  */
 export function AppShell() {
   const windowWidth = useWindowWidth();
@@ -60,8 +62,11 @@ export function AppShell() {
           ) : (
             <div className="w-1 shrink-0" />
           )}
-          <PreviewFrame inspectorShown={inspectorShown} onToggleInspector={toggleInspector} />
-          {!layout.inspectorAsSheet && ui.inspectorOpen && (
+          {ui.view === "settings" && <SettingsView />}
+          {ui.view === "workspace" && (
+            <PreviewFrame inspectorShown={inspectorShown} onToggleInspector={toggleInspector} />
+          )}
+          {ui.view === "workspace" && !layout.inspectorAsSheet && ui.inspectorOpen && (
             <>
               <ResizeHandle
                 label="Resize inspector"
@@ -123,11 +128,27 @@ function useGlobalShortcuts() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const match = matchShortcut(event);
-      if (!match) return;
-      event.preventDefault();
       const ui = useUiStore.getState();
-      if (match.id === "toggleQueue") ui.toggleSidebar();
-      else ui.toggleInspector(window.innerWidth < INSPECTOR_SHEET_BREAKPOINT);
+      switch (match?.id) {
+        case "toggleQueue":
+          ui.toggleSidebar();
+          break;
+        case "toggleInspector":
+          if (ui.view !== "workspace") return;
+          ui.toggleInspector(window.innerWidth < INSPECTOR_SHEET_BREAKPOINT);
+          break;
+        case "openSettings":
+          ui.openSettings();
+          break;
+        case "closeOverlay":
+          // Open menus and dialogs handle Escape first (defaultPrevented).
+          if (ui.view !== "settings") return;
+          ui.closeSettings();
+          break;
+        case undefined:
+          return;
+      }
+      event.preventDefault();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

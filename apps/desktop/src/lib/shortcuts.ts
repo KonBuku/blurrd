@@ -4,7 +4,7 @@
  */
 
 /** Ids of the shortcuts the app handles. */
-export type ShortcutId = "toggleQueue" | "toggleInspector";
+export type ShortcutId = "toggleQueue" | "toggleInspector" | "openSettings" | "closeOverlay";
 
 /** One keyboard shortcut. */
 export interface Shortcut {
@@ -38,6 +38,24 @@ export const SHORTCUTS: Readonly<Record<ShortcutId, Shortcut>> = {
     key: "b",
     ctrl: true,
     alt: true,
+    shift: false,
+  },
+  openSettings: {
+    id: "openSettings",
+    label: "Open settings",
+    keys: ["Ctrl", ","],
+    key: ",",
+    ctrl: true,
+    alt: false,
+    shift: false,
+  },
+  closeOverlay: {
+    id: "closeOverlay",
+    label: "Close settings, menus and dialogs",
+    keys: ["Esc"],
+    key: "Escape",
+    ctrl: false,
+    alt: false,
     shift: false,
   },
 };

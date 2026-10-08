@@ -31,12 +31,15 @@ test.describe("window shell", () => {
   test("keeps the window controls reachable with the keyboard", async ({ page }) => {
     // Wait for the first render; a Tab before it lands on the empty page.
     await expect(page.getByRole("button", { name: "Minimize" })).toBeVisible();
-    // Focus order starts in the title bar: queue toggle, then the window
-    // controls.
-    await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Hide queue" })).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Minimize" })).toBeFocused();
+    // Focus order starts in the title bar: queue toggle, app actions, then
+    // the window controls.
+    for (const name of ["Hide queue", "Theme", "Settings", "Minimize"]) {
+      // Each Tab moves on from the focus the previous one left behind.
+      // oxlint-disable-next-line no-await-in-loop
+      await page.keyboard.press("Tab");
+      // oxlint-disable-next-line no-await-in-loop
+      await expect(page.getByRole("button", { name, exact: true })).toBeFocused();
+    }
   });
 
   test("logs no console errors on start", async ({ page }) => {

@@ -234,8 +234,9 @@ differ by more than the 1 % tolerance, so small changes would be missed.)
 
 The window has no native title bar (`decorations: false`); the frontend
 draws its own with window controls. `src-tauri/capabilities/default.json`
-grants the main window only the window calls of that title bar and the log
-plugin's `log` command. The app writes JSON lines to
+grants the main window only the window calls of that title bar, the log
+plugin's `log` command, and reading and writing the settings store that the
+Rust side opens at start (the frontend cannot open other store files). The app writes JSON lines to
 `%LOCALAPPDATA%\io.github.konbuku.blurrd\logs\blurrd.log` (debug builds
 also print to stdout) and remembers the window size and position. Starting
 it a second time focuses the running window.
@@ -253,6 +254,17 @@ Ctrl+B shows or hides the queue, Ctrl+Alt+B the inspector; the shortcut
 table is `src/lib/shortcuts.ts`. Panel visibility and widths are kept in
 the WebView's local storage (`src/store/ui.ts`), not in the settings file.
 
+The settings view (gear button or Ctrl+, in the title bar; Escape closes
+it) replaces the preview and inspector. Appearance (theme, interface size,
+reduce motion) is applied by `src/lib/appearance.ts` and saved by
+`src/store/settings.ts` to `settings.json` (schema `blurrd-settings/1`) in
+`%APPDATA%\io.github.konbuku.blurrd` through the store plugin; a copy in
+local storage paints the first frame in the right theme before the file
+has loaded. A settings file of another schema major is read but never
+overwritten. `e2e/settings.spec.ts` covers theme switching (system, light,
+dark, title bar menu), persistence across reloads, interface size, reduce
+motion, focus handling and an axe scan of each page in both themes.
+
 `e2e/layout.spec.ts` checks the layout from 1024x680 to 2560x1440 (no
 overflow, limits respected, sheet below the breakpoint), resizing by drag
 and keyboard, and runs an axe accessibility scan of the shell and the sheet
@@ -260,14 +272,16 @@ in both themes. Native window behaviour cannot be tested in a browser;
 check it by hand in `pnpm dev` after changing the title bar: maximize and
 restore with the button and by double-clicking the title bar, drag the
 title bar to a screen edge (snap) and to the top (maximize), Win+arrow
-keys, and Win+Z (snap layouts).
+keys, Win+Z (snap layouts), and that a theme chosen in Settings survives
+a restart.
 
 ### Design tokens and typography
 
 `src/styles/globals.css` defines every colour, text size and easing of the
 user interface as a Tailwind theme token, with the light values in `@theme`
-and the dark overrides under the `.dark` class (set on `<html>` from the
-system theme by `src/lib/theme.ts`). Tailwind's default palette and text
+and the dark overrides under the `.dark` class (set on `<html>` by
+`src/lib/appearance.ts` from Settings > Appearance, following the Windows
+theme in "System" mode). Tailwind's default palette and text
 scale are switched off: use the semantic tokens (`bg-panel`,
 `text-foreground-subtle`, `border-border`, ...) and the `text-ui-*` sizes,
 which all follow one interface-size variable. Compose class names with

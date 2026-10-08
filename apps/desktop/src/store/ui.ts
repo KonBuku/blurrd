@@ -6,12 +6,22 @@ import { INSPECTOR, SIDEBAR, type LayoutPreferences } from "@/lib/layout";
 /** Tabs of the inspector frame. */
 export type InspectorTab = "blur" | "export" | "verify";
 
+/** Pages of the settings view. */
+export type SettingsSection = "appearance" | "shortcuts";
+
+/** What the content area shows: the workspace frames or the settings. */
+export type View = "workspace" | "settings";
+
 /** State of the window shell. */
 export interface UiState extends LayoutPreferences {
   /** Whether the inspector sheet is open (narrow windows only). */
   readonly inspectorSheetOpen: boolean;
   /** The selected inspector tab. */
   readonly inspectorTab: InspectorTab;
+  /** Whether the settings replace the preview and inspector. */
+  readonly view: View;
+  /** The settings page shown. */
+  readonly settingsSection: SettingsSection;
   readonly toggleSidebar: () => void;
   readonly setSidebarWidth: (width: number) => void;
   /**
@@ -22,6 +32,10 @@ export interface UiState extends LayoutPreferences {
   readonly setInspectorSheetOpen: (open: boolean) => void;
   readonly setInspectorWidth: (width: number) => void;
   readonly setInspectorTab: (tab: InspectorTab) => void;
+  /** Shows the settings, on `section` or the last page shown. */
+  readonly openSettings: (section?: SettingsSection) => void;
+  /** Returns to the workspace. */
+  readonly closeSettings: () => void;
 }
 
 /** The parts of {@link UiState} that survive a restart. */
@@ -31,8 +45,8 @@ type PersistedUi = Pick<
 >;
 
 /**
- * Shell state: panel visibility, preferred widths and the selected
- * inspector tab. Layout preferences are kept in the WebView's local
+ * Shell state: panel visibility, preferred widths, the selected
+ * inspector tab and whether the settings are open. Layout preferences are kept in the WebView's local
  * storage (a per-install convenience, not a setting); widths are stored as
  * the user left them and clamped to the window by `resolveLayout`.
  */
@@ -45,6 +59,8 @@ export const useUiStore = create<UiState>()(
       inspectorWidth: INSPECTOR.default,
       inspectorSheetOpen: false,
       inspectorTab: "blur",
+      view: "workspace",
+      settingsSection: "appearance",
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
       toggleInspector: (asSheet) =>
@@ -56,6 +72,13 @@ export const useUiStore = create<UiState>()(
       setInspectorSheetOpen: (inspectorSheetOpen) => set({ inspectorSheetOpen }),
       setInspectorWidth: (inspectorWidth) => set({ inspectorWidth }),
       setInspectorTab: (inspectorTab) => set({ inspectorTab }),
+      openSettings: (section) =>
+        set((state) => ({
+          view: "settings",
+          settingsSection: section ?? state.settingsSection,
+          inspectorSheetOpen: false,
+        })),
+      closeSettings: () => set({ view: "workspace" }),
     }),
     {
       name: "blurrd.layout",

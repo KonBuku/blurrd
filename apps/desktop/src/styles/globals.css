@@ -23,6 +23,20 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* `motion-reduce:` follows Settings > Appearance > Reduce motion: on with
+   `data-motion="reduced"` on <html>, from Windows unless the setting says
+   off (`data-motion="full"`). */
+@custom-variant motion-reduce {
+  &:where([data-motion="reduced"] *) {
+    @slot;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:where(:root:not([data-motion="full"]) *) {
+      @slot;
+    }
+  }
+}
+
 @theme {
   --color-*: initial;
   --text-*: initial;
@@ -305,11 +319,22 @@
     background-color: var(--color-border-hover);
   }
 
-  /* Only opacity changes remain when the user asks for less motion. */
+  /* Animations end at once when the user asks for less motion: in
+     Settings > Appearance (`data-motion="reduced"` on <html>), or in
+     Windows unless the setting overrides it (`data-motion="full"`). */
+  :root[data-motion="reduced"] *,
+  :root[data-motion="reduced"] *::before,
+  :root[data-motion="reduced"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
+    :root:not([data-motion="full"]) *,
+    :root:not([data-motion="full"]) *::before,
+    :root:not([data-motion="full"]) *::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;

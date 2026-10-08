@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { forwardUncaughtErrors } from "./lib/log";
-import { followSystemTheme } from "./lib/theme";
+import { initialAppearance, useSettingsStore } from "./store/settings";
 import "./styles/globals.css";
 
 const container = document.getElementById("root");
@@ -29,7 +29,10 @@ if (import.meta.env.MODE === "mock") {
 }
 
 forwardUncaughtErrors();
-followSystemTheme();
+// The cached appearance paints the first frame; the settings file then
+// loads in the background and replaces it if it differs.
+initialAppearance();
+void useSettingsStore.getState().load();
 
 // Icons use a 1.5 px stroke everywhere; components set only their size.
 createRoot(container).render(

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { App } from "./App";
@@ -15,8 +15,9 @@ function resizeWindow(width: number) {
 
 describe("App shell", () => {
   beforeEach(() => {
-    installMockBackend();
+    sessionStorage.clear();
     localStorage.clear();
+    installMockBackend();
     useUiStore.setState(useUiStore.getInitialState());
     resizeWindow(1440);
   });
@@ -67,5 +68,26 @@ describe("App shell", () => {
     resizeWindow(1180);
     expect(screen.queryByRole("dialog", { name: "Inspector" })).toBeNull();
     expect(screen.getByRole("region", { name: "Inspector" })).toBeDefined();
+  });
+
+  it("opens the settings with Ctrl+, and closes them with Escape", async () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: ",", code: "Comma", ctrlKey: true });
+    expect(screen.getByRole("region", { name: "Settings" })).toBeDefined();
+    expect(screen.queryByRole("region", { name: "Preview" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Appearance" })).toBe(document.activeElement);
+    expect(screen.getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Shortcuts" }));
+    expect(screen.getByRole("heading", { name: "Shortcuts" })).toBeDefined();
+
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
+    expect(screen.queryByRole("region", { name: "Settings" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Preview" })).toBeDefined();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Settings" })).toBe(document.activeElement),
+    );
   });
 });
