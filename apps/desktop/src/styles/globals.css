@@ -131,6 +131,29 @@
 
   /* Letterbox behind the video preview, both themes. */
   --color-video-stage: #0d0d0d;
+
+  /*
+   * Region families: text and stroke colour plus a translucent surface for
+   * chips, overlay fills and timeline lanes. The four HUD regions and
+   * manual boxes have one family each; the four screen surfaces
+   * (scoreboard, death recap, spectating, match end) share the "screens"
+   * family. Colour is never the only cue: every chip carries its label.
+   * Chip text reaches 4.5:1 on its surface over the card and background
+   * colours, and every region colour 3:1 against them
+   * (src/styles/regions.test.ts).
+   */
+  --color-region-killfeed: #1869ad;
+  --color-region-killfeed-surface: rgba(24, 105, 173, 0.1);
+  --color-region-banner: #7453b0;
+  --color-region-banner-surface: rgba(116, 83, 176, 0.1);
+  --color-region-voice: #12736d;
+  --color-region-voice-surface: rgba(18, 115, 109, 0.1);
+  --color-region-chat: #8e5e14;
+  --color-region-chat-surface: rgba(142, 94, 20, 0.1);
+  --color-region-manual: #566270;
+  --color-region-manual-surface: rgba(86, 98, 112, 0.1);
+  --color-region-screens: #a8378f;
+  --color-region-screens-surface: rgba(168, 55, 143, 0.1);
 }
 
 :root {
@@ -201,6 +224,19 @@
   --color-destructive-foreground: #ffffff;
   --color-confirmation: rgba(70, 191, 114, 0.16);
   --color-confirmation-foreground: #87d9a4;
+
+  --color-region-killfeed: #8fc5ef;
+  --color-region-killfeed-surface: rgba(112, 174, 224, 0.16);
+  --color-region-banner: #bda5e6;
+  --color-region-banner-surface: rgba(166, 137, 218, 0.16);
+  --color-region-voice: #93d8d2;
+  --color-region-voice-surface: rgba(104, 196, 188, 0.16);
+  --color-region-chat: #efc58f;
+  --color-region-chat-surface: rgba(224, 174, 112, 0.16);
+  --color-region-manual: #b5c0cc;
+  --color-region-manual-surface: rgba(154, 166, 180, 0.14);
+  --color-region-screens: #eba2d8;
+  --color-region-screens-surface: rgba(220, 120, 190, 0.16);
 }
 
 @layer base {

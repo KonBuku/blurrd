@@ -242,6 +242,13 @@ the headless Radix UI primitives, and blurrd's own icons in
 `src/components/icons` (24 px grid, 1.5 stroke, like Lucide). Keyboard
 focus shows a 2 px accent ring on every control.
 
+Each region has a colour family (`--color-region-*`): one per HUD region
+and for manual boxes, and one shared by the four screen surfaces.
+`RegionChip` always shows the region's label next to its colour.
+`src/styles/regions.test.ts` checks that chip text reaches 4.5:1 and every
+region colour 3:1 in both themes, so change the tokens only together with
+that test passing.
+
 ```sh
 pnpm lint:typography  # reject Tailwind's default and fixed text sizes in apps/desktop/src
 ```
