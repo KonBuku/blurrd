@@ -176,10 +176,42 @@ pub fn write_clip(path: &Path, spec: &ClipSpec) {
     for (number, &pts) in spec.pts.iter().enumerate() {
         draw(&mut picture, number as u32);
         picture.set_pts(Some(pts));
+        // Each frame lasts until the next one (the last as long as the one
+        // before), so the container knows the duration of every frame.
+        let next = spec.pts.get(number + 1).copied();
+        let previous = number.checked_sub(1).map(|i| spec.pts[i]);
+        let duration = match (next, previous) {
+            (Some(next), _) => next - pts,
+            (None, Some(previous)) => pts - previous,
+            (None, None) => 1,
+        };
+        // SAFETY: setting the duration field of the frame owned here.
+        unsafe { (*picture.as_mut_ptr()).duration = duration };
         enc.send_frame(&picture).unwrap();
         drain(&mut enc, &mut out);
     }
     enc.send_eof().unwrap();
     drain(&mut enc, &mut out);
     out.write_trailer().unwrap();
+}
+
+/// Number of video packets the demuxer presents (not marked as discarded by
+/// an edit list), counted independently of blurrd's probe and decoder.
+pub fn presented_packets(path: &Path) -> u32 {
+    let mut input = format::input(path).unwrap();
+    let video = input
+        .streams()
+        .best(ffmpeg_the_third::media::Type::Video)
+        .unwrap()
+        .index();
+    let mut count = 0;
+    for item in input.packets() {
+        let (stream, packet) = item.unwrap();
+        // SAFETY: reading the flags of a valid packet.
+        let flags = unsafe { (*ffmpeg_the_third::codec::packet::Ref::as_ptr(&packet)).flags };
+        if stream.index() == video && flags & ffi::AV_PKT_FLAG_DISCARD == 0 {
+            count += 1;
+        }
+    }
+    count
 }
