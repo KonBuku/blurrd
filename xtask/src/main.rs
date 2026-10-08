@@ -4,11 +4,13 @@
 //! defined in `.cargo/config.toml`); `cargo xtask help` lists the tasks.
 //! Tasks are added by the milestones that need them: generating TypeScript
 //! bindings and JSON schemas, fetching the pinned FFmpeg build and staging
-//! its DLLs, and fetching the fonts of the synthetic test fixtures so far.
+//! its DLLs, fetching the fonts of the synthetic test fixtures and checking
+//! the local test recordings so far.
 
 mod codegen;
 mod ffmpeg;
 mod fonts;
+mod media;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -53,6 +55,22 @@ enum Task {
     /// other scripts for the synthetic HUD fixtures) into
     /// `tests/fonts/noto/`, verifying each SHA-256.
     FetchFonts,
+    /// Work with the local test recordings listed in
+    /// `tests/media/manifest.toml`.
+    Media {
+        #[command(subcommand)]
+        action: MediaAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MediaAction {
+    /// Check that every recording is present with its pinned SHA-256.
+    Verify {
+        /// The folder with the recordings (default: `BLURRD_TEST_MEDIA`).
+        #[arg(long, value_name = "DIR")]
+        media: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -67,6 +85,9 @@ fn main() -> ExitCode {
         }
         Task::StageDlls => ffmpeg::stage_dlls(&root),
         Task::FetchFonts => fonts::fetch(&root),
+        Task::Media {
+            action: MediaAction::Verify { media },
+        } => media::verify(media),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

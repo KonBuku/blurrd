@@ -25,6 +25,11 @@
 //!   (plan 11.3), with exactly the mask the blur applies.
 //! - [`proposals`] merges detector, OCR, slot and pixel-change boxes into
 //!   the dense proposals that goldens are reviewed from (plan 11.2).
+//! - [`media`] reads the committed media manifest (real recordings by id,
+//!   SHA-256, excerpt ranges, case tags and the held-out split) and checks
+//!   the recordings in `BLURRD_TEST_MEDIA`; [`golden`] reads reviewed
+//!   goldens of real excerpts, turns them into the same [`FrameTruth`] and
+//!   scores boxes against them with the same metrics.
 //!
 //! All geometry follows the measurements in the port spec (reference
 //! pixels of a 1920 × 1080 frame). The fonts are OFL-licensed stand-ins;
@@ -42,10 +47,12 @@
 
 pub mod background;
 pub mod font;
+pub mod golden;
 pub mod hud;
 pub mod image;
 pub mod layout;
 pub mod mask;
+pub mod media;
 pub mod metrics;
 pub mod names;
 mod paint;

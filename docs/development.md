@@ -103,6 +103,32 @@ The download source and checksums are pinned in `tests/fonts/fonts.toml`.
 Tests that need these fonts skip with a message when they are missing;
 CI sets `BLURRD_REQUIRE_FONTS=1`, which turns the skip into a failure.
 
+### Real recordings, held-out split and goldens
+
+`tests/media/manifest.toml` lists the real recordings the local tests use:
+id, file name, SHA-256 and frame count of each clip, the excerpts E1 to
+E18 (frame ranges and case tags) and the split into tuning and held-out
+clips. It holds no pixels and no names. Check a local copy of the
+recordings against it with
+
+```sh
+cargo xtask media verify                 # the folder in BLURRD_TEST_MEDIA
+cargo xtask media verify --media <DIR>
+```
+
+The ten held-out clips are never used to tune a detector, and every gate
+of the architecture plan (section 11.3) must also pass on them; the split
+is fixed, and a test freezes the list.
+
+Goldens are the reviewed ground truth of the excerpts: keyframed glyph
+extents of every name and the portrait rectangles, without any text
+(`blurrd-golden/1`, read and written by `blurrd_testkit::golden`). They
+live next to the recordings in `<BLURRD_TEST_MEDIA>/goldens/<id>.golden.json`
+and are never committed. `blurrd_testkit::golden::evaluate` scores the
+boxes of any frame source against a golden with the same metrics as the
+synthetic fixtures, and `missing_items` is the missing-item audit: OCR text
+proposals that match no golden item.
+
 ### Generated TypeScript bindings and JSON Schemas
 
 The types in `blurrd-core` are the single source of truth for the IPC

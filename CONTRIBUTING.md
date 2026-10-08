@@ -29,7 +29,8 @@ material. They never enter the repository, not even temporarily:
   rendered with an OFL-licensed font at test time.
 - Tests that need real footage read the folder named by the
   `BLURRD_TEST_MEDIA` environment variable and are skipped when it is not
-  set. Use your own recordings.
+  set. Use your own recordings. `tests/media/manifest.toml` identifies the
+  maintainers' recordings by checksum only.
 
 ## Development setup
 

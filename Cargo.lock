@@ -208,6 +208,11 @@ dependencies = [
  "ab_glyph",
  "blurrd-blur",
  "blurrd-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -1621,6 +1626,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "blurrd-core",
+ "blurrd-testkit",
  "clap",
  "schemars",
  "serde",

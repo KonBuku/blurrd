@@ -1,0 +1,376 @@
+# Real recordings used by the local golden tests and benchmarks
+# (architecture plan 11.2 and 11.7). The recordings themselves are never
+# committed: they contain other players' names and third-party
+# copyrighted material. Tests and `cargo xtask media verify` read them
+# from the folder in BLURRD_TEST_MEDIA and skip when it is not set.
+#
+# This file holds only identifiers, file names, SHA-256 checksums, frame
+# counts, excerpt frame ranges, case tags and the split: no pixels, no
+# names. Frame numbers are presentation-order indices (inclusive ranges).
+#
+# Held-out clips (`held_out = true`) are never used to tune a detector;
+# every gate of plan 11.3 must also pass on them. Their excerpts are
+# held out too. The split is fixed: do not move a clip between the sets.
+# Soak clips are run in full to measure false positives and long-lived
+# tracking.
+
+schema = "blurrd-media/1"
+
+[[clip]]
+id = "06.16-18.26"
+file = "VALORANT_replay_2024.06.16-18.26.mp4"
+sha256 = "019d60f64f9c1077f7717911a6c4ca86bdafd70f63a7d5616a98adcb1c8cd407"
+frames = 3005
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.16-18.42"
+file = "VALORANT_replay_2024.06.16-18.42.mp4"
+sha256 = "3eb799f44340507b7564ac1f7b79245d9ff44135f6024fb2ae73029e24fd7f2f"
+frames = 3601
+held_out = false
+soak = true
+
+[[clip]]
+id = "06.18-20.46"
+file = "VALORANT_replay_2024.06.18-20.46.mp4"
+sha256 = "423bad80f83f1fe509780c8ffa317673d41aef72bb958877c3bafec2cb7ce8f7"
+frames = 3601
+held_out = true
+soak = false
+
+[[clip]]
+id = "06.18-20.51"
+file = "VALORANT_replay_2024.06.18-20.51.mp4"
+sha256 = "70eb362ca21e46cd9fcc50e2d598a3535f1773e20b2ff1e12a28b81a96124e60"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.18-20.59"
+file = "VALORANT_replay_2024.06.18-20.59.mp4"
+sha256 = "fced260e3a00b4426bb30844a147e8adc49f1d9544126df3838d223361125872"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.21-18.38"
+file = "VALORANT_replay_2024.06.21-18.38.mp4"
+sha256 = "742bd873132d9eabeae657e8a173c0a78c8488ed5243b253c69f135ce3c31ea4"
+frames = 3601
+held_out = true
+soak = false
+
+[[clip]]
+id = "06.21-18.41"
+file = "VALORANT_replay_2024.06.21-18.41.mp4"
+sha256 = "56560f0b8a36425b1dba3199b695ef89bafe05757cc649660cb7071de520fbd9"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.21-18.42"
+file = "VALORANT_replay_2024.06.21-18.42.mp4"
+sha256 = "96db578f46cefc86470aea3dcf95e36fe444258d2c78ffb957c98434e15d1e72"
+frames = 2840
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.22-00.38"
+file = "VALORANT_replay_2024.06.22-00.38.mp4"
+sha256 = "6a0ca0e8474ef0b588876504cce5d99889816309b5bcdb53d50ca3aea231dd61"
+frames = 3601
+held_out = true
+soak = false
+
+[[clip]]
+id = "06.22-01.09"
+file = "VALORANT_replay_2024.06.22-01.09.mp4"
+sha256 = "31e578832519084ca25faeeebfd7ce30626bcc81876f72ca988dd0a465767699"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.22-01.21"
+file = "VALORANT_replay_2024.06.22-01.21.mp4"
+sha256 = "87b55d3894ba8078168c00afb25f6fd0ebbaa4b35af4ba902ddefc40760370bb"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.22-11.50"
+file = "VALORANT_replay_2024.06.22-11.50.mp4"
+sha256 = "9100006b488a6d88e3fd40b76d27c8743e04e24cb95b90598a45d1790bf4a0ca"
+frames = 3601
+held_out = false
+soak = true
+
+[[clip]]
+id = "06.22-17.17"
+file = "VALORANT_replay_2024.06.22-17.17.mp4"
+sha256 = "8269a3f56c1638d85c50d7a036146e3c6961bde9f04fe9215dd8111ef84df62f"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.22-17.56"
+file = "VALORANT_replay_2024.06.22-17.56.mp4"
+sha256 = "05abe5ebac539a35095775c34935c094e7a3d6e051373737c69ede7326c3c2a3"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.22-17.57"
+file = "VALORANT_replay_2024.06.22-17.57.mp4"
+sha256 = "bb586ac213d887beab89dae9e82bd69f0f8754a0a6455602f4207eccc345499a"
+frames = 3229
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.22-18.36"
+file = "VALORANT_replay_2024.06.22-18.36.mp4"
+sha256 = "b44c60edd16a7fb3aacd6fa200868422df664b10c69b98029657ccdaedf73c8e"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.23-12.59"
+file = "VALORANT_replay_2024.06.23-12.59.mp4"
+sha256 = "0ea3e4537d5a67858085c4561177ded31943625de3e878010c60d44b61965338"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "06.23-13.59"
+file = "VALORANT_replay_2024.06.23-13.59.mp4"
+sha256 = "13c4d17dd07c41e311da38fc84e304e817b33439705a108ad2dc77bbed72ae46"
+frames = 3601
+held_out = true
+soak = false
+
+[[clip]]
+id = "07.15-18.03"
+file = "VALORANT_replay_2024.07.15-18.03.mp4"
+sha256 = "be6339dd439d40aeb877f8cded3fb4324cda628683efbc2d81067fcc9a2c49bc"
+frames = 3270
+held_out = true
+soak = false
+
+[[clip]]
+id = "07.15-20.38"
+file = "VALORANT_replay_2024.07.15-20.38.mp4"
+sha256 = "e794397d7573de0c580db2ff03b5a886c99714d34c35668ea6b9c7ff5409c477"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "07.15-20.51"
+file = "VALORANT_replay_2024.07.15-20.51.mp4"
+sha256 = "8ba2a94c4f13241a21e7a06f46316ec22a9ad8ac0567b4381d66b49d213c162d"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "07.15-20.54"
+file = "VALORANT_replay_2024.07.15-20.54.mp4"
+sha256 = "36fb84d05bbc96a248608c15f78d000158f88290218bb67b11c4897fc3194f03"
+frames = 3601
+held_out = true
+soak = false
+
+[[clip]]
+id = "07.15-20.57"
+file = "VALORANT_replay_2024.07.15-20.57.mp4"
+sha256 = "7c0d257455ea8eb61067a2021b43f6806b4960416ae8bd5f62e66f65e7f20eb0"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "07.21-13.39"
+file = "VALORANT_replay_2024.07.21-13.39.mp4"
+sha256 = "05ca9045fba0c599dc36fd8ac8a41dd4c2e52edb48d4462faed98fbce94a1198"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "07.21-13.52"
+file = "VALORANT_replay_2024.07.21-13.52.mp4"
+sha256 = "5682d532beeb8b749a1137e617e7d3a56fdd0400e10fb61b36beafa6434ef8cd"
+frames = 3601
+held_out = true
+soak = true
+
+[[clip]]
+id = "07.21-14.12"
+file = "VALORANT_replay_2024.07.21-14.12.mp4"
+sha256 = "70d9478d4be6f980aaa7bdefb73b80cac2f9ba5d41ec682c9996af009b0354c8"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "07.21-14.17"
+file = "VALORANT_replay_2024.07.21-14.17.mp4"
+sha256 = "5355d1bc454e08ed35cf455329b37ac33439d0fa31f4f20290e0539f7d759e57"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "07.25-15.40"
+file = "VALORANT_replay_2024.07.25-15.40.mp4"
+sha256 = "3e798714f42f5b30fddfe3e637b7b2e5276f0d144ebeadb36863b6f25475df28"
+frames = 3601
+held_out = false
+soak = false
+
+[[clip]]
+id = "07.25-15.49"
+file = "VALORANT_replay_2024.07.25-15.49.mp4"
+sha256 = "e3df739b84417615a6f3a8b8cde7c7373a7c529f9a382505b3b628c57d68ac9e"
+frames = 3601
+held_out = true
+soak = false
+
+[[clip]]
+id = "07.25-15.50"
+file = "VALORANT_replay_2024.07.25-15.50.mp4"
+sha256 = "fdfbe03e8fff59c29dc684af8d53108e2fd8dbb0af73e2b2a63040d047179d80"
+frames = 3246
+held_out = true
+soak = false
+
+[[clip]]
+id = "07.25-16.01"
+file = "VALORANT_replay_2024.07.25-16.01.mp4"
+sha256 = "e1e35a20e793cbfb942d6149c7ff26ca2d66f8a257a3a58dda88374260d9df56"
+frames = 3012
+held_out = true
+soak = false
+
+# Excerpts E1-E18 of the port spec (section 11.5): inclusive ranges of
+# the clip's presentation frames (start second x 60 to end second x 60 - 1).
+
+[[excerpt]]
+id = "E1"
+clip = "06.21-18.42"
+frames = [[2400, 2759]]
+cases = ["killfeed", "killfeed-stack", "banner", "banner-settle", "banner-feed-overlap"]
+
+[[excerpt]]
+id = "E2"
+clip = "06.22-00.38"
+frames = [[3150, 3269]]
+cases = ["banner", "banner-two-word"]
+
+[[excerpt]]
+id = "E3"
+clip = "07.15-20.57"
+frames = [[3012, 3119]]
+cases = ["banner", "banner-bright"]
+
+[[excerpt]]
+id = "E4"
+clip = "07.25-15.50"
+frames = [[2784, 2879]]
+cases = ["banner", "banner-fx"]
+
+[[excerpt]]
+id = "E5"
+clip = "06.22-01.09"
+frames = [[2820, 2879]]
+cases = ["negative-ult-ready"]
+
+[[excerpt]]
+id = "E6"
+clip = "07.15-20.38"
+frames = [[1530, 1589], [3048, 3095]]
+cases = ["killfeed-wipe-in", "negative-ult-ready"]
+
+[[excerpt]]
+id = "E7"
+clip = "07.21-13.39"
+frames = [[1650, 1979]]
+cases = ["killfeed", "killfeed-self-kill"]
+
+[[excerpt]]
+id = "E8"
+clip = "07.25-15.49"
+frames = [[2688, 2819]]
+cases = ["chat", "chat-low-contrast", "killfeed-self-kill"]
+
+[[excerpt]]
+id = "E9"
+clip = "06.22-17.56"
+frames = [[1950, 2669]]
+cases = ["killfeed-wall", "chat", "chat-fade", "voice", "voice-blink", "voice-stack"]
+
+[[excerpt]]
+id = "E10"
+clip = "06.22-17.57"
+frames = [[2700, 3029]]
+cases = ["killfeed", "killfeed-multikill", "killfeed-flash", "banner", "voice", "world-tags"]
+
+[[excerpt]]
+id = "E11"
+clip = "07.25-16.01"
+frames = [[780, 1169]]
+cases = ["voice", "voice-pop"]
+
+[[excerpt]]
+id = "E12"
+clip = "06.21-18.41"
+frames = [[2460, 3239]]
+cases = ["chat", "chat-fade", "chat-push-up", "world-tags"]
+
+[[excerpt]]
+id = "E13"
+clip = "06.21-18.38"
+frames = [[3330, 3449]]
+cases = ["chat", "chat-wrap", "chat-system"]
+
+[[excerpt]]
+id = "E14"
+clip = "06.22-18.36"
+frames = [[2460, 3059]]
+cases = ["chat", "chat-stack", "chat-two-word", "chat-low-contrast"]
+
+[[excerpt]]
+id = "E15"
+clip = "07.21-14.12"
+frames = [[3030, 3095]]
+cases = ["chat", "chat-broadcast"]
+
+[[excerpt]]
+id = "E16"
+clip = "06.23-13.59"
+frames = [[2490, 2609]]
+cases = ["chat", "chat-team"]
+
+[[excerpt]]
+id = "E17"
+clip = "07.21-14.17"
+frames = [[3120, 3239]]
+cases = ["banner", "negative-location"]
+
+[[excerpt]]
+id = "E18"
+clip = "06.23-12.59"
+frames = [[3090, 3239]]
+cases = ["banner", "chat", "chat-fade"]
