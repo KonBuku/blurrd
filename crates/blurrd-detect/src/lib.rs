@@ -15,6 +15,8 @@
 //!   episode (settle model).
 //! - [`VoiceDetector`] ([`voice`]): speaker names in the voice-chat entries
 //!   of one frame.
+//! - [`ChatDetector`] ([`chat`]): sender names in the text-chat lines of
+//!   one frame.
 //!
 //! Temporal models ([`temporal`]):
 //!
@@ -44,6 +46,7 @@
 )]
 
 pub mod banner;
+pub mod chat;
 pub mod classes;
 pub mod components;
 mod detection;
@@ -56,6 +59,7 @@ pub mod track;
 pub mod voice;
 
 pub use banner::{BannerDetector, BannerTracker};
+pub use chat::ChatDetector;
 pub use classes::{Class, ClassParams, PixelClasses, hsv};
 pub use detection::{DetectError, Detection};
 pub use image::{BitMask, GrayImage, ImageError, RgbView};
