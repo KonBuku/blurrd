@@ -30,6 +30,7 @@ const ITEMS: readonly QueueItem[] = STATUSES.map((status, index) => {
     name: `match_${String(index + 1).padStart(2, "0")}.mp4`,
     media: status.kind === "probing" ? null : fakeMedia(path),
     status,
+    output: null,
     added: index + 1,
   };
 });

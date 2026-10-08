@@ -2,8 +2,10 @@ import { toast } from "sonner";
 import { create } from "zustand";
 
 import type { Appearance } from "@/bindings/Appearance";
+import type { General } from "@/bindings/General";
 import { openSettings, type SettingsFile } from "@/ipc/settings";
 import { applyAppearance, cacheAppearance, cachedAppearance } from "@/lib/appearance";
+import { DEFAULT_GENERAL } from "@/lib/general";
 import { logWarning } from "@/lib/log";
 
 /** Where the settings come from. */
@@ -19,10 +21,13 @@ export type SettingsStatus =
 export interface SettingsState {
   readonly status: SettingsStatus;
   readonly appearance: Appearance;
+  readonly general: General;
   /** Loads the settings file and applies it. */
   readonly load: () => Promise<void>;
   /** Changes appearance fields, applies them at once and saves them. */
   readonly updateAppearance: (patch: Partial<Appearance>) => void;
+  /** Changes general fields and saves them. */
+  readonly updateGeneral: (patch: Partial<General>) => void;
 }
 
 /** The open settings file, once loaded. */
@@ -31,6 +36,20 @@ let file: SettingsFile | null = null;
 let stopFollowingSystem: () => void = () => undefined;
 /** Saves run one after another, so the last change is the one on disk. */
 let saving: Promise<void> = Promise.resolve();
+
+/** Queues a save after the previous ones; a failure is logged and shown once. */
+function persist(write: (target: SettingsFile) => Promise<void>) {
+  const target = file;
+  if (!target?.writable) return;
+  saving = saving
+    .then(() => write(target))
+    .catch((error: unknown) => {
+      logWarning("saving the settings failed", error);
+      toast.error("Settings could not be saved", {
+        description: "The change applies until blurrd closes.",
+      });
+    });
+}
 
 /** Applies an appearance to the document and caches it for the next start. */
 function apply(appearance: Appearance) {
@@ -47,6 +66,7 @@ function apply(appearance: Appearance) {
 export const useSettingsStore = create<SettingsState>()((set, get) => ({
   status: "loading",
   appearance: cachedAppearance(),
+  general: DEFAULT_GENERAL,
 
   load: async () => {
     try {
@@ -57,23 +77,24 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       return;
     }
     apply(file.appearance);
-    set({ appearance: file.appearance, status: file.writable ? "ready" : "read-only" });
+    set({
+      appearance: file.appearance,
+      general: file.general,
+      status: file.writable ? "ready" : "read-only",
+    });
   },
 
   updateAppearance: (patch) => {
     const appearance = { ...get().appearance, ...patch };
     apply(appearance);
     set({ appearance });
-    const target = file;
-    if (!target?.writable) return;
-    saving = saving
-      .then(() => target.saveAppearance(appearance))
-      .catch((error: unknown) => {
-        logWarning("saving the settings failed", error);
-        toast.error("Settings could not be saved", {
-          description: "The change applies until blurrd closes.",
-        });
-      });
+    persist((target) => target.saveAppearance(appearance));
+  },
+
+  updateGeneral: (patch) => {
+    const general = { ...get().general, ...patch };
+    set({ general });
+    persist((target) => target.saveGeneral(general));
   },
 }));
 

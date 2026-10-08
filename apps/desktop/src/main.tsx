@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { forwardUncaughtErrors } from "./lib/log";
+import { startSession } from "./store/session";
 import { initialAppearance, useSettingsStore } from "./store/settings";
 import "./styles/globals.css";
 
@@ -30,9 +31,13 @@ if (import.meta.env.MODE === "mock") {
 
 forwardUncaughtErrors();
 // The cached appearance paints the first frame; the settings file then
-// loads in the background and replaces it if it differs.
+// loads in the background and replaces it if it differs. The saved queue
+// is restored once the settings say whether to.
 initialAppearance();
-void useSettingsStore.getState().load();
+void useSettingsStore
+  .getState()
+  .load()
+  .then(() => startSession());
 
 // Icons use a 1.5 px stroke everywhere; components set only their size.
 createRoot(container).render(

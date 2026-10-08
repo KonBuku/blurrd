@@ -45,6 +45,12 @@ export type QueueStatus =
 /** Kinds of {@link QueueStatus}. */
 export type QueueStatusKind = QueueStatus["kind"];
 
+/** Statuses that survive a restart (no job is running). */
+export type RestingStatus = Exclude<
+  QueueStatus,
+  { kind: "probing" | "analyzing" | "exporting" | "verifying" }
+>;
+
 /** Colour role of a status glyph; the text always says the same. */
 export type StatusTone = "neutral" | "muted" | "success" | "warning" | "destructive";
 
@@ -154,6 +160,57 @@ export function statusProgress(status: QueueStatus): number | null | undefined {
       return status.passes > 0 ? (status.pass - 1) / status.passes : null;
     default:
       return undefined;
+  }
+}
+
+/**
+ * The status a file returns to when the app restarts while a job runs:
+ * an interrupted analysis is queued again, an interrupted export or
+ * verification leaves the analysed file ready.
+ */
+export function restingStatus(status: QueueStatus): RestingStatus {
+  switch (status.kind) {
+    case "probing":
+    case "analyzing":
+      return { kind: "queued" };
+    case "exporting":
+    case "verifying":
+      return { kind: "ready", boxes: null };
+    default:
+      return status;
+  }
+}
+
+/** A non-negative integer from untrusted JSON, or `null`. */
+function savedCount(field: unknown): number | null {
+  return typeof field === "number" && Number.isInteger(field) && field >= 0 ? field : null;
+}
+
+/**
+ * Reads a saved status from untrusted JSON (the session file); anything
+ * unknown or malformed reads as queued.
+ */
+export function parseRestingStatus(value: unknown): RestingStatus {
+  const raw = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  switch (raw.kind) {
+    case "ready":
+      return { kind: "ready", boxes: savedCount(raw.boxes) };
+    case "done":
+      return { kind: "done", verified: raw.verified === true };
+    case "warnings":
+      return { kind: "warnings", leaks: savedCount(raw.leaks) ?? 0 };
+    case "unverified":
+      return { kind: "unverified" };
+    case "failed":
+      return {
+        kind: "failed",
+        reason: typeof raw.reason === "string" && raw.reason !== "" ? raw.reason : "Failed",
+        detail: typeof raw.detail === "string" ? raw.detail : null,
+      };
+    case "canceled":
+      return { kind: "canceled" };
+    default:
+      return { kind: "queued" };
   }
 }
 

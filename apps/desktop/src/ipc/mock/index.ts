@@ -8,6 +8,10 @@ import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 import type { AppError } from "@/bindings/AppError";
+import type { Capabilities } from "@/bindings/Capabilities";
+import type { SessionEntry } from "@/ipc/commands";
+
+import { MOCK_CAPABILITIES } from "./capabilities";
 
 import { createEventBus } from "./events";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
@@ -44,6 +48,15 @@ export interface MockBackend {
   readonly drop: (paths: readonly string[]) => Promise<void>;
   /** Simulates a second app start with `paths` on its command line. */
   readonly secondInstance: (paths: readonly string[]) => Promise<void>;
+  /** What `get_capabilities` reports once the background probe is done. */
+  capabilities: Capabilities;
+  /**
+   * How long the background probe runs after the backend was installed,
+   * in milliseconds; until then `probe_state` is `Pending`.
+   */
+  capabilitiesDelayMs: number;
+  /** The saved queue as last written, or `null` before the first save. */
+  readonly sessionFile: () => SessionEntry[] | null;
 }
 
 /** Name of the settings file, as opened by the real shell. */
@@ -55,6 +68,15 @@ const SETTINGS_RID = 1;
  * the same tab, like the real file survives restarts.
  */
 const DISK_KEY = "blurrd.mock.settings";
+/** Session storage key of the mocked `session.json` (the saved queue). */
+const SESSION_KEY = "blurrd.mock.session";
+/**
+ * Session storage key that overrides the probe duration from the first
+ * paint on (end-to-end tests set it before the page loads).
+ */
+const PROBE_DURATION_KEY = "blurrd.mock.capabilitiesDelayMs";
+/** Default duration of the mocked background probe, in milliseconds. */
+const PROBE_DURATION_MS = 800;
 
 /** The object members of a store command's arguments. */
 interface StoreArgs {
@@ -103,7 +125,14 @@ export function installMockBackend(): MockBackend {
       await emit("tauri://drag-drop", { paths, position: DRAG_POSITION });
     },
     secondInstance: (paths) => emit("second-instance", { paths }),
+    capabilities: MOCK_CAPABILITIES,
+    capabilitiesDelayMs: Number(sessionStorage.getItem(PROBE_DURATION_KEY) ?? PROBE_DURATION_MS),
+    sessionFile: () => {
+      const text = sessionStorage.getItem(SESSION_KEY);
+      return text === null ? null : (JSON.parse(text) as SessionEntry[]);
+    },
   };
+  const installedAt = performance.now();
   const store = (cmd: string, args: StoreArgs) => {
     if (cmd === "plugin:store|get_store") return args.path === SETTINGS_FILE ? SETTINGS_RID : null;
     if (args.rid !== SETTINGS_RID) throw new Error(`mock backend: unknown store ${args.rid}`);
@@ -145,6 +174,15 @@ export function installMockBackend(): MockBackend {
         return probeMedia((args as { paths: string[] }).paths, backend.folders);
       case "plugin:dialog|open":
         return backend.dialogResult;
+      case "get_capabilities":
+        return performance.now() - installedAt < backend.capabilitiesDelayMs
+          ? { ...backend.capabilities, probe_state: "Pending", encoders: [] }
+          : backend.capabilities;
+      case "get_session":
+        return backend.sessionFile() ?? [];
+      case "save_session":
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify((args as { entries: unknown }).entries));
+        return null;
       case "plugin:window|minimize":
       case "plugin:window|start_dragging":
       case "plugin:log|log":

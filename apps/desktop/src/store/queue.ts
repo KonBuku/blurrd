@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
+import type { AppError } from "@/bindings/AppError";
 import type { MediaInfo } from "@/bindings/MediaInfo";
-import { isProbed, type ProbeOutcome } from "@/ipc/commands";
+import { isProbed, type ProbeOutcome, type SessionEntry } from "@/ipc/commands";
 import { baseName, looksLikeFile, pathKey } from "@/lib/media";
 import { isFinished, statusRank, type QueueStatus } from "@/lib/queue-status";
 
@@ -16,6 +17,8 @@ export interface QueueItem {
   /** Media facts; `null` while the file is being read. */
   readonly media: MediaInfo | null;
   readonly status: QueueStatus;
+  /** The exported file, once there is one. */
+  readonly output: string | null;
   /** Order of addition, for "Sort by date added". */
   readonly added: number;
 }
@@ -69,6 +72,17 @@ export interface QueueState {
   ) => ProbeResolution;
   /** Removes the placeholders of `pending` (the probe failed as a whole). */
   readonly dropPending: (pending: readonly string[]) => void;
+  /**
+   * Puts the files of a saved session in front of the queue, with their
+   * saved status and no media facts yet; files already queued are
+   * skipped. Returns the paths that were added.
+   */
+  readonly restore: (entries: readonly SessionEntry[]) => string[];
+  /**
+   * Fills in the media facts of restored files from a fresh probe. A file
+   * that can no longer be read is marked failed with the reason.
+   */
+  readonly refresh: (outcomes: readonly ProbeOutcome[]) => void;
   readonly remove: (ids: Iterable<string>) => void;
   readonly removeSelected: () => void;
   /** Removes every item in an end state (done, failed, canceled, …). */
@@ -96,8 +110,15 @@ function pendingItem(path: string): QueueItem {
     name: baseName(path),
     media: null,
     status: { kind: "probing", folder: !looksLikeFile(path) },
+    output: null,
     added: addedCounter,
   };
+}
+
+/** Status of a restored file whose probe failed. */
+function unreadable(error: AppError): QueueStatus {
+  const reason = error.kind === "NotFound" ? "File not found" : "File can't be read";
+  return { kind: "failed", reason, detail: error.message };
 }
 
 /** Items the filter shows, in list order. */
@@ -171,6 +192,7 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
         name: baseName(outcome.path),
         media: outcome.media,
         status: { kind: "queued" },
+        output: null,
         added: order.get(id) ?? addedCounter,
       });
       added.push(outcome.path);
@@ -190,6 +212,41 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
         state.items.filter((item) => !pendingIds.has(item.id)),
       ),
     );
+  },
+
+  restore: (entries) => {
+    const known = new Set(get().items.map((item) => item.id));
+    const restored: QueueItem[] = [];
+    for (const entry of entries) {
+      const id = pathKey(entry.path);
+      if (known.has(id)) continue;
+      known.add(id);
+      addedCounter += 1;
+      restored.push({
+        id,
+        path: entry.path,
+        name: baseName(entry.path),
+        media: null,
+        status: entry.status,
+        output: entry.output,
+        added: addedCounter,
+      });
+    }
+    if (restored.length > 0) set((state) => ({ items: [...restored, ...state.items] }));
+    return restored.map((item) => item.path);
+  },
+
+  refresh: (outcomes) => {
+    const byId = new Map(outcomes.map((outcome) => [pathKey(outcome.path), outcome]));
+    set((state) => ({
+      items: state.items.map((item) => {
+        const outcome = byId.get(item.id);
+        if (!outcome) return item;
+        return isProbed(outcome)
+          ? { ...item, media: outcome.media }
+          : { ...item, status: unreadable(outcome.error) };
+      }),
+    }));
   },
 
   remove: (ids) => {

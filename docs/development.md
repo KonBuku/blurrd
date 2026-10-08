@@ -305,11 +305,37 @@ axe scan in both themes, and drops 200 files to check that the list keeps
 fewer than 30 rows in the DOM and scrolls at the idle page's frame rate
 with no long tasks.
 
+While the queue is empty, the preview frame shows the empty state
+(`src/features/empty/EmptyState.tsx`): Browse files and Add folder, the
+accepted formats, the GPU card and a dismissible getting-started checklist
+(dismissal kept in local storage). The GPU card
+(`src/features/gpu/GpuStatusCard.tsx`, also in the queue footer) renders
+at once with "Probing GPU…" and polls `get_capabilities` through TanStack
+Query (`src/lib/query.ts`) every 500 ms until the backend reports the
+probe as ready; `src/lib/gpu.ts` turns the capabilities into the GPU, CPU
+fallback or no-encoder state and the capability chips.
+
+`src/store/session.ts` saves the queue (path, resting status, output)
+300 ms after every change through `save_session` and restores it with
+`get_session` on start, then probes the restored files again; a file that
+is gone is marked failed ("File not found"). Running jobs are saved as
+their resting status (an interrupted analysis is queued again, an
+interrupted export leaves the file ready). Settings › General › "Restore
+the queue" switches this off; the saved queue is then cleared.
+`e2e/session.spec.ts` covers restore after a reload, every saved status
+including UNVERIFIED, the setting, the GPU card from "probing" to the
+results with the first paint before the probe ends, the empty state and
+axe scans.
+
 The mock backend (`src/ipc/mock`) has a small fake file system for this:
 `window.blurrdMock.dialogResult` is what the next dialog returns,
 `folders` maps folder paths to their files, `drop()`, `dragEnter()`,
 `dragLeave()` and `secondInstance()` emit the events of the real shell, and
-`probeError` makes the probe fail.
+`probeError` makes the probe fail. It reports an RTX 40 machine whose
+probe takes `capabilitiesDelayMs` (800 ms; session storage
+`blurrd.mock.capabilitiesDelayMs` sets it before the page loads) and keeps
+the saved queue in session storage (`sessionFile()`), so a reload behaves
+like a restart.
 
 ### Design tokens and typography
 

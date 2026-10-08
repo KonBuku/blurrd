@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   isFinished,
   isRunning,
+  parseRestingStatus,
+  restingStatus,
   statusProgress,
   statusRank,
   statusText,
@@ -66,5 +68,45 @@ describe("queue status", () => {
     const ranks = CASES.map(([status]) => statusRank(status));
     expect(Math.min(...ranks)).toBe(statusRank({ kind: "failed", reason: "", detail: null }));
     expect(statusRank({ kind: "unverified" })).toBeLessThan(statusRank({ kind: "queued" }));
+  });
+
+  it("puts interrupted jobs back to rest", () => {
+    expect(restingStatus({ kind: "probing", folder: false })).toEqual({ kind: "queued" });
+    expect(restingStatus({ kind: "analyzing", progress: 0.4, fps: 1 })).toEqual({ kind: "queued" });
+    expect(restingStatus({ kind: "exporting", progress: 0.4, fps: 1, etaMs: 1 })).toEqual({
+      kind: "ready",
+      boxes: null,
+    });
+    expect(restingStatus({ kind: "verifying", pass: 1, passes: 3 })).toEqual({
+      kind: "ready",
+      boxes: null,
+    });
+    expect(restingStatus({ kind: "unverified" })).toEqual({ kind: "unverified" });
+  });
+
+  it("reads saved statuses defensively", () => {
+    expect(parseRestingStatus({ kind: "ready", boxes: 12 })).toEqual({ kind: "ready", boxes: 12 });
+    expect(parseRestingStatus({ kind: "ready", boxes: -1 })).toEqual({
+      kind: "ready",
+      boxes: null,
+    });
+    expect(parseRestingStatus({ kind: "done", verified: "yes" })).toEqual({
+      kind: "done",
+      verified: false,
+    });
+    expect(parseRestingStatus({ kind: "warnings", leaks: 2.5 })).toEqual({
+      kind: "warnings",
+      leaks: 0,
+    });
+    expect(parseRestingStatus({ kind: "unverified" })).toEqual({ kind: "unverified" });
+    expect(parseRestingStatus({ kind: "failed", reason: "" })).toEqual({
+      kind: "failed",
+      reason: "Failed",
+      detail: null,
+    });
+    expect(parseRestingStatus({ kind: "canceled" })).toEqual({ kind: "canceled" });
+    // Running states never come from a saved file; they read as queued.
+    expect(parseRestingStatus({ kind: "analyzing" })).toEqual({ kind: "queued" });
+    expect(parseRestingStatus("done")).toEqual({ kind: "queued" });
   });
 });

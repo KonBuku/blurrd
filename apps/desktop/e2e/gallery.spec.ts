@@ -27,6 +27,8 @@ test.describe("gallery screenshots", { tag: "@screenshot" }, () => {
       await page.setViewportSize({ width: 1024, height: 680 });
       await page.goto("/");
       await expect(page.getByRole("banner")).toBeVisible();
+      // The GPU card finishes probing before the screenshot.
+      await expect(page.getByText("GPU ready", { exact: true })).toBeVisible();
       await expect(page).toHaveScreenshot(`shell-${theme}.png`);
     });
 

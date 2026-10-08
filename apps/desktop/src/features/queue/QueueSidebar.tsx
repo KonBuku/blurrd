@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { GpuStatusCard } from "@/features/gpu/GpuStatusCard";
 import { browseFiles, browseFolder } from "@/features/import/import";
 import { formatCount } from "@/lib/media";
 import { isFinished } from "@/lib/queue-status";
@@ -104,6 +105,7 @@ export function QueueSidebar({ open, width, resizing }: QueueSidebarProps) {
         ) : (
           <QueueList items={shown} />
         )}
+        <GpuStatusCard variant="compact" className="shrink-0" />
       </div>
     </aside>
   );

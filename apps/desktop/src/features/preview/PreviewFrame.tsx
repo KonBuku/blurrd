@@ -5,9 +5,11 @@ import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EmptyState } from "@/features/empty/EmptyState";
 import { Frame, FrameHeader, FrameTitle } from "@/features/shell/Frame";
 import { INSPECTOR_ID } from "@/features/inspector/Inspector";
 import { SHORTCUTS } from "@/lib/shortcuts";
+import { useQueueStore } from "@/store/queue";
 
 /** Id of the inspector toggle in the preview header. */
 export const INSPECTOR_TOGGLE_ID = "inspector-toggle";
@@ -21,11 +23,13 @@ export interface PreviewFrameProps {
 
 /**
  * The preview frame: a header with the inspector toggle and the stage
- * below it. Without a recording the stage shows the welcome message.
+ * below it. With an empty queue the stage shows the empty state (design
+ * 8.2), otherwise the welcome message.
  */
 export function PreviewFrame({ inspectorShown, onToggleInspector }: PreviewFrameProps) {
   const label = inspectorShown ? "Hide inspector" : "Show inspector";
   const { keys } = SHORTCUTS.toggleInspector;
+  const queueEmpty = useQueueStore((state) => state.items.length === 0);
 
   return (
     <Frame aria-labelledby="preview-title" className="flex-1">
@@ -53,16 +57,20 @@ export function PreviewFrame({ inspectorShown, onToggleInspector }: PreviewFrame
           </TooltipContent>
         </Tooltip>
       </FrameHeader>
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-        <img src={brandIcon} alt="" className="size-16 rounded-2xl dark:hidden" />
-        <img src={brandIconLight} alt="" className="hidden size-16 rounded-2xl dark:block" />
-        <div className="flex flex-col gap-1">
-          <h1 className="text-ui-lg font-medium">Blur player names in your clips</h1>
-          <p className="text-ui-base text-foreground-subtle">
-            Everything runs on this PC. Nothing is uploaded.
-          </p>
+      {queueEmpty ? (
+        <EmptyState />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+          <img src={brandIcon} alt="" className="size-16 rounded-2xl dark:hidden" />
+          <img src={brandIconLight} alt="" className="hidden size-16 rounded-2xl dark:block" />
+          <div className="flex flex-col gap-1">
+            <h1 className="text-ui-lg font-medium">Blur player names in your clips</h1>
+            <p className="text-ui-base text-foreground-subtle">
+              Everything runs on this PC. Nothing is uploaded.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
     </Frame>
   );
 }

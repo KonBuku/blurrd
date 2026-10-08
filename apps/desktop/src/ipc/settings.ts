@@ -9,8 +9,10 @@
 import { getStore, type Store } from "@tauri-apps/plugin-store";
 
 import type { Appearance } from "@/bindings/Appearance";
+import type { General } from "@/bindings/General";
 import type { Settings } from "@/bindings/Settings";
 import { parseAppearance } from "@/lib/appearance";
+import { parseGeneral } from "@/lib/general";
 
 /** File name, as opened by the Rust side (`SETTINGS_FILE`). */
 const FILE = "settings.json";
@@ -23,6 +25,8 @@ const REVISION = 1;
 export interface SettingsFile {
   /** Appearance, defaults filled in. */
   readonly appearance: Appearance;
+  /** General behaviour, defaults filled in. */
+  readonly general: General;
   /**
    * Whether the file may be written. A file of another schema major
    * (written by a newer blurrd) is only read, never overwritten.
@@ -30,6 +34,8 @@ export interface SettingsFile {
   readonly writable: boolean;
   /** Replaces the appearance section and writes the file. */
   saveAppearance(appearance: Appearance): Promise<void>;
+  /** Replaces the general section and writes the file. */
+  saveGeneral(general: General): Promise<void>;
 }
 
 /** Writes one top-level section together with the schema header. */
@@ -55,16 +61,20 @@ export async function openSettings(): Promise<SettingsFile> {
   const schema = await store.get<unknown>("schema");
   const writable = schema === undefined || schema === SCHEMA;
   const appearance = parseAppearance(await store.get<unknown>("appearance"));
+  const general = parseGeneral(await store.get<unknown>("general"));
+  const save = async <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    if (!writable) {
+      throw new Error(`the settings file has schema ${String(schema)}, expected ${SCHEMA}`);
+    }
+    await saveSection(store, key, value);
+  };
 
   return {
     appearance,
+    general,
     writable,
-    saveAppearance: async (next) => {
-      if (!writable) {
-        throw new Error(`the settings file has schema ${String(schema)}, expected ${SCHEMA}`);
-      }
-      await saveSection(store, "appearance", next);
-    },
+    saveAppearance: (next) => save("appearance", next),
+    saveGeneral: (next) => save("general", next),
   };
 }
 
@@ -72,7 +82,9 @@ export async function openSettings(): Promise<SettingsFile> {
 function readOnlyDefaults(reason: string): SettingsFile {
   return {
     appearance: parseAppearance(undefined),
+    general: parseGeneral(undefined),
     writable: false,
     saveAppearance: () => Promise.reject(new Error(reason)),
+    saveGeneral: () => Promise.reject(new Error(reason)),
   };
 }
