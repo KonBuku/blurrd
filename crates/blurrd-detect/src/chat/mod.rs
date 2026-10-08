@@ -13,15 +13,31 @@
 //! A new message appears at the bottom line within one frame and pushes
 //! the older ones up; old messages fade out together with their part of
 //! the box. [`ChatDetector`] finds the box from its vertical edges, the
-//! text lines inside it from their ink, and the name in each line from the
-//! word layout: the prefix word, then the name up to the colon. It works
-//! on the left-panel crop of plan 5.4 ([`LEFT_PANEL_ROI`]) and reports
-//! reference-pixel boxes; following lines across frames is the temporal
-//! model's job.
+//! text lines inside it from their ink, and the name in each line from its
+//! layout. It works on the left-panel crop of plan 5.4
+//! ([`LEFT_PANEL_ROI`]) and reports reference-pixel boxes; following lines
+//! across frames is the temporal model's job.
+//!
+//! Nothing depends on the client language (plan 7.3). The prefix is the
+//! line's first word, recognised by the parentheses it starts and ends
+//! with (only parentheses reach from the ascender line to below the
+//! baseline), so "(All)", "(Alle)" and "(Transmisión)" are found without a
+//! list of prefixes or their widths. The name follows the prefix and ends
+//! at the colon after it; where the colon cannot be seen, at the end of
+//! the prefix colour (the prefix has the name's colour, the colon and the
+//! message are white). Where either end stays uncertain, the box takes
+//! Safe geometry: a prefix that runs into the name covers the name from the
+//! end of the shortest prefix ([`NameStart::Shortest`]), and a line without
+//! colon and name colour, such as a system line ("(System) Name has
+//! abandoned the match", white name and phrase), is covered from the name
+//! start for the widest name ([`NameEnd::Safe`]), so names of several words
+//! stay covered in every language.
 
 mod band;
 mod ink;
 mod line;
+
+pub use line::{NameEnd, NameStart};
 
 use blurrd_core::{NameKind, RectI, Region};
 
@@ -78,6 +94,13 @@ pub struct ChatLine {
     pub band: BoxBand,
     /// The sender name's text bounds.
     pub name: RectI,
+    /// How the start of the name was found.
+    pub start: NameStart,
+    /// How the end of the name was found.
+    pub end: NameEnd,
+    /// The text after the name on the same line: the message (from the
+    /// colon) or the system phrase. Used when messages are blurred too.
+    pub message: Option<RectI>,
 }
 
 /// Reusable buffers.
@@ -162,6 +185,14 @@ impl ChatDetector {
                     bottom: found.rows.1,
                     band: *band,
                     name,
+                    start: found.start,
+                    end: found.end,
+                    message: found.message.map(|(x0, x1)| RectI {
+                        x0,
+                        y0: found.rows.0,
+                        x1,
+                        y1: found.rows.1,
+                    }),
                 });
                 out.push(name_detection(name));
             },

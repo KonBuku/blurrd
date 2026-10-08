@@ -11,13 +11,14 @@
 mod support;
 
 use blurrd_core::{NameKind, Region};
-use blurrd_detect::chat::{ChatDetector, LEFT_PANEL_ROI};
+use blurrd_detect::chat::{ChatDetector, LEFT_PANEL_ROI, NameEnd, NameStart};
 use blurrd_detect::{DetectError, Detection, RgbView};
 use blurrd_testkit::hud::chat::{Channel, ChatMessage, ChatSpec, Language};
 use blurrd_testkit::hud::killfeed::Team;
-use blurrd_testkit::metrics::{item_coverage, over_blur};
+use blurrd_testkit::metrics::{OverBlur, item_coverage, over_blur};
 use blurrd_testkit::{
-    Background, Fixture, FontSet, Layout, NameStyle, Palette, RgbFrame, Rng, Scene, synth_name,
+    Background, ContentKind, Fixture, FontSet, Layout, NameStyle, Palette, RgbFrame, Rng, Scene,
+    synth_name,
 };
 
 use support::prepared;
@@ -91,8 +92,11 @@ struct Check {
     missed: Vec<String>,
     /// Detections that overlap no chat name.
     false_positives: Vec<String>,
-    /// Blurred pixels away from every name, over all blurred pixels.
-    over_blur: f64,
+    /// Blurred pixels, and those away from every name.
+    over_blur: OverBlur,
+    /// Whether a line was covered with Safe geometry (start or end of its
+    /// name not found).
+    safe: bool,
 }
 
 impl Check {
@@ -158,7 +162,11 @@ fn check_with(detector: &mut ChatDetector, fx: &Fixture) -> Check {
         .collect();
     Check {
         items: items.len(),
-        over_blur: over_blur(&fx.truth, &boxes).ratio(),
+        over_blur: over_blur(&fx.truth, &boxes),
+        safe: detector
+            .lines()
+            .iter()
+            .any(|l| l.start == NameStart::Shortest || l.end == NameEnd::Safe),
         detections,
         leaks,
         missed,
@@ -190,14 +198,116 @@ fn finds_the_sender_of_every_line() {
         let context = format!("seed {seed}, {lines} lines");
         check.assert_clean(&context);
         assert_eq!(check.items, lines as usize, "{context}");
+        assert!(!check.safe, "{context}: {:?}", check.detections);
         assert!(
-            check.over_blur <= 0.35,
-            "{context}: over-blur {}",
+            check.over_blur.ratio() <= 0.35,
+            "{context}: over-blur {:?}",
             check.over_blur
         );
         names += check.items;
     }
     assert!(names >= 55, "{names} names checked");
+}
+
+/// Every channel, system lines included.
+const CHANNELS: [Channel; 5] = [
+    Channel::All,
+    Channel::Team,
+    Channel::Party,
+    Channel::Broadcast,
+    Channel::System,
+];
+
+/// Over-blur summed over many frames, split by geometry.
+#[derive(Debug, Default)]
+struct OverBlurTotals {
+    /// Frames whose lines all have both ends of their names found.
+    tight: OverBlur,
+    /// Frames with a line covered with Safe geometry.
+    safe: OverBlur,
+}
+
+impl OverBlurTotals {
+    fn add(&mut self, check: &Check) {
+        let total = if check.safe {
+            &mut self.safe
+        } else {
+            &mut self.tight
+        };
+        total.blurred += check.over_blur.blurred;
+        total.outside += check.over_blur.outside;
+    }
+
+    /// Checks the gates of plan 11.3: over-blur at most 0.35 where names
+    /// are found exactly, at most 0.6 with Safe geometry.
+    fn assert_within_gates(&self, context: &str) {
+        assert!(
+            self.tight.ratio() <= 0.35 && self.safe.ratio() <= 0.6,
+            "{context}: over-blur {self:?} (tight {:.3}, safe {:.3})",
+            self.tight.ratio(),
+            self.safe.ratio()
+        );
+    }
+}
+
+/// Checks chats of one to three random lines in every channel with every
+/// name style, adds their over-blur to `totals` and returns the number of
+/// names checked.
+fn check_mixed_chats(
+    language: Language,
+    palette: Palette,
+    seeds: std::ops::Range<u64>,
+    totals: &mut OverBlurTotals,
+) -> usize {
+    let mut names = 0;
+    for seed in seeds {
+        let mut rng = Rng::new(seed);
+        let lines = 1 + (seed % 3) as u32;
+        let messages: Vec<_> = (0..lines)
+            .map(|i| {
+                let channel = CHANNELS[((seed + u64::from(i)) % 5) as usize];
+                let style = NameStyle::LATIN_MIX[((3 * seed + u64::from(i)) % 7) as usize];
+                message(&mut rng, channel, style, i)
+            })
+            .collect();
+        let system = messages.iter().any(|m| m.channel == Channel::System);
+        let background = BACKGROUNDS[(seed % 2) as usize];
+        let fx = chat_fixture(language, messages, background, palette);
+        let check = check_frame(&fx);
+        let context = format!("{language:?}, {}, seed {seed}, {lines} lines", palette.name);
+        check.assert_clean(&context);
+        assert_eq!(check.items, lines as usize, "{context}");
+        // System lines have no colon and a white name: always Safe.
+        assert!(!system || check.safe, "{context}: {:?}", check.detections);
+        totals.add(&check);
+        names += check.items;
+    }
+    names
+}
+
+#[test]
+fn finds_names_in_every_language_and_channel() {
+    // German and Spanish prefixes have other widths and words; names have
+    // every length, two words, digits and diacritics; backgrounds include
+    // a bright sky that narrows the gaps between words.
+    let mut names = 0;
+    for language in Language::ALL {
+        let mut totals = OverBlurTotals::default();
+        names += check_mixed_chats(language, Palette::DEFAULT, 0..40, &mut totals);
+        totals.assert_within_gates(&format!("{language:?}"));
+    }
+    assert!(names >= 220, "{names} names checked");
+}
+
+#[test]
+fn finds_names_in_colour_blind_palettes() {
+    let mut names = 0;
+    for palette in &Palette::ALL[1..] {
+        let mut totals = OverBlurTotals::default();
+        names += check_mixed_chats(Language::English, *palette, 100..120, &mut totals);
+        totals.assert_within_gates(palette.name);
+    }
+    assert!(names >= 110, "{names} names checked");
 }
 
 #[test]
@@ -220,6 +330,43 @@ fn skips_the_continuation_of_wrapped_messages() {
         let check = check_frame(&fx);
         check.assert_clean(&format!("seed {seed}"));
         assert_eq!(check.detections.len(), 2, "seed {seed}");
+    }
+}
+
+#[test]
+fn reports_the_message_after_the_name() {
+    // The message is reported separately (blurred only when the user asks
+    // for it), and the name box does not reach into it.
+    for language in Language::ALL {
+        let mut rng = Rng::new(7);
+        let messages = vec![
+            message(&mut rng, Channel::Team, NameStyle::Latin(8), 0),
+            message(&mut rng, Channel::All, NameStyle::TwoWord, 1),
+        ];
+        let fx = chat_fixture(language, messages, Background::noise(4), Palette::DEFAULT);
+        let mut detector = ChatDetector::new();
+        check_with(&mut detector, &fx).assert_clean(&format!("{language:?}"));
+        let bodies: Vec<_> = fx
+            .truth
+            .content
+            .iter()
+            .filter(|c| c.kind == ContentKind::ChatMessage)
+            .collect();
+        assert_eq!(detector.lines().len(), 2);
+        for line in detector.lines() {
+            assert_eq!(line.end, NameEnd::Colon, "{language:?}: {line:?}");
+            let message = line.message.unwrap();
+            assert!(message.x0 > line.name.x1, "{language:?}: {line:?}");
+            let body = bodies
+                .iter()
+                .find(|b| b.rect.intersection(&message).is_some())
+                .unwrap();
+            assert!(
+                message.x1 >= body.rect.x1 - 3,
+                "{language:?}: {message} vs {}",
+                body.rect
+            );
+        }
     }
 }
 
