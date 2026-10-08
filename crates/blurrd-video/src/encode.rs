@@ -338,6 +338,11 @@ impl EncodedPacket {
     pub fn data(&self) -> &[u8] {
         self.packet.data().unwrap_or_default()
     }
+
+    /// The FFmpeg packet, for the muxer.
+    pub(crate) fn into_inner(self) -> codec::packet::Packet {
+        self.packet
+    }
 }
 
 /// An open video encoder.
@@ -416,6 +421,33 @@ impl VideoEncoder {
                 std::slice::from_raw_parts((*ctx).extradata, size)
             }
         }
+    }
+
+    /// Time base of the packets' timestamps.
+    pub(crate) fn time_base(&self) -> ffmpeg_the_third::Rational {
+        // SAFETY: reading a field of the open context.
+        unsafe { (*self.context.as_ptr()).time_base.into() }
+    }
+
+    /// Fills a stream's codec parameters for the muxer.
+    ///
+    /// # Safety
+    ///
+    /// `parameters` must point to valid codec parameters.
+    pub(crate) unsafe fn fill_parameters(
+        &self,
+        parameters: *mut ffi::AVCodecParameters,
+    ) -> Result<(), VideoError> {
+        // SAFETY: the context is open; `parameters` is valid by the
+        // caller's contract.
+        let ret =
+            unsafe { ffi::avcodec_parameters_from_context(parameters, self.context.as_ptr()) };
+        if ret < 0 {
+            return Err(VideoError::encode("copying encoder parameters")(
+                ffmpeg_the_third::Error::from(ret),
+            ));
+        }
+        Ok(())
     }
 
     /// Sends a frame. With `keyframe`, the encoder makes it a keyframe (an

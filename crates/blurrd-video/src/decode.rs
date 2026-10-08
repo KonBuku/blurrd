@@ -166,6 +166,11 @@ impl VideoFrame {
         &mut self.frame
     }
 
+    /// The underlying FFmpeg frame, consuming the handle.
+    pub(crate) fn into_raw(self) -> frame::Video {
+        self.frame
+    }
+
     /// Another handle to the same pixels (an FFmpeg frame reference, no
     /// copy).
     ///

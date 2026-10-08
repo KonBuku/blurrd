@@ -23,6 +23,14 @@
 //! - [`DecoderChoice`]: picks software decoding, NVDEC or D3D11VA per video
 //!   from a cached micro-benchmark; hardware frames are downloaded as NV12
 //!   or P010.
+//! - [`VideoEncoder`]: encodes frames through the fallback chain NVENC,
+//!   AMF, Quick Sync, Media Foundation (no GPL encoders) and reports every
+//!   fallback; [`probe_encoders`] checks once per machine which of them
+//!   work. Output colour tags follow [`output_color`].
+//! - [`Transcoder`]: the render. Decoding, blurring plus encoding, and
+//!   muxing run on their own threads; only frames with boxes are copied
+//!   before they are blurred, keyframes and timestamps stay the source's,
+//!   and the output appears under its name only when it is complete.
 //! - [`sys::gpu`]: the machine's GPUs from DXGI, identified by LUID.
 //! - [`PtsTable`]: the PTS of every presentation frame, persisted as
 //!   `pts.bin` in the project cache. Rendering and seeking compare decoded
@@ -40,16 +48,19 @@ mod colour;
 mod decode;
 mod encode;
 mod error;
+mod frames;
 mod hw;
 mod input;
 mod log_bridge;
 mod mp4;
+mod mux;
 mod probe;
 mod pts;
 mod rgb;
 mod roi;
 mod seek;
 pub mod sys;
+mod transcode;
 
 use std::sync::OnceLock;
 
@@ -65,6 +76,7 @@ pub use pts::PtsTable;
 pub use rgb::{RgbConverter, RgbImage};
 pub use roi::{RoiLayout, YuvRoi};
 pub use seek::{FrameSeeker, SeekerOptions};
+pub use transcode::{MuxOptions, TranscodeReport, Transcoder};
 
 /// Sets up FFmpeg for blurrd. Safe to call more than once; only the first
 /// call does the work.

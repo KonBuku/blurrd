@@ -1,0 +1,128 @@
+//! Render throughput and output checks on real recordings from
+//! `BLURRD_TEST_MEDIA` (never in CI, never committed). Run with
+//! `cargo nextest run -p blurrd-video --release --run-ignored all real_render --no-capture`.
+//!
+//! Throughput gates of the architecture plan (section 11.4) are asserted in
+//! release builds only.
+
+mod support;
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use blurrd_blur::CpuBlur;
+use blurrd_core::{BlurPlan, EncoderSetting, FrameBoxTable, Override, RectI, Region, RegionSet};
+use blurrd_video::{
+    DecodeOptions, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder, probe,
+};
+use support::{decode_table, pixel_params};
+
+/// The 3601-frame 1080p60 H.264 benchmark clip of the stack research.
+const CLIP: &str = "VALORANT_replay_2024.06.22-11.50.mp4";
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper: a missing variable is a test failure"
+)]
+fn media(name: &str) -> PathBuf {
+    let dir = std::env::var_os("BLURRD_TEST_MEDIA").expect("set BLURRD_TEST_MEDIA");
+    PathBuf::from(dir).join(name)
+}
+
+/// Sixteen 160×30 boxes in the kill-feed area on every frame: more than a
+/// real kill feed ever shows, so the numbers are a worst case.
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: an error is a test failure"
+)]
+fn sixteen_boxes(frames: u32) -> FrameBoxTable {
+    let overrides = (0..16u8)
+        .map(|i| Override::Add {
+            uid: uuid::Uuid::from_u128(u128::from(i) + 1),
+            region: Region::Manual,
+            f0: 0,
+            f1: frames - 1,
+            rect: RectI::new(
+                1500 - i32::from(i % 2) * 200,
+                100 + i32::from(i / 2) * 38,
+                1660 - i32::from(i % 2) * 200,
+                130 + i32::from(i / 2) * 38,
+            )
+            .unwrap(),
+        })
+        .collect();
+    BlurPlan {
+        frame_count: frames,
+        tracks: Vec::new(),
+        overrides,
+    }
+    .frame_table(&RegionSet::all())
+}
+
+/// Renders the clip and returns the report and frames per second.
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: an error is a test failure"
+)]
+fn render(
+    source: &Path,
+    pts: &Arc<PtsTable>,
+    table: &FrameBoxTable,
+    options: &EncodeOptions,
+    output: &Path,
+) -> (TranscodeReport, f64) {
+    let info = probe(source).unwrap();
+    let transcoder = Transcoder::open(
+        &info,
+        Arc::clone(pts),
+        output,
+        &DecodeOptions::default(),
+        options,
+        MuxOptions::default(),
+    )
+    .unwrap();
+    let report = transcoder
+        .run(table, &CpuBlur, &pixel_params(&info), &|| false, |_| {})
+        .unwrap();
+    let fps = f64::from(report.frames) / report.elapsed.as_secs_f64();
+    (report, fps)
+}
+
+#[test]
+#[ignore = "needs BLURRD_TEST_MEDIA and an NVIDIA GPU"]
+fn real_render_h264_nvenc_throughput() {
+    let source = media(CLIP);
+    let (pts, keys) = decode_table(&source);
+    let pts = Arc::new(pts);
+    let output =
+        std::env::temp_dir().join(format!("blurrd-real-render-{}.mp4", std::process::id()));
+    let mut options = EncodeOptions::default();
+    options.encoder = EncoderSetting::Named(String::from("h264_nvenc"));
+    let empty = sixteen_boxes(pts.len());
+    let none = BlurPlan {
+        frame_count: pts.len(),
+        tracks: Vec::new(),
+        overrides: Vec::new(),
+    }
+    .frame_table(&RegionSet::all());
+    for (label, table) in [("no boxes", &none), ("16 boxes per frame", &empty)] {
+        let (report, fps) = render(&source, &pts, table, &options, &output);
+        let per_frame =
+            report.blur_time.as_secs_f64() * 1000.0 / f64::from(report.blurred_frames.max(1));
+        println!(
+            "{CLIP}: {label}: {} frames, {fps:.0} fps ({:?}), encoder {}, copy+blur {per_frame:.3} ms per blurred frame",
+            report.frames, report.elapsed, report.encoder
+        );
+        let (out_pts, out_keys) = decode_table(&output);
+        assert_eq!(out_pts.as_slice(), pts.as_slice(), "PTS list");
+        assert_eq!(out_keys, keys, "keyframes");
+        if !cfg!(debug_assertions) {
+            assert!(fps >= 450.0, "{label}: {fps:.0} fps < 450 (one session)");
+            assert!(
+                per_frame <= 0.4,
+                "{label}: copy+blur {per_frame:.3} ms > 0.4 ms"
+            );
+        }
+    }
+    std::fs::remove_file(&output).unwrap();
+}

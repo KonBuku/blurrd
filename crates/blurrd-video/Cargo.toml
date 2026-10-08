@@ -13,6 +13,7 @@ publish.workspace = true
 [dependencies]
 blurrd-blur.workspace = true
 blurrd-core.workspace = true
+crossbeam-channel.workspace = true
 ffmpeg-the-third.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,6 +22,9 @@ tracing.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
 
 [lints]
 workspace = true

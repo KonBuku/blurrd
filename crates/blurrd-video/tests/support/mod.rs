@@ -215,3 +215,59 @@ pub fn presented_packets(path: &Path) -> u32 {
     }
     count
 }
+
+/// Decodes a file in software and returns its PTS table and keyframe
+/// indices (what an analysis would store).
+pub fn decode_table(path: &Path) -> (blurrd_video::PtsTable, Vec<u32>) {
+    let mut decoder =
+        blurrd_video::Decoder::open(path, &blurrd_video::DecodeOptions::default()).unwrap();
+    let (mut pts, mut keys) = (Vec::new(), Vec::new());
+    while let Some(frame) = decoder.next_frame().unwrap() {
+        if frame.is_key() {
+            keys.push(frame.index());
+        }
+        pts.push(frame.pts());
+    }
+    (
+        blurrd_video::PtsTable::new(decoder.time_base(), pts).unwrap(),
+        keys,
+    )
+}
+
+/// A box table with one manual box `rect` on frames `f0..=f1` of a video
+/// with `frames` frames (no boxes when `f0 > f1`).
+pub fn box_table(
+    frames: u32,
+    f0: u32,
+    f1: u32,
+    rect: blurrd_core::RectI,
+) -> blurrd_core::FrameBoxTable {
+    let overrides = if f0 <= f1 {
+        vec![blurrd_core::Override::Add {
+            uid: uuid::Uuid::from_u128(1),
+            region: blurrd_core::Region::Manual,
+            f0,
+            f1,
+            rect,
+        }]
+    } else {
+        Vec::new()
+    };
+    blurrd_core::BlurPlan {
+        frame_count: frames,
+        tracks: Vec::new(),
+        overrides,
+    }
+    .frame_table(&blurrd_core::RegionSet::all())
+}
+
+/// Blur parameters for a source with the given colour tags and height.
+pub fn pixel_params(info: &blurrd_core::MediaInfo) -> blurrd_blur::PixelParams {
+    let colour = blurrd_video::VideoColour::from_info(&info.color, info.height);
+    blurrd_blur::PixelParams::new(
+        &blurrd_core::BlurParams::default(),
+        (info.height as f32 / 1080.0).max(blurrd_blur::MIN_SCALE),
+        colour.yuv_colour(),
+    )
+    .unwrap()
+}

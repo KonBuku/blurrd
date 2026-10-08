@@ -89,6 +89,21 @@ pub enum VideoError {
         /// Number of frames in the video.
         count: u32,
     },
+    /// The video has a different number of frames than the project's PTS
+    /// table or box table.
+    #[error("the video has {found} frames, the project expects {expected}")]
+    FrameCountMismatch {
+        /// Frames in the project.
+        expected: u32,
+        /// Frames found (or the size of the other table).
+        found: u32,
+    },
+    /// The job was canceled.
+    #[error("canceled")]
+    Canceled,
+    /// The blur rejected a frame or a box (a bug in blurrd).
+    #[error("blurring a frame: {0}")]
+    Blur(#[from] blurrd_blur::BlurError),
     /// An encoder failed while encoding.
     #[error("{context}: {source}")]
     Encode {
@@ -155,8 +170,12 @@ impl VideoError {
             Self::Timestamps(_) | Self::FrameOutOfRange { .. } => ErrorKind::Decode,
             Self::InvalidPtsTable { .. }
             | Self::PtsMismatch { .. }
-            | Self::FrameNotFound { .. } => ErrorKind::ProjectMismatch,
-            Self::LibraryVersion { .. } | Self::SeekerStopped => ErrorKind::Internal,
+            | Self::FrameNotFound { .. }
+            | Self::FrameCountMismatch { .. } => ErrorKind::ProjectMismatch,
+            Self::Canceled => ErrorKind::Canceled,
+            Self::LibraryVersion { .. } | Self::SeekerStopped | Self::Blur(_) => {
+                ErrorKind::Internal
+            }
             Self::Encode { .. } => ErrorKind::Encode,
             Self::EncoderUnavailable {
                 driver_too_old: true,
@@ -181,6 +200,7 @@ impl From<VideoError> for AppError {
             ErrorKind::Io => "The file could not be read.",
             ErrorKind::Internal => "blurrd is installed incorrectly; reinstall it.",
             ErrorKind::Encode => "The video could not be encoded.",
+            ErrorKind::Canceled => "The job was canceled.",
             ErrorKind::EncoderUnavailable => "No video encoder works on this computer.",
             ErrorKind::DriverTooOld => {
                 "The graphics driver is too old for hardware encoding; update it."
