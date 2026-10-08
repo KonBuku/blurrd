@@ -204,6 +204,19 @@ FFmpeg build once with `cargo xtask fetch-ffmpeg`. Inside `apps/desktop`,
 port 1420), and `pnpm tauri <command>` runs the Tauri CLI. The installer is
 written to `target/release/bundle/nsis/`.
 
+`pnpm dev:mock` (inside `apps/desktop`) serves the frontend for a plain
+browser: an in-memory mock backend (`src/ipc/mock`) answers the IPC calls
+the Tauri shell would handle. Unit tests use the same mock; production
+builds never include it.
+
+The window has no native title bar (`decorations: false`); the frontend
+draws its own with window controls. `src-tauri/capabilities/default.json`
+grants the main window only the window calls of that title bar and the log
+plugin's `log` command. The app writes JSON lines to
+`%LOCALAPPDATA%\io.github.konbuku.blurrd\logs\blurrd.log` (debug builds
+also print to stdout) and remembers the window size and position. Starting
+it a second time focuses the running window.
+
 ## Git hooks
 
 `pnpm install` installs the Git hooks with [lefthook](https://lefthook.dev)

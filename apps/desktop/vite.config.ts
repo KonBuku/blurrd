@@ -13,7 +13,11 @@ const tauriDebug = Boolean(process.env.TAURI_ENV_DEBUG);
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // Logo masters, shared with the README and the installer.
+      "@brand": fileURLToPath(new URL("../../assets/brand", import.meta.url)),
+    },
   },
   // Keep the Rust compiler output visible in `tauri dev`.
   clearScreen: false,
@@ -35,5 +39,6 @@ export default defineConfig({
     environment: "happy-dom",
     include: ["src/**/*.test.{ts,tsx}"],
     restoreMocks: true,
+    setupFiles: ["src/test/setup.ts"],
   },
 });

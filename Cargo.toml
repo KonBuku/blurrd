@@ -58,6 +58,9 @@ sha2 = "=0.11.0"
 # The desktop app shell (apps/desktop/src-tauri).
 tauri = "=2.12.1"
 tauri-build = "=2.7.1"
+tauri-plugin-log = "=2.10.0"
+tauri-plugin-single-instance = "=2.5.2"
+tauri-plugin-window-state = "=2.5.0"
 thiserror = "=2.0.21"
 # `CancellationToken` for jobs (blurrd-engine).
 tokio-util = { version = "=0.7.19", default-features = false }

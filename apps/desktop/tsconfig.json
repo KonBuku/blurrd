@@ -6,7 +6,7 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "types": ["vite/client", "node"],
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./src/*"], "@brand/*": ["../../assets/brand/*"] },
 
     "strict": true,
     "noUncheckedIndexedAccess": true,
