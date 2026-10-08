@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5884edd1c11b69a9c6989a9e11418ef35f6a54a926a401a423294f19162a8abb # shrinks to src = GrayImage { width: 1, height: 5, data: [32, 32, 32, 0, 0] }, k = 6

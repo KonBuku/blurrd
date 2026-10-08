@@ -21,6 +21,7 @@ ab_glyph = "=0.2.32"
 anyhow = "=1.0.104"
 blurrd-blur = { path = "crates/blurrd-blur" }
 blurrd-core = { path = "crates/blurrd-core" }
+blurrd-testkit = { path = "crates/blurrd-testkit" }
 blurrd-video = { path = "crates/blurrd-video" }
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"

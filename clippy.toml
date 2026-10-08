@@ -16,4 +16,5 @@ doc-valid-idents = [
   "SplitMix64",
   "TensorRT",
   "QuickTime",
+  "OpenCV",
 ]

@@ -1,0 +1,27 @@
+[package]
+name = "blurrd-detect"
+description = "HUD and screen detectors of blurrd: pixel classes, morphology and name detection"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+blurrd-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+blurrd-testkit.workspace = true
+criterion.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "classes"
+harness = false
+
+[lints]
+workspace = true

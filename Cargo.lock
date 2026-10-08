@@ -191,6 +191,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "blurrd-detect"
+version = "0.1.0"
+dependencies = [
+ "blurrd-core",
+ "blurrd-testkit",
+ "criterion",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "blurrd-testkit"
 version = "0.1.0"
 dependencies = [
