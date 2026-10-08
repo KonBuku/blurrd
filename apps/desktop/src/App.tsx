@@ -1,8 +1,9 @@
+import { Toaster } from "@/components/ui/toaster";
 import { TitleBar } from "@/features/shell/TitleBar";
 
 /**
  * The root component of the desktop app: the window shell with the title
- * bar on top and the inset content panel below it.
+ * bar on top, the inset content panel below it and the toast stack.
  */
 export function App() {
   return (
@@ -14,6 +15,7 @@ export function App() {
           Blur player names in gameplay recordings.
         </p>
       </main>
+      <Toaster />
     </div>
   );
 }

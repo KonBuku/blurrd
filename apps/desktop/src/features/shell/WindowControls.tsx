@@ -1,13 +1,12 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Copy, Minus, Square, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Minus, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
+import { MaximizeIcon, RestoreIcon } from "@/components/icons/window";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { logWarning } from "@/lib/log";
 import { cn } from "@/lib/utils";
-
-/** 28 px square ghost buttons with an 8 px radius, inset in the bar. */
-const buttonClass =
-  "grid size-7 place-items-center rounded-lg text-foreground-subtle transition-colors hover:bg-hover hover:text-foreground";
 
 /** Click handler that runs a window call and logs its failure. */
 function run(action: string, call: () => Promise<void>) {
@@ -61,37 +60,55 @@ export function WindowControls() {
 
   return (
     <div className="flex items-center gap-0.5">
-      <button
-        type="button"
-        aria-label="Minimize"
-        title="Minimize"
-        className={buttonClass}
+      <CaptionButton
+        label="Minimize"
         onClick={run("minimizing the window", () => appWindow.minimize())}
       >
-        <Minus className="size-4" aria-hidden />
-      </button>
-      <button
-        type="button"
-        aria-label={maximized ? "Restore" : "Maximize"}
-        title={maximized ? "Restore" : "Maximize"}
-        className={buttonClass}
+        <Minus />
+      </CaptionButton>
+      <CaptionButton
+        label={maximized ? "Restore" : "Maximize"}
         onClick={run("maximizing the window", () => appWindow.toggleMaximize())}
       >
-        {maximized ? (
-          <Copy className="size-4 -scale-x-100" aria-hidden />
-        ) : (
-          <Square className="size-4" aria-hidden />
-        )}
-      </button>
-      <button
-        type="button"
-        aria-label="Close"
-        title="Close"
-        className={cn(buttonClass, "hover:bg-destructive hover:text-destructive-foreground")}
+        {maximized ? <RestoreIcon /> : <MaximizeIcon />}
+      </CaptionButton>
+      <CaptionButton
+        label="Close"
+        className="hover:bg-destructive hover:text-destructive-foreground"
         onClick={run("closing the window", () => appWindow.close())}
       >
-        <X className="size-4" aria-hidden />
-      </button>
+        <X />
+      </CaptionButton>
     </div>
+  );
+}
+
+interface CaptionButtonProps {
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly className?: string;
+  readonly children: ReactNode;
+}
+
+/**
+ * One window button: a 28 px ghost icon button with an 8 px radius and a
+ * tooltip below it. Secondary text turns primary on hover.
+ */
+function CaptionButton({ label, onClick, className, children }: CaptionButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-md"
+          aria-label={label}
+          className={cn("text-foreground-subtle hover:text-foreground", className)}
+          onClick={onClick}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }

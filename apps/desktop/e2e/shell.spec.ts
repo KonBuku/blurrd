@@ -29,6 +29,8 @@ test.describe("window shell", () => {
   });
 
   test("keeps the window controls reachable with the keyboard", async ({ page }) => {
+    // Wait for the first render; a Tab before it lands on the empty page.
+    await expect(page.getByRole("button", { name: "Minimize" })).toBeVisible();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Minimize" })).toBeFocused();
   });

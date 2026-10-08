@@ -16,6 +16,7 @@
  * drop target.
  */
 @import "tailwindcss";
+@import "tw-animate-css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -49,6 +50,18 @@
   --tracking-label: 0.09em;
 
   --ease-toast: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* Indeterminate progress: a third-width bar sweeping left to right. */
+  --animate-progress-sweep: progress-sweep 1.2s ease-in-out infinite;
+
+  @keyframes progress-sweep {
+    from {
+      left: -33%;
+    }
+    to {
+      left: 100%;
+    }
+  }
 
   /* ---- Light ---- */
   --color-transparent: transparent;

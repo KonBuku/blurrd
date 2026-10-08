@@ -236,6 +236,12 @@ which all follow one interface-size variable. Compose class names with
 `cn` from `src/lib/utils.ts`, which knows the `text-ui-*` sizes. Lucide
 icons get their 1.5 px stroke from a provider at the root.
 
+Reusable components live in `src/components/ui` (buttons, fields,
+switches, selects, menus, tabs, dialogs, tooltips, toasts, ...), built on
+the headless Radix UI primitives, and blurrd's own icons in
+`src/components/icons` (24 px grid, 1.5 stroke, like Lucide). Keyboard
+focus shows a 2 px accent ring on every control.
+
 ```sh
 pnpm lint:typography  # reject Tailwind's default and fixed text sizes in apps/desktop/src
 ```
