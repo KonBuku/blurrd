@@ -31,6 +31,10 @@ test.describe("window shell", () => {
   test("keeps the window controls reachable with the keyboard", async ({ page }) => {
     // Wait for the first render; a Tab before it lands on the empty page.
     await expect(page.getByRole("button", { name: "Minimize" })).toBeVisible();
+    // Focus order starts in the title bar: queue toggle, then the window
+    // controls.
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Hide queue" })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Minimize" })).toBeFocused();
   });
@@ -41,7 +45,7 @@ test.describe("window shell", () => {
       if (message.type() === "error") errors.push(message.text());
     });
     await page.reload();
-    await expect(page.getByRole("heading", { name: "blurrd" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Preview" })).toBeVisible();
     expect(errors).toEqual([]);
   });
 });

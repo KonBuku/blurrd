@@ -1,9 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installMockBackend, type MockBackend } from "@/ipc/mock";
 
 import { TitleBar } from "./TitleBar";
+
+/** The title bar with the queue sidebar open. */
+function titleBar() {
+  return <TitleBar sidebarOpen onToggleSidebar={() => undefined} />;
+}
 
 describe("TitleBar", () => {
   let backend: MockBackend;
@@ -15,7 +20,7 @@ describe("TitleBar", () => {
   const commands = () => backend.calls.map((call) => call.cmd);
 
   it("marks the bar as a drag region but not its buttons", () => {
-    const { container } = render(<TitleBar />);
+    const { container } = render(titleBar());
     expect(container.querySelector("header")?.hasAttribute("data-tauri-drag-region")).toBe(true);
     for (const button of screen.getAllByRole("button")) {
       expect(button.hasAttribute("data-tauri-drag-region")).toBe(false);
@@ -23,7 +28,7 @@ describe("TitleBar", () => {
   });
 
   it("minimizes and closes the window", async () => {
-    render(<TitleBar />);
+    render(titleBar());
     fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(backend.closed).toBe(true));
@@ -31,7 +36,7 @@ describe("TitleBar", () => {
   });
 
   it("toggles maximize and follows the window state", async () => {
-    render(<TitleBar />);
+    render(titleBar());
     fireEvent.click(await screen.findByRole("button", { name: "Maximize" }));
     expect(await screen.findByRole("button", { name: "Restore" })).toBeDefined();
     expect(backend.maximized).toBe(true);
@@ -44,5 +49,19 @@ describe("TitleBar", () => {
       await emit("tauri://resize", { width: 1440, height: 900 });
     });
     expect(await screen.findByRole("button", { name: "Maximize" })).toBeDefined();
+  });
+
+  it("toggles the queue sidebar from the app mark", () => {
+    const onToggle = vi.fn<() => void>();
+    const { rerender } = render(<TitleBar sidebarOpen onToggleSidebar={onToggle} />);
+    const hide = screen.getByRole("button", { name: "Hide queue" });
+    expect(hide.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(hide);
+    expect(onToggle).toHaveBeenCalledOnce();
+
+    rerender(<TitleBar sidebarOpen={false} onToggleSidebar={onToggle} />);
+    expect(screen.getByRole("button", { name: "Show queue" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
   });
 });

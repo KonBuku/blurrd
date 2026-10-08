@@ -10,8 +10,11 @@
  *
  * Light values sit in `@theme`; the `.dark` class on <html> overrides them.
  * Hierarchy comes from three surface steps (window shell, inset content
- * panel, cards) and three text opacities (100/60/40 %, 30 % in dark), not
- * from colour. The single accent (`ring`, `accent-strong`) is reserved for
+ * panel, cards) and three text opacities, not from colour. Secondary text
+ * is 70 % (74 % in dark) so it reaches WCAG AA on every surface, including
+ * hovered and selected rows on the window shell (src/styles/contrast.test.ts);
+ * the 40 % (30 % in dark) level is for placeholders, disabled controls and
+ * decoration only. The single accent (`ring`, `accent-strong`) is reserved for
  * non-text indicators: focus ring, playhead, selected box, progress and
  * drop target.
  */
@@ -110,7 +113,7 @@
   --color-brand: #000000;
 
   --color-foreground: #262626;
-  --color-foreground-subtle: color-mix(in oklab, #262626 60%, transparent);
+  --color-foreground-subtle: rgba(38, 38, 38, 0.7);
   --color-foreground-subtlest: color-mix(in oklab, #262626 40%, transparent);
   --color-foreground-inverse: #ffffff;
 
@@ -140,7 +143,7 @@
    * family. Colour is never the only cue: every chip carries its label.
    * Chip text reaches 4.5:1 on its surface over the card and background
    * colours, and every region colour 3:1 against them
-   * (src/styles/regions.test.ts).
+   * (src/styles/contrast.test.ts).
    */
   --color-region-killfeed: #1869ad;
   --color-region-killfeed-surface: rgba(24, 105, 173, 0.1);
@@ -206,7 +209,7 @@
   --color-brand: #ffffff;
 
   --color-foreground: #d4d4d4;
-  --color-foreground-subtle: color-mix(in oklab, #d4d4d4 60%, transparent);
+  --color-foreground-subtle: rgba(212, 212, 212, 0.74);
   --color-foreground-subtlest: color-mix(in oklab, #d4d4d4 30%, transparent);
   --color-foreground-inverse: #000000;
 

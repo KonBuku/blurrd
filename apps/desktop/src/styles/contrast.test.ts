@@ -1,7 +1,8 @@
-// Contrast checks of the region colour families in globals.css, for both
-// themes: chip text must reach WCAG AA (4.5:1) on its translucent surface
-// over the colours chips sit on, and every region colour must reach the
-// non-text minimum (3:1) against them (overlay strokes, timeline lanes).
+// Contrast checks of the tokens in globals.css, for both themes: primary
+// and secondary text must reach WCAG AA (4.5:1) on every surface it sits
+// on; region chip text must reach 4.5:1 on its translucent surface over
+// the colours chips sit on, and every region colour the non-text minimum
+// (3:1) against them (overlay strokes, timeline lanes).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -82,6 +83,27 @@ describe.each([
     it.each(GROUNDS)("the region colour reaches 3:1 against %s", (ground) => {
       expect(contrast(color(`region-${family}`), color(ground))).toBeGreaterThanOrEqual(3);
     });
+  });
+
+  // Text sits on the window shell (sidebar, title bar), the content
+  // frames, cards and popovers, and on hovered or selected rows of each.
+  const textGrounds = (): [string, Rgba][] => {
+    const opaque = ["background-win-alt", "background", "panel", "card", "popover"];
+    const overlays = ["surface", "hover", "selected"];
+    return opaque.flatMap((ground): [string, Rgba][] => [
+      [ground, color(ground)],
+      ...overlays.map((overlay): [string, Rgba] => [
+        `${overlay} on ${ground}`,
+        over(color(overlay), color(ground)),
+      ]),
+    ]);
+  };
+
+  it.each(["foreground", "foreground-subtle"])("%s text reaches 4.5:1 on every surface", (text) => {
+    for (const [name, ground] of textGrounds()) {
+      const ratio = contrast(over(color(text), ground), ground);
+      expect(ratio, `${text} on ${name}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("keeps the focus ring at 3:1 against the content background", () => {

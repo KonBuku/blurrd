@@ -226,8 +226,11 @@ After an intended visual change, update them on Windows and review the
 new images before committing:
 
 ```sh
-pnpm --filter @blurrd/desktop e2e --grep "@screenshot" --update-snapshots
+pnpm --filter @blurrd/desktop e2e --grep "@screenshot" --update-snapshots=all
 ```
+
+(`=all` rewrites every baseline; the default only rewrites images that
+differ by more than the 1 % tolerance, so small changes would be missed.)
 
 The window has no native title bar (`decorations: false`); the frontend
 draws its own with window controls. `src-tauri/capabilities/default.json`
@@ -236,6 +239,28 @@ plugin's `log` command. The app writes JSON lines to
 `%LOCALAPPDATA%\io.github.konbuku.blurrd\logs\blurrd.log` (debug builds
 also print to stdout) and remembers the window size and position. Starting
 it a second time focuses the running window.
+
+### Window shell
+
+`src/features/shell/AppShell.tsx` lays out the main window: the title bar,
+the queue sidebar on the window shell colour, the preview frame and the
+inspector frame. The 4 px gaps between them are resize handles (drag, or
+focus them and use the arrow keys, Home and End; a double-click resets the
+width). `src/lib/layout.ts` clamps the preferred widths to the window
+(queue 264 px to 40 % of the window, inspector 300 to 420 px, preview at
+least 480 px) and turns the inspector into an overlay sheet below 1180 px.
+Ctrl+B shows or hides the queue, Ctrl+Alt+B the inspector; the shortcut
+table is `src/lib/shortcuts.ts`. Panel visibility and widths are kept in
+the WebView's local storage (`src/store/ui.ts`), not in the settings file.
+
+`e2e/layout.spec.ts` checks the layout from 1024x680 to 2560x1440 (no
+overflow, limits respected, sheet below the breakpoint), resizing by drag
+and keyboard, and runs an axe accessibility scan of the shell and the sheet
+in both themes. Native window behaviour cannot be tested in a browser;
+check it by hand in `pnpm dev` after changing the title bar: maximize and
+restore with the button and by double-clicking the title bar, drag the
+title bar to a screen edge (snap) and to the top (maximize), Win+arrow
+keys, and Win+Z (snap layouts).
 
 ### Design tokens and typography
 
@@ -258,9 +283,10 @@ focus shows a 2 px accent ring on every control.
 Each region has a colour family (`--color-region-*`): one per HUD region
 and for manual boxes, and one shared by the four screen surfaces.
 `RegionChip` always shows the region's label next to its colour.
-`src/styles/regions.test.ts` checks that chip text reaches 4.5:1 and every
-region colour 3:1 in both themes, so change the tokens only together with
-that test passing.
+`src/styles/contrast.test.ts` checks that primary and secondary text reach
+4.5:1 on every surface (including hovered and selected rows), chip text
+4.5:1 and every region colour 3:1 in both themes, so change the tokens only
+together with that test passing.
 
 ```sh
 pnpm lint:typography  # reject Tailwind's default and fixed text sizes in apps/desktop/src
