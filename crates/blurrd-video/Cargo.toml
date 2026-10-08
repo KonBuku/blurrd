@@ -11,6 +11,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+blurrd-blur.workspace = true
 blurrd-core.workspace = true
 ffmpeg-the-third.workspace = true
 serde.workspace = true

@@ -150,6 +150,7 @@ dependencies = [
 name = "blurrd-video"
 version = "0.1.0"
 dependencies = [
+ "blurrd-blur",
  "blurrd-core",
  "ffmpeg-the-third",
  "serde",

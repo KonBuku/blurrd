@@ -69,6 +69,18 @@ pub enum VideoError {
         /// PTS of the decoded frame.
         found: i64,
     },
+    /// Seeking found no decoded frame with the PTS the project's table
+    /// expects for this index.
+    #[error("frame {index} (PTS {pts}) was not found in the video")]
+    FrameNotFound {
+        /// Presentation frame index.
+        index: u32,
+        /// PTS stored in the project's PTS table.
+        pts: i64,
+    },
+    /// The seek thread of a `FrameSeeker` is gone (it panicked).
+    #[error("the frame seeker's decoder thread stopped")]
+    SeekerStopped,
     /// A requested frame index is past the end of the video.
     #[error("frame {index} is past the end of the video ({count} frames)")]
     FrameOutOfRange {
@@ -106,8 +118,10 @@ impl VideoError {
             },
             Self::NoVideoStream | Self::Unsupported(_) => ErrorKind::UnsupportedMedia,
             Self::Timestamps(_) | Self::FrameOutOfRange { .. } => ErrorKind::Decode,
-            Self::InvalidPtsTable { .. } | Self::PtsMismatch { .. } => ErrorKind::ProjectMismatch,
-            Self::LibraryVersion { .. } => ErrorKind::Internal,
+            Self::InvalidPtsTable { .. }
+            | Self::PtsMismatch { .. }
+            | Self::FrameNotFound { .. } => ErrorKind::ProjectMismatch,
+            Self::LibraryVersion { .. } | Self::SeekerStopped => ErrorKind::Internal,
         }
     }
 }

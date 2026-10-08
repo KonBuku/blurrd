@@ -7,7 +7,7 @@ use ffmpeg_the_third::{codec, decoder, ffi, format, frame, media};
 
 use crate::hw::{self, Backend};
 use crate::probe::positive_rational;
-use crate::{VideoError, input};
+use crate::{PtsTable, VideoError, input};
 
 /// Where frames are decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -145,6 +145,11 @@ impl VideoFrame {
         unsafe { (*self.frame.as_ptr()).flags & ffi::AV_FRAME_FLAG_KEY != 0 }
     }
 
+    /// The underlying FFmpeg frame.
+    pub(crate) fn raw(&self) -> &frame::Video {
+        &self.frame
+    }
+
     /// Another handle to the same pixels (an FFmpeg frame reference, no
     /// copy).
     ///
@@ -193,6 +198,8 @@ pub struct Decoder {
     last_pts: Option<i64>,
     draining: bool,
     finished: bool,
+    /// A frame decoded while seeking, returned by the next `next_frame`.
+    pending: Option<VideoFrame>,
 }
 
 impl std::fmt::Debug for Decoder {
@@ -272,6 +279,7 @@ impl Decoder {
             last_pts: None,
             draining: false,
             finished: false,
+            pending: None,
         })
     }
 
@@ -355,13 +363,109 @@ impl Decoder {
     /// process, [`VideoError::Timestamps`] when a frame has no PTS or the PTS
     /// does not increase.
     pub fn next_frame(&mut self) -> Result<Option<VideoFrame>, VideoError> {
+        if let Some(frame) = self.pending.take() {
+            return Ok(Some(frame));
+        }
+        match self.receive()? {
+            Some(decoded) => self.emit(decoded).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Positions the decoder so that the next [`Decoder::next_frame`]
+    /// returns frame `index` of `table` (the PTS table of this file).
+    ///
+    /// Seeks the demuxer to the last keyframe at or before the frame's PTS
+    /// and decodes forward, dropping earlier frames. When the demuxer lands
+    /// after the frame (its index is not exact for files with B-frames or
+    /// edit lists), it seeks further back and tries again.
+    ///
+    /// # Errors
+    ///
+    /// [`VideoError::FrameOutOfRange`] for an index past the table,
+    /// [`VideoError::FrameNotFound`] when no decoded frame has the expected
+    /// PTS (the file does not match the table), [`VideoError::Ffmpeg`] when
+    /// seeking or decoding fails.
+    pub fn seek(&mut self, index: u32, table: &PtsTable) -> Result<(), VideoError> {
+        let target = table.pts(index).ok_or(VideoError::FrameOutOfRange {
+            index,
+            count: table.len(),
+        })?;
+        let mut back = 0u32;
+        loop {
+            let from = index.saturating_sub(back);
+            let timestamp = table.pts(from).unwrap_or(target);
+            self.seek_demuxer(timestamp)?;
+            let mut found = None;
+            while let Some(decoded) = self.receive()? {
+                let pts = decoded.timestamp();
+                match pts {
+                    Some(pts) if pts < target => {}
+                    Some(pts) if pts == target => {
+                        found = Some(decoded);
+                        break;
+                    }
+                    // Landed after the target (or a frame without PTS).
+                    _ => break,
+                }
+            }
+            if let Some(decoded) = found {
+                self.next_index = index;
+                self.last_pts = None;
+                let frame = self.emit(decoded)?;
+                self.pending = Some(frame);
+                return Ok(());
+            }
+            if from == 0 {
+                return Err(VideoError::FrameNotFound { index, pts: target });
+            }
+            back = (back * 4).max(32);
+        }
+    }
+
+    /// Seeks the demuxer to the keyframe at or before `timestamp` (stream
+    /// time base) and resets the decoder.
+    fn seek_demuxer(&mut self, timestamp: i64) -> Result<(), VideoError> {
+        let stream = i32::try_from(self.stream).unwrap_or(i32::MAX);
+        // SAFETY: the format context is valid and owned by `self.input`;
+        // `avformat_seek_file` with `max_ts = timestamp` lands on a
+        // keyframe at or before it.
+        let ret = unsafe {
+            ffi::avformat_seek_file(
+                self.input.as_mut_ptr(),
+                stream,
+                i64::MIN,
+                timestamp,
+                timestamp,
+                0,
+            )
+        };
+        if ret < 0 {
+            return Err(VideoError::ffmpeg("seeking")(
+                ffmpeg_the_third::Error::from(ret),
+            ));
+        }
+        self.codec.flush();
+        self.draining = false;
+        self.finished = false;
+        self.pending = None;
+        Ok(())
+    }
+
+    /// Receives the next decoded frame in system memory, feeding packets as
+    /// needed; `None` at the end of the stream.
+    fn receive(&mut self) -> Result<Option<frame::Video>, VideoError> {
         let mut decoded = frame::Video::empty();
         loop {
             if self.finished {
                 return Ok(None);
             }
             match self.codec.receive_frame(&mut decoded) {
-                Ok(()) => return self.emit(decoded).map(Some),
+                Ok(()) => {
+                    let (decoded, on_gpu) = hw::download(decoded, self.surface)?;
+                    self.hardware_frames += u32::from(on_gpu);
+                    return Ok(Some(decoded));
+                }
                 Err(ffmpeg_the_third::Error::Eof) => {
                     self.finished = true;
                     return Ok(None);
@@ -407,8 +511,6 @@ impl Decoder {
     /// Turns a decoded frame into a [`VideoFrame`] with the next index.
     fn emit(&mut self, decoded: frame::Video) -> Result<VideoFrame, VideoError> {
         let index = self.next_index;
-        let (decoded, on_gpu) = hw::download(decoded, self.surface)?;
-        self.hardware_frames += u32::from(on_gpu);
         let pts = decoded
             .timestamp()
             .ok_or_else(|| VideoError::Timestamps(format!("frame {index} has no timestamp")))?;

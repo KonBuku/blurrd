@@ -14,6 +14,12 @@
 //!   lists and the keyframes as presentation frame indices.
 //! - [`Decoder`]: decodes the video stream in presentation order. Every
 //!   [`VideoFrame`] carries its presentation index and PTS.
+//! - [`VideoFrame::roi_yuv`] and [`RgbConverter`]: even-aligned HUD crops
+//!   in a layout the blur works on, and their RGB conversion (bit-exact
+//!   with FFmpeg's `bgr24` for SDR, tone-mapped for HDR) with every colour
+//!   tag mapped ([`VideoColour`]).
+//! - [`FrameSeeker`]: random access by presentation index with a frame
+//!   cache, prefetching and a PTS check against the project's table.
 //! - [`DecoderChoice`]: picks software decoding, NVDEC or D3D11VA per video
 //!   from a cached micro-benchmark; hardware frames are downloaded as NV12
 //!   or P010.
@@ -39,15 +45,22 @@ mod log_bridge;
 mod mp4;
 mod probe;
 mod pts;
+mod rgb;
+mod roi;
+mod seek;
 pub mod sys;
 
 use std::sync::OnceLock;
 
 pub use choice::{DecodePurpose, DecoderChoice};
+pub use colour::{ColourTransfer, VideoColour};
 pub use decode::{DecodeOptions, Decoder, HwDecode, PixelLayout, VideoFrame};
 pub use error::VideoError;
 pub use probe::probe;
 pub use pts::PtsTable;
+pub use rgb::{RgbConverter, RgbImage};
+pub use roi::{RoiLayout, YuvRoi};
+pub use seek::{FrameSeeker, SeekerOptions};
 
 /// Sets up FFmpeg for blurrd. Safe to call more than once; only the first
 /// call does the work.
