@@ -7,10 +7,12 @@ use ts_rs::TS;
 
 /// A screen region that can contain player names.
 ///
-/// The detector regions are the gameplay HUD parts that blurrd finds by
-/// itself. [`Region::Manual`] marks boxes the user drew; they are always
-/// applied, whichever regions are enabled. World-space name tags above
-/// players' heads are out of scope and have no region.
+/// The detector regions are the gameplay HUD parts ([`Region::HUD`]) and
+/// the screen surfaces ([`Region::SCREENS`]: full-screen or large overlays
+/// such as the scoreboard) that blurrd finds by itself. [`Region::Manual`]
+/// marks boxes the user drew; they are always applied, whichever regions
+/// are enabled. World-space name tags above players' heads are out of
+/// scope and have no region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
@@ -23,27 +25,69 @@ pub enum Region {
     VoiceChat,
     /// Sender names in the text chat on the left.
     TextChat,
+    /// The name column of the scoreboard (tab) screen.
+    Scoreboard,
+    /// The death recap: the "killed by" panel and the combat report.
+    DeathRecap,
+    /// The spectated player's name while the player spectates.
+    Spectating,
+    /// The match-end, MVP and round-end screens.
+    MatchEnd,
     /// A box drawn by the user.
     Manual,
 }
 
 impl Region {
     /// Every region, in declaration order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 9] = [
         Self::KillFeed,
         Self::Banner,
         Self::VoiceChat,
         Self::TextChat,
+        Self::Scoreboard,
+        Self::DeathRecap,
+        Self::Spectating,
+        Self::MatchEnd,
         Self::Manual,
     ];
 
-    /// The regions blurrd detects by itself ("all supported regions").
-    pub const DETECTED: [Self; 4] = [
+    /// The gameplay HUD regions.
+    pub const HUD: [Self; 4] = [
         Self::KillFeed,
         Self::Banner,
         Self::VoiceChat,
         Self::TextChat,
     ];
+
+    /// The screen surfaces: overlays outside the gameplay HUD that show
+    /// player names.
+    pub const SCREENS: [Self; 4] = [
+        Self::Scoreboard,
+        Self::DeathRecap,
+        Self::Spectating,
+        Self::MatchEnd,
+    ];
+
+    /// The regions blurrd detects by itself ("all supported regions"): the
+    /// HUD regions followed by the screen surfaces.
+    pub const DETECTED: [Self; 8] = [
+        Self::KillFeed,
+        Self::Banner,
+        Self::VoiceChat,
+        Self::TextChat,
+        Self::Scoreboard,
+        Self::DeathRecap,
+        Self::Spectating,
+        Self::MatchEnd,
+    ];
+
+    /// Whether the region is a screen surface ([`Region::SCREENS`]).
+    pub const fn is_screen(self) -> bool {
+        matches!(
+            self,
+            Self::Scoreboard | Self::DeathRecap | Self::Spectating | Self::MatchEnd
+        )
+    }
 
     /// Position of the region in [`Region::ALL`]; used as a bit index.
     const fn index(self) -> u32 {
@@ -52,7 +96,11 @@ impl Region {
             Self::Banner => 1,
             Self::VoiceChat => 2,
             Self::TextChat => 3,
-            Self::Manual => 4,
+            Self::Scoreboard => 4,
+            Self::DeathRecap => 5,
+            Self::Spectating => 6,
+            Self::MatchEnd => 7,
+            Self::Manual => 8,
         }
     }
 
@@ -63,6 +111,10 @@ impl Region {
             Self::Banner => "banner",
             Self::VoiceChat => "voice",
             Self::TextChat => "chat",
+            Self::Scoreboard => "scoreboard",
+            Self::DeathRecap => "recap",
+            Self::Spectating => "spectating",
+            Self::MatchEnd => "matchend",
             Self::Manual => "manual",
         }
     }
@@ -89,6 +141,14 @@ pub enum NameKind {
     Speaker,
     /// The sender of a text-chat line.
     ChatSender,
+    /// A player name in a scoreboard row.
+    ScoreboardRow,
+    /// A name in the death recap / "killed by" panel.
+    RecapName,
+    /// The spectated player's name.
+    Spectated,
+    /// A name on a match-end, MVP or round-end screen.
+    MatchEndName,
     /// A box drawn by the user.
     Manual,
     /// A slot box added by the OCR verification because a name was still
@@ -114,8 +174,8 @@ impl RegionSet {
         Self { bits: 0 }
     }
 
-    /// All detector regions ([`Region::DETECTED`]), the "all supported
-    /// regions" choice.
+    /// All detector regions ([`Region::DETECTED`]: the HUD regions and the
+    /// screen surfaces), the "all supported regions" choice.
     pub const fn all() -> Self {
         let mut set = Self::empty();
         let mut i = 0;
@@ -197,6 +257,22 @@ mod tests {
         let all = RegionSet::all();
         assert!(Region::DETECTED.iter().all(|r| all.contains(*r)));
         assert!(!all.contains(Region::Manual));
+    }
+
+    #[test]
+    fn detected_is_hud_then_screens() {
+        let joined: Vec<_> = Region::HUD
+            .iter()
+            .chain(&Region::SCREENS)
+            .copied()
+            .collect();
+        assert_eq!(joined, Region::DETECTED);
+        assert!(Region::SCREENS.iter().all(|r| r.is_screen()));
+        assert!(!Region::HUD.iter().any(|r| r.is_screen()));
+        assert!(!Region::Manual.is_screen());
+        // Every region has its own bit.
+        let set: RegionSet = Region::ALL.into_iter().collect();
+        assert_eq!(set.iter().count(), Region::ALL.len());
     }
 
     #[test]

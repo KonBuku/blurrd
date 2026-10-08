@@ -210,7 +210,8 @@ mod tests {
       "geometry": { "layout": "Auto", "sx": 1.0, "sy": 1.0, "anchor_left": 0, "anchor_right": 1920,
                     "anchor_center": 960, "oy": 0, "confidence": 0.98,
                     "per_region": { "KillFeed": 0.99, "Banner": 0.97, "VoiceChat": 0.95, "TextChat": 0.96 } },
-      "detector": { "version": "detect/1.0.0", "regions": ["KillFeed","Banner","VoiceChat","TextChat"],
+      "detector": { "version": "detect/1.0.0", "regions": ["KillFeed","Banner","VoiceChat","TextChat",
+                                                           "Scoreboard","DeathRecap","Spectating","MatchEnd"],
                     "mode": "Tight", "sensitivity": "Balanced",
                     "temporal": { "pre_roll": 3, "post_roll_min": 18, "max_gap": 45 } },
       "tracks": [

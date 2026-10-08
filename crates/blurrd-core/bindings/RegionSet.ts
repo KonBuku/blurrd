@@ -6,4 +6,4 @@
  * Serialised as a sorted array of region names, for example
  * `["KillFeed", "Banner"]`.
  */
-export type RegionSet = Array<"KillFeed" | "Banner" | "VoiceChat" | "TextChat" | "Manual">;
+export type RegionSet = Array<"KillFeed" | "Banner" | "VoiceChat" | "TextChat" | "Scoreboard" | "DeathRecap" | "Spectating" | "MatchEnd" | "Manual">;

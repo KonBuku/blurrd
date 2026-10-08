@@ -3,4 +3,4 @@
 /**
  * What a blurred name is, inside its region.
  */
-export type NameKind = "Killer" | "Victim" | "Banner" | "Speaker" | "ChatSender" | "Manual" | "OcrFix";
+export type NameKind = "Killer" | "Victim" | "Banner" | "Speaker" | "ChatSender" | "ScoreboardRow" | "RecapName" | "Spectated" | "MatchEndName" | "Manual" | "OcrFix";

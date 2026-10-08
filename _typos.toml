@@ -12,3 +12,5 @@ trak = "trak"
 wdth = "wdth"
 # German chat prefix in the synthetic HUD fixtures.
 Alle = "Alle"
+# Command-line key of the match-end screen region (plan 5.7).
+matchend = "matchend"

@@ -3,9 +3,11 @@
 /**
  * A screen region that can contain player names.
  *
- * The detector regions are the gameplay HUD parts that blurrd finds by
- * itself. [`Region::Manual`] marks boxes the user drew; they are always
- * applied, whichever regions are enabled. World-space name tags above
- * players' heads are out of scope and have no region.
+ * The detector regions are the gameplay HUD parts ([`Region::HUD`]) and
+ * the screen surfaces ([`Region::SCREENS`]: full-screen or large overlays
+ * such as the scoreboard) that blurrd finds by itself. [`Region::Manual`]
+ * marks boxes the user drew; they are always applied, whichever regions
+ * are enabled. World-space name tags above players' heads are out of
+ * scope and have no region.
  */
-export type Region = "KillFeed" | "Banner" | "VoiceChat" | "TextChat" | "Manual";
+export type Region = "KillFeed" | "Banner" | "VoiceChat" | "TextChat" | "Scoreboard" | "DeathRecap" | "Spectating" | "MatchEnd" | "Manual";

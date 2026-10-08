@@ -666,7 +666,7 @@
       ]
     },
     "Region": {
-      "description": "A screen region that can contain player names.\n\nThe detector regions are the gameplay HUD parts that blurrd finds by\nitself. [`Region::Manual`] marks boxes the user drew; they are always\napplied, whichever regions are enabled. World-space name tags above\nplayers' heads are out of scope and have no region.",
+      "description": "A screen region that can contain player names.\n\nThe detector regions are the gameplay HUD parts ([`Region::HUD`]) and\nthe screen surfaces ([`Region::SCREENS`]: full-screen or large overlays\nsuch as the scoreboard) that blurrd finds by itself. [`Region::Manual`]\nmarks boxes the user drew; they are always applied, whichever regions\nare enabled. World-space name tags above players' heads are out of\nscope and have no region.",
       "oneOf": [
         {
           "description": "Kill feed rows in the top right corner (killer and victim names).",
@@ -687,6 +687,26 @@
           "description": "Sender names in the text chat on the left.",
           "type": "string",
           "const": "TextChat"
+        },
+        {
+          "description": "The name column of the scoreboard (tab) screen.",
+          "type": "string",
+          "const": "Scoreboard"
+        },
+        {
+          "description": "The death recap: the \"killed by\" panel and the combat report.",
+          "type": "string",
+          "const": "DeathRecap"
+        },
+        {
+          "description": "The spectated player's name while the player spectates.",
+          "type": "string",
+          "const": "Spectating"
+        },
+        {
+          "description": "The match-end, MVP and round-end screens.",
+          "type": "string",
+          "const": "MatchEnd"
         },
         {
           "description": "A box drawn by the user.",
