@@ -10,23 +10,38 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use blurrd_blur::CpuBlur;
-use blurrd_core::{EncoderSetting, RectI};
+use blurrd_core::{EncoderSetting, NvencSessions, RectI};
 use blurrd_video::{
-    DecodeOptions, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder, VideoError,
-    output_color, probe,
+    DecodeOptions, Decoder, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder,
+    VideoError, YuvRoi, output_color, probe,
 };
 use support::{ClipSpec, TempClip, box_table, decode_table, pixel_params, write_clip};
 
 /// Renders `source` into `output` with `encoder`, one box on frames
 /// `boxes` (none when the range is empty).
-#[allow(
-    clippy::unwrap_used,
-    reason = "test helper: an error is a test failure"
-)]
 fn render(
     source: &Path,
     output: &Path,
     encoder: &str,
+    boxes: (u32, u32),
+    cancel_after: Option<u32>,
+) -> Result<TranscodeReport, VideoError> {
+    let mut options = EncodeOptions::default();
+    options.encoder = EncoderSetting::Named(encoder.to_owned());
+    render_with(source, output, &options, boxes, cancel_after)
+}
+
+/// Renders `source` into `output` with `options`, one box on frames
+/// `boxes` (none when the range is empty), canceling after
+/// `cancel_after` frames if given.
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: an error is a test failure"
+)]
+fn render_with(
+    source: &Path,
+    output: &Path,
+    options: &EncodeOptions,
     boxes: (u32, u32),
     cancel_after: Option<u32>,
 ) -> Result<TranscodeReport, VideoError> {
@@ -38,14 +53,12 @@ fn render(
         boxes.1,
         RectI::new(64, 64, 160, 96).unwrap(),
     );
-    let mut options = EncodeOptions::default();
-    options.encoder = EncoderSetting::Named(encoder.to_owned());
     let transcoder = Transcoder::open(
         &info,
         Arc::new(pts),
         output,
         &DecodeOptions::default(),
-        &options,
+        options,
         MuxOptions::default(),
     )?;
     let sent = AtomicU32::new(0);
@@ -191,6 +204,72 @@ fn renders_edit_list_sources() {
     }
 }
 
+/// Every decoded picture of `path` (all planes, without padding).
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: an error is a test failure"
+)]
+fn pictures(path: &Path) -> Vec<Vec<u8>> {
+    let mut decoder = Decoder::open(path, &DecodeOptions::default()).unwrap();
+    let mut out = Vec::new();
+    let mut roi = YuvRoi::new();
+    while let Some(frame) = decoder.next_frame().unwrap() {
+        let full = RectI::new(
+            0,
+            0,
+            frame.width().cast_signed(),
+            frame.height().cast_signed(),
+        );
+        frame.roi_yuv(full.unwrap(), &mut roi).unwrap();
+        let (u, v) = roi.chroma();
+        let mut picture = roi.luma().to_vec();
+        picture.extend_from_slice(u);
+        picture.extend_from_slice(v.unwrap_or_default());
+        out.push(picture);
+    }
+    out
+}
+
+#[test]
+fn two_sessions_stitch_into_the_same_video() {
+    // 600 frames with a keyframe every 30: about five segments.
+    let spec = ClipSpec {
+        gop: 30,
+        ..ClipSpec::cfr(600)
+    };
+    // Matroska like the outputs, so timestamps compare exactly (Matroska
+    // stores milliseconds).
+    let source = TempClip::new("render-sessions", "mkv");
+    write_clip(source.path(), &spec);
+    let mut options = EncodeOptions::default();
+    // Lossless and intra-only: the pictures must not depend on how the
+    // frames were split between sessions.
+    options.encoder = EncoderSetting::Named(String::from("ffv1"));
+    options.sessions = NvencSessions::One;
+    let one = TempClip::new("render-sessions-1", "mkv");
+    let single = render_with(source.path(), one.path(), &options, (100, 420), None).unwrap();
+    options.sessions = NvencSessions::Two;
+    let two = TempClip::new("render-sessions-2", "mkv");
+    let split = render_with(source.path(), two.path(), &options, (100, 420), None).unwrap();
+    assert_eq!((single.sessions, split.sessions), (1, 2));
+    assert_eq!(split.blurred_frames, 321);
+    let (split_pictures, single_pictures) = (pictures(two.path()), pictures(one.path()));
+    assert_eq!(split_pictures.len(), single_pictures.len(), "frame count");
+    let differing: Vec<usize> = (0..split_pictures.len())
+        .filter(|&i| split_pictures[i] != single_pictures[i])
+        .collect();
+    assert_eq!(differing, Vec::<usize>::new(), "frames with other pictures");
+    let (source_pts, _) = decode_table(source.path());
+    let (split_pts, _) = decode_table(two.path());
+    assert_eq!(rescaled(&split_pts, &source_pts), source_pts.as_slice());
+    // An inter-coded test encoder keeps the source's keyframes too.
+    options.encoder = EncoderSetting::Named(String::from("mpeg4"));
+    let inter = TempClip::new("render-sessions-3", "mkv");
+    let report = render_with(source.path(), inter.path(), &options, (0, 599), None).unwrap();
+    assert_eq!(report.sessions, 2);
+    assert_same_timeline(source.path(), inter.path());
+}
+
 #[test]
 fn a_changed_video_is_rejected_without_output() {
     let source = TempClip::new("render-mismatch", "mp4");
@@ -260,5 +339,22 @@ fn gpu_nvenc_renders_with_the_source_timeline() {
     let output = TempClip::new("render-nvenc-out", "mp4");
     let report = render(source.path(), output.path(), "h264_nvenc", (30, 70), None).unwrap();
     assert_eq!(report.blurred_frames, 41);
+    assert_same_timeline(source.path(), output.path());
+}
+
+#[test]
+#[ignore = "needs an NVIDIA GPU"]
+fn gpu_two_nvenc_sessions_keep_the_timeline() {
+    let spec = ClipSpec {
+        width: 640,
+        height: 360,
+        gop: 60,
+        ..ClipSpec::cfr(900)
+    };
+    let source = TempClip::new("render-nvenc2", "mp4");
+    write_clip(source.path(), &spec);
+    let output = TempClip::new("render-nvenc2-out", "mp4");
+    let report = render(source.path(), output.path(), "h264_nvenc", (100, 700), None).unwrap();
+    assert_eq!(report.sessions, 2, "H.264 NVENC uses two sessions");
     assert_same_timeline(source.path(), output.path());
 }

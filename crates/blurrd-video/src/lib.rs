@@ -31,6 +31,8 @@
 //!   muxing run on their own threads; only frames with boxes are copied
 //!   before they are blurred, keyframes and timestamps stay the source's,
 //!   and the output appears under its name only when it is complete.
+//!   H.264 on NVENC runs as two sessions over keyframe-aligned segments
+//!   (the GPU's two encoder engines); HEVC and AV1 split each frame instead.
 //! - [`sys::gpu`]: the machine's GPUs from DXGI, identified by LUID.
 //! - [`PtsTable`]: the PTS of every presentation frame, persisted as
 //!   `pts.bin` in the project cache. Rendering and seeking compare decoded
@@ -59,6 +61,7 @@ mod pts;
 mod rgb;
 mod roi;
 mod seek;
+mod segments;
 pub mod sys;
 mod transcode;
 

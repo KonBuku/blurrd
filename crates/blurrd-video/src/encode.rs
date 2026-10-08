@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use blurrd_core::{
     Codec, ColorInfo, ColorRange, EncoderInfo, EncoderSetting, ExportSettings, KeyframePolicy,
-    MediaInfo, RateControl, Rational, Toggle,
+    MediaInfo, NvencSessions, RateControl, Rational, Toggle,
 };
 use ffmpeg_the_third::codec::packet::Mut as _;
 use ffmpeg_the_third::{Dictionary, codec, ffi};
@@ -57,6 +57,11 @@ pub struct EncodeOptions {
     /// and AV1. `Auto` splits into two strips below 4K and lets the driver
     /// decide at 4K and above.
     pub split_encode: Toggle,
+    /// Parallel NVENC sessions for H.264. `Auto` and `Two` split the video
+    /// into keyframe-aligned segments encoded by two sessions (the GPU's
+    /// two encoder engines) when the video is long enough and both sessions
+    /// produce identical codec headers; other encoders always use one.
+    pub sessions: NvencSessions,
     /// Keyframe placement. `MatchSource` makes every frame sent as a
     /// keyframe an IDR frame and lets the encoder add no keyframes of its
     /// own within the source's longest keyframe interval.
@@ -79,6 +84,7 @@ impl Default for EncodeOptions {
             preset: DEFAULT_PRESET,
             ten_bit: Toggle::Auto,
             split_encode: Toggle::Auto,
+            sessions: NvencSessions::Auto,
             keyframes: KeyframePolicy::MatchSource,
             surfaces: None,
             gpu: true,
@@ -96,6 +102,7 @@ impl EncodeOptions {
             preset: export.preset,
             ten_bit: export.ten_bit,
             split_encode: export.split_encode,
+            sessions: export.nvenc_sessions,
             keyframes: export.keyframes,
             ..Self::default()
         }
@@ -743,7 +750,14 @@ fn try_open(
         }
         (*ctx).time_base = rational(input.time_base);
         (*ctx).framerate = rational(input.frame_rate);
-        (*ctx).gop_size = c_int::try_from(input.keyframe_interval).unwrap_or(c_int::MAX);
+        // FFV1 ignores requested keyframes and resets its coder state only
+        // every `gop_size` frames; one keeps every frame independent, so it
+        // stays exact when segments are stitched.
+        (*ctx).gop_size = if name == "ffv1" {
+            1
+        } else {
+            c_int::try_from(input.keyframe_interval).unwrap_or(c_int::MAX)
+        };
         // B-frames stay off until the M18 quality benchmark decides: without
         // them DTS equals PTS, which keeps segment stitching trivial.
         (*ctx).max_b_frames = 0;

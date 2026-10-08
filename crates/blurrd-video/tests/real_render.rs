@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use blurrd_blur::CpuBlur;
-use blurrd_core::{BlurPlan, EncoderSetting, FrameBoxTable, Override, RectI, Region, RegionSet};
+use blurrd_core::{
+    BlurPlan, Codec, EncoderSetting, FrameBoxTable, NvencSessions, Override, RectI, Region,
+    RegionSet,
+};
 use blurrd_video::{
     DecodeOptions, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder, probe,
 };
@@ -96,33 +99,71 @@ fn real_render_h264_nvenc_throughput() {
     let pts = Arc::new(pts);
     let output =
         std::env::temp_dir().join(format!("blurrd-real-render-{}.mp4", std::process::id()));
-    let mut options = EncodeOptions::default();
-    options.encoder = EncoderSetting::Named(String::from("h264_nvenc"));
-    let empty = sixteen_boxes(pts.len());
+    let boxes = sixteen_boxes(pts.len());
     let none = BlurPlan {
         frame_count: pts.len(),
         tracks: Vec::new(),
         overrides: Vec::new(),
     }
     .frame_table(&RegionSet::all());
-    for (label, table) in [("no boxes", &none), ("16 boxes per frame", &empty)] {
-        let (report, fps) = render(&source, &pts, table, &options, &output);
-        let per_frame =
-            report.blur_time.as_secs_f64() * 1000.0 / f64::from(report.blurred_frames.max(1));
-        println!(
-            "{CLIP}: {label}: {} frames, {fps:.0} fps ({:?}), encoder {}, copy+blur {per_frame:.3} ms per blurred frame",
-            report.frames, report.elapsed, report.encoder
-        );
-        let (out_pts, out_keys) = decode_table(&output);
-        assert_eq!(out_pts.as_slice(), pts.as_slice(), "PTS list");
-        assert_eq!(out_keys, keys, "keyframes");
-        if !cfg!(debug_assertions) {
-            assert!(fps >= 450.0, "{label}: {fps:.0} fps < 450 (one session)");
-            assert!(
-                per_frame <= 0.4,
-                "{label}: copy+blur {per_frame:.3} ms > 0.4 ms"
+    // Plan gates (section 11.4): one session at least 450 fps, two at
+    // least 800 fps.
+    for (sessions, gate) in [(NvencSessions::One, 450.0), (NvencSessions::Two, 800.0)] {
+        let mut options = EncodeOptions::default();
+        options.encoder = EncoderSetting::Named(String::from("h264_nvenc"));
+        options.sessions = sessions;
+        for (label, table) in [("no boxes", &none), ("16 boxes per frame", &boxes)] {
+            let (report, fps) = render(&source, &pts, table, &options, &output);
+            let per_frame =
+                report.blur_time.as_secs_f64() * 1000.0 / f64::from(report.blurred_frames.max(1));
+            println!(
+                "{CLIP}: {} session(s), {label}: {} frames, {fps:.0} fps ({:?}), copy+blur \
+                 {per_frame:.3} ms per blurred frame",
+                report.sessions, report.frames, report.elapsed
             );
+            let (out_pts, out_keys) = decode_table(&output);
+            assert_eq!(out_pts.as_slice(), pts.as_slice(), "PTS list");
+            assert_eq!(out_keys, keys, "keyframes");
+            // Free the disk right away (each output is ~350 MB).
+            std::fs::remove_file(&output).unwrap();
+            if !cfg!(debug_assertions) {
+                assert!(fps >= gate, "{label}: {fps:.0} fps < {gate}");
+                // The blur cost gate (0.4 ms including the copy) is measured
+                // with one session; with two, both decoders load every core
+                // and the same work takes longer in wall time.
+                if report.sessions == 1 {
+                    assert!(
+                        per_frame <= 0.4,
+                        "{label}: copy+blur {per_frame:.3} ms > 0.4 ms"
+                    );
+                }
+            }
         }
     }
+}
+
+#[test]
+#[ignore = "needs BLURRD_TEST_MEDIA and an NVIDIA GPU"]
+fn real_render_hevc_split_encode_throughput() {
+    let source = media(CLIP);
+    let (pts, keys) = decode_table(&source);
+    let pts = Arc::new(pts);
+    let output = std::env::temp_dir().join(format!("blurrd-real-hevc-{}.mp4", std::process::id()));
+    let mut options = EncodeOptions::default();
+    options.codec = Codec::Hevc;
+    let (report, fps) = render(&source, &pts, &sixteen_boxes(pts.len()), &options, &output);
+    println!(
+        "{CLIP}: HEVC, {} session(s), split-frame encoding, 16 boxes per frame: {} frames, \
+         {fps:.0} fps ({:?}), encoder {}",
+        report.sessions, report.frames, report.elapsed, report.encoder
+    );
+    let (out_pts, out_keys) = decode_table(&output);
     std::fs::remove_file(&output).unwrap();
+    assert_eq!(report.encoder, "hevc_nvenc");
+    assert_eq!(out_pts.as_slice(), pts.as_slice(), "PTS list");
+    assert_eq!(out_keys, keys, "keyframes");
+    if !cfg!(debug_assertions) {
+        // Plan gate (section 11.4): HEVC split-frame encoding at 650 fps.
+        assert!(fps >= 650.0, "HEVC split encode {fps:.0} fps < 650");
+    }
 }
