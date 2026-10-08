@@ -177,6 +177,7 @@ impl KillFeedDetector {
         });
         self.classes.compute_rect(crop, score, &self.params);
         rows::find_rows(
+            crop,
             &self.classes,
             &mut self.scratch.rows,
             &mut self.scratch.tones,

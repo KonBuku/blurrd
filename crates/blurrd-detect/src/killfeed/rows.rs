@@ -16,6 +16,7 @@ use super::{
 };
 use crate::classes::{Class, PixelClasses};
 use crate::components::runs;
+use crate::image::RgbView;
 
 /// Minimum mean row score inside a bar-edge candidate.
 const MIN_INNER: f64 = 0.5;
@@ -44,6 +45,16 @@ const ANCHOR_MIN_STROKES: usize = 2;
 const ANCHOR_RUN: (u32, u32) = (6, 17);
 /// The row top lies this far above the start of its text line.
 const ANCHOR_TO_TOP: i32 = 11;
+/// Columns of the victim portrait (x 1838..1900, without its slanted
+/// edges) checked by the wall guard.
+const PORTRAIT: (i32, i32) = (1842, 1896);
+/// Rows of the portrait below the row top checked by the wall guard.
+const PORTRAIT_ROWS: (i32, i32) = (3, 30);
+/// Minimum mean absolute difference of `min(R, G, B)` between neighbouring
+/// portrait pixels. Measured on the parity excerpts: rows with names
+/// 7.3 to 25 (1st percentile 14.8), bar-edge rows without names (empty
+/// cover bars, walls) 0 to 4.1 (95th percentile).
+const MIN_PORTRAIT_TEXTURE: f32 = 6.0;
 /// A bar colour is learned from a text line's band if its tone covers at
 /// least this share of the non-white pixels next to the name...
 const TONE_SHARE: f32 = 0.6;
@@ -96,6 +107,7 @@ impl RowScratch {
 /// anchors rows whose edges a wall in the bar colour hides. The rows must
 /// form a stack from the top.
 pub(super) fn find_rows(
+    crop: &RgbView<'_>,
     classes: &PixelClasses,
     s: &mut RowScratch,
     tones: &mut Vec<Tone>,
@@ -156,8 +168,11 @@ pub(super) fn find_rows(
     }
     s.candidates
         .sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)));
+    // Wall guard: a bar-edge candidate without a text line must show the
+    // victim portrait. A wall in a bar colour behind the feed has edges
+    // too, but no portrait art.
     for &(_, y) in &s.candidates {
-        if far_from(&s.tops, y) {
+        if far_from(&s.tops, y) && has_portrait(crop, y + FEED_ROI.y0) {
             s.tops.push(y);
         }
     }
@@ -270,6 +285,45 @@ fn score_rows(classes: &PixelClasses, tones: &[Tone], s: &mut RowScratch) {
         let strokes = row[ax0..ax1].iter().filter(|&&f| f & text != 0).count();
         s.text_rows.push(strokes >= ANCHOR_MIN_STROKES);
     }
+}
+
+/// Whether the row at reference row `top` has the textured art of a
+/// victim portrait: the mean absolute difference of `min(R, G, B)` between
+/// neighbouring pixels of [`PORTRAIT`] is at least
+/// [`MIN_PORTRAIT_TEXTURE`].
+fn has_portrait(crop: &RgbView<'_>, top: i32) -> bool {
+    let (x0, x1) = (
+        (PORTRAIT.0 - FEED_ROI.x0) as usize,
+        (PORTRAIT.1 - FEED_ROI.x0) as usize,
+    );
+    let rows =
+        (top + PORTRAIT_ROWS.0 - FEED_ROI.y0) as u32..(top + PORTRAIT_ROWS.1 - FEED_ROI.y0) as u32;
+    let mn = |row: &[u8]| -> Vec<i16> {
+        row.as_chunks::<3>().0[x0..x1]
+            .iter()
+            .map(|p| i16::from(p[0].min(p[1]).min(p[2])))
+            .collect()
+    };
+    let (mut sum, mut count) = (0u32, 0u32);
+    let mut above: Option<Vec<i16>> = None;
+    for y in rows {
+        if y >= crop.height() {
+            return false;
+        }
+        let row = mn(crop.row(y));
+        for pair in row.windows(2) {
+            sum += u32::from(pair[0].abs_diff(pair[1]));
+        }
+        count += row.len().saturating_sub(1) as u32;
+        if let Some(prev) = &above {
+            for (a, b) in prev.iter().zip(&row) {
+                sum += u32::from(a.abs_diff(*b));
+            }
+            count += row.len() as u32;
+        }
+        above = Some(row);
+    }
+    count > 0 && sum as f32 >= MIN_PORTRAIT_TEXTURE * count as f32
 }
 
 /// Whether `y` is at least [`MIN_ROW_DISTANCE`] from every accepted row.

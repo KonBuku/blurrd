@@ -36,6 +36,33 @@ fn finds_every_settled_name() {
 }
 
 #[test]
+fn walls_in_a_bar_colour_add_no_rows() {
+    // A red or teal wall behind the feed passes the bar-colour score; the
+    // wall guard keeps only rows with a text line or a victim portrait.
+    for (i, background) in [Background::red_wall(5), Background::teal_wall(6)]
+        .into_iter()
+        .enumerate()
+    {
+        for rows in [1, 3, 6] {
+            let check = settled_feed(300 + i as u64, rows, background, Palette::DEFAULT);
+            let context = format!("wall {i}, {rows} rows");
+            check.assert_clean(&context);
+            assert_eq!(check.rows, rows as usize, "{context}: {:?}", check.row_tops);
+        }
+        let empty = Scene::new(Layout::reference(), background, Palette::DEFAULT, 1).render(0);
+        let mut detector = KillFeedDetector::new();
+        detector
+            .detect(&feed_view(&empty.frame), &mut vec![])
+            .unwrap();
+        assert!(
+            detector.rows().is_empty(),
+            "wall {i}: {:?}",
+            detector.rows()
+        );
+    }
+}
+
+#[test]
 fn reports_rows_top_to_bottom_with_their_names() {
     let check = settled_feed(7, 5, Background::noise(1), Palette::DEFAULT);
     check.assert_found("five rows");
