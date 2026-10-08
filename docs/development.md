@@ -23,16 +23,18 @@ policy and the commit conventions.
 
 ## Repository layout
 
-| Path                  | Contents                                                                                 |
-| --------------------- | ---------------------------------------------------------------------------------------- |
-| `crates/blurrd-core`  | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`.     |
-| `crates/blurrd-blur`  | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.      |
-| `crates/blurrd-video` | FFmpeg probing, decoding, seeking and the render (encode, mux); the only `unsafe` crate. |
-| `crates/blurrd-cli`   | The `blurrd` command-line tool (see [cli.md](cli.md)).                                   |
-| `xtask`               | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).          |
-| `docs`                | Developer and user documentation.                                                        |
-| `scripts`             | Node scripts for repository tasks (`release.mjs`).                                       |
-| `assets/brand`        | Logo and brand assets with their generator.                                              |
+| Path                    | Contents                                                                                 |
+| ----------------------- | ---------------------------------------------------------------------------------------- |
+| `crates/blurrd-core`    | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`.     |
+| `crates/blurrd-blur`    | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.      |
+| `crates/blurrd-video`   | FFmpeg probing, decoding, seeking and the render (encode, mux); the only `unsafe` crate. |
+| `crates/blurrd-cli`     | The `blurrd` command-line tool (see [cli.md](cli.md)).                                   |
+| `crates/blurrd-testkit` | Development only: synthetic HUD fixtures with ground truth, quality metrics, proposals.  |
+| `xtask`                 | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).          |
+| `docs`                  | Developer and user documentation.                                                        |
+| `scripts`               | Node scripts for repository tasks (`release.mjs`).                                       |
+| `assets/brand`          | Logo and brand assets with their generator.                                              |
+| `tests/fonts`           | The OFL font of the synthetic fixtures and the pins of the fetched Noto fonts.           |
 
 ## Rust workspace
 
@@ -73,6 +75,32 @@ Lints are configured once in the root `Cargo.toml` (`[workspace.lints]`) and
 inherited by every crate with `[lints] workspace = true`. Production code must
 not use `unwrap`, `expect`, `dbg!`, `todo!` or `println!`; tests may unwrap,
 expect and print (`clippy.toml`).
+
+### Synthetic HUD fixtures
+
+Real recordings never enter the repository, so the detectors are tested in
+CI on generated frames. `blurrd-testkit` draws HUD-like kill-feed rows,
+banners, voice-chat speakers and text-chat lines with made-up names over
+procedural backgrounds, in every HUD layout (16:9 at 720p to 2160p, native
+4:3, pillarbox, 16:10, stretched 4:3) and colour palette, and returns the
+exact ground truth of each frame: every name's glyph mask (dilated by two
+reference pixels), its slot box, portraits and other text. Its `metrics`
+module measures geometric leaks, the high-frequency residual, over-blur,
+portrait intrusion, false positives, jitter and flicker with exactly the
+mask the blur applies.
+
+Latin text uses Barlow Condensed (SIL Open Font License 1.1), committed in
+`tests/fonts/`. Names in other scripts (Hangul, Japanese, Thai, Arabic,
+Devanagari) use Noto Sans fonts that are too large to commit; fetch them
+once with
+
+```sh
+cargo xtask fetch-fonts   # into tests/fonts/noto/ (gitignored), SHA-256 checked
+```
+
+The download source and checksums are pinned in `tests/fonts/fonts.toml`.
+Tests that need these fonts skip with a message when they are missing;
+CI sets `BLURRD_REQUIRE_FONTS=1`, which turns the skip into a failure.
 
 ### Generated TypeScript bindings and JSON Schemas
 
@@ -139,11 +167,11 @@ GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
 every pull request and on manual dispatch. All jobs must pass before a
 change is merged.
 
-| Job              | Runner  | Checks                                                                                                             |
-| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| `lint`           | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history |
-| `rust (windows)` | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), clippy with `-D warnings`, cargo-nextest, doctests             |
-| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                         |
+| Job              | Runner  | Checks                                                                                                                                                    |
+| ---------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`           | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history                                        |
+| `rust (windows)` | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
+| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
 (see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the

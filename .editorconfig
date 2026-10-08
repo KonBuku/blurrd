@@ -25,3 +25,7 @@ indent_style = tab
 # that CI can compare them.
 [crates/blurrd-core/bindings/*.ts]
 trim_trailing_whitespace = unset
+
+# Verbatim license texts.
+[tests/fonts/OFL.txt]
+trim_trailing_whitespace = unset

@@ -1,0 +1,19 @@
+[package]
+name = "blurrd-testkit"
+description = "Synthetic HUD fixtures, ground truth and metrics for testing blurrd (development only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ab_glyph.workspace = true
+blurrd-blur.workspace = true
+blurrd-core.workspace = true
+
+[lints]
+workspace = true

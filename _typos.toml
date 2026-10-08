@@ -8,3 +8,7 @@ extend-exclude = ["*.lock", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md", "pnpm-lock
 [default.extend-words]
 # MP4/QuickTime box names (crates/blurrd-video/src/mp4.rs).
 trak = "trak"
+# OpenType variation axis tag in the fixture font pins (tests/fonts).
+wdth = "wdth"
+# German chat prefix in the synthetic HUD fixtures.
+Alle = "Alle"

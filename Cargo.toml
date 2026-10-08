@@ -16,6 +16,8 @@ publish = false
 # architecture plan). A dependency is added here by the commit that first
 # uses it; crates inherit it with `dep.workspace = true`.
 [workspace.dependencies]
+# Text rendering of the synthetic HUD fixtures (blurrd-testkit).
+ab_glyph = "=0.2.32"
 anyhow = "=1.0.104"
 blurrd-blur = { path = "crates/blurrd-blur" }
 blurrd-core = { path = "crates/blurrd-core" }
@@ -101,4 +103,9 @@ panic = "abort"
 # Keep dependencies (image operations, OCR pre-processing) fast enough to be
 # usable in debug builds.
 [profile.dev.package."*"]
+opt-level = 2
+
+# The synthetic fixture generator renders full frames in every test; keep
+# it fast in debug builds too.
+[profile.dev.package.blurrd-testkit]
 opt-level = 2

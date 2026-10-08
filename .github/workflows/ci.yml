@@ -116,10 +116,22 @@ jobs:
         run: cargo xtask fetch-ffmpeg
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: fixture fonts cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tests/fonts/noto
+          key: fonts-${{ hashFiles('tests/fonts/fonts.toml') }}
+      - name: fixture fonts
+        # Noto fonts for the multi-script synthetic HUD fixtures, pinned by
+        # SHA-256 in tests/fonts/fonts.toml.
+        run: cargo xtask fetch-fonts
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: tests
         run: cargo nextest run --workspace --locked
+        env:
+          # Fail instead of skipping when the fixture fonts are missing.
+          BLURRD_REQUIRE_FONTS: "1"
       - name: doctests
         run: cargo test --workspace --doc --locked
         env:

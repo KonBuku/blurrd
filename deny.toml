@@ -7,7 +7,14 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+  # ttf-parser (through ab_glyph) is unmaintained. It is used only by the
+  # development-only blurrd-testkit to render synthetic HUD fixtures from
+  # the fonts in tests/fonts, which are committed or pinned by SHA-256, so
+  # it never parses untrusted input and is never shipped. Revisit when
+  # ab_glyph moves to a maintained parser.
+  { id = "RUSTSEC-2026-0192", reason = "dev-only fixture rendering of pinned fonts" },
+]
 
 [licenses]
 version = 2

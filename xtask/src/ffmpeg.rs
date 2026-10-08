@@ -256,7 +256,8 @@ fn run_curl(mut cmd: Command, token: Option<&str>, url: &str) -> Result<std::pro
     Ok(output)
 }
 
-fn curl(url: &str, dest: &Path, token: Option<&str>, accept: &str) -> Result<()> {
+/// Downloads `url` into `dest` with curl (shared with `fetch-fonts`).
+pub(crate) fn curl(url: &str, dest: &Path, token: Option<&str>, accept: &str) -> Result<()> {
     eprintln!("downloading {url}");
     let mut cmd = curl_command(url, token, accept);
     cmd.arg("--output").arg(dest);
