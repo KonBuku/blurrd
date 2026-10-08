@@ -13,6 +13,12 @@ export default defineConfig({
   forbidOnly: ci,
   retries: ci ? 1 : 0,
   reporter: ci ? [["github"], ["html", { open: "never" }]] : "list",
+  expect: {
+    // Gallery screenshots (e2e/gallery.spec.ts-snapshots, rendered on
+    // Windows): tolerate antialiasing differences between machines, not
+    // layout or colour changes.
+    toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: "disabled", caret: "hide" },
+  },
   use: {
     baseURL: `http://localhost:${port}`,
     viewport: { width: 1440, height: 900 },

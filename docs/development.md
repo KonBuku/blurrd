@@ -216,6 +216,19 @@ pnpm --filter @blurrd/desktop exec playwright install chromium   # once
 pnpm --filter @blurrd/desktop e2e                                # starts `pnpm dev:mock` itself
 ```
 
+`/?gallery` on the mock server shows the component gallery: every token
+and component in one page. `e2e/gallery.spec.ts` checks that every control
+in it shows a visible focus ring, and compares light and dark screenshots
+of the gallery, the window shell and the floating layers with the
+baselines in `e2e/gallery.spec.ts-snapshots`. The baselines are rendered on
+Windows (Segoe UI) and the screenshot tests skip themselves elsewhere.
+After an intended visual change, update them on Windows and review the
+new images before committing:
+
+```sh
+pnpm --filter @blurrd/desktop e2e --grep "@screenshot" --update-snapshots
+```
+
 The window has no native title bar (`decorations: false`); the frontend
 draws its own with window controls. `src-tauri/capabilities/default.json`
 grants the main window only the window calls of that title bar and the log
@@ -273,13 +286,14 @@ GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
 every pull request and on manual dispatch. All jobs must pass before a
 change is merged; the installer job runs only after a merge.
 
-| Job                | Runner  | Checks                                                                                                                                                                                                                                               |
-| ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`             | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typography check, typos, gitleaks over the full history                                                                                                                 |
-| `frontend`         | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, Playwright end-to-end tests in Chromium against the mock backend (report uploaded on failure)                                                                                                 |
-| `rust (windows)`   | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
-| `deny`             | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                           |
-| `bundle (windows)` | Windows | pushes to `main` and manual runs only, after `frontend` and `rust (windows)`: `pnpm build` (release app + NSIS installer), uploaded as the `blurrd-windows-<sha>` artifact for 14 days                                                               |
+| Job                     | Runner  | Checks                                                                                                                                                                                                                                               |
+| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`                  | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typography check, typos, gitleaks over the full history                                                                                                                 |
+| `frontend`              | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, Playwright end-to-end tests in Chromium against the mock backend (report uploaded on failure)                                                                                                 |
+| `screenshots (windows)` | Windows | Playwright screenshot comparison of the component gallery, the window shell and the floating layers in both themes (report uploaded on failure)                                                                                                      |
+| `rust (windows)`        | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
+| `deny`                  | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                           |
+| `bundle (windows)`      | Windows | pushes to `main` and manual runs only, after `frontend`, `screenshots (windows)` and `rust (windows)`: `pnpm build` (release app + NSIS installer), uploaded as the `blurrd-windows-<sha>` artifact for 14 days                                      |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
 (see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the
