@@ -6,7 +6,12 @@
 //! this crate builds and tests without FFmpeg, ONNX Runtime or a GPU; the
 //! engine feeds it crops converted by `blurrd-video`.
 //!
-//! This version provides the building blocks every detector shares:
+//! Detectors:
+//!
+//! - [`KillFeedDetector`] ([`killfeed`]): killer and victim names in the
+//!   kill-feed rows of one frame.
+//!
+//! The building blocks every detector shares:
 //!
 //! - [`RgbView`], [`GrayImage`] and [`BitMask`]: the images detectors read
 //!   and produce.
@@ -29,8 +34,12 @@
 
 pub mod classes;
 pub mod components;
+mod detection;
 mod image;
+pub mod killfeed;
 pub mod morph;
 
 pub use classes::{Class, ClassParams, PixelClasses, hsv};
+pub use detection::{DetectError, Detection};
 pub use image::{BitMask, GrayImage, ImageError, RgbView};
+pub use killfeed::KillFeedDetector;

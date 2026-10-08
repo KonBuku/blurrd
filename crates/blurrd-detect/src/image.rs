@@ -224,6 +224,21 @@ impl<'a> BitMask<'a> {
         self.height
     }
 
+    /// The flag bit the mask selects.
+    pub(crate) const fn bit(&self) -> u8 {
+        self.bit
+    }
+
+    /// The flags of row `y` (test them with [`BitMask::bit`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `y` is not below the height.
+    pub(crate) fn row(&self, y: u32) -> &'a [u8] {
+        let w = self.width as usize;
+        &self.flags[y as usize * w..(y as usize + 1) * w]
+    }
+
     /// Whether pixel `(x, y)` is set; `false` outside the mask.
     pub fn get(&self, x: i32, y: i32) -> bool {
         x >= 0

@@ -3,9 +3,12 @@
 //! Geometry in reference pixels from the port spec (section 3): rows are
 //! 33 px tall on a 39 px pitch with the first row's top at y 96, right
 //! aligned at x 1900; the victim portrait spans x 1838..1900 and the victim
-//! name ends near x 1832; names have 14 px capitals with the baseline at
-//! the row top + 24. The newest row is at the bottom; when the oldest row
-//! has faded out, every row below jumps up by one pitch.
+//! name ends near x 1832; names have 11 px capitals with the baseline 21 px
+//! below the row top, as measured on real recordings (the text strokes of
+//! 1,455 rows span 10 to 21 px below the row top; the port spec's 14 px
+//! capitals from 10 to 24 px include anti-aliasing and descenders). The
+//! newest row is at the bottom; when the oldest row has faded out, every
+//! row below jumps up by one pitch.
 //!
 //! Animations per row: a one-frame cover bar without content, then the
 //! content slides in from the left (60, 25 and 8 px short of its place),
@@ -32,9 +35,9 @@ pub const VICTIM_PORTRAIT_X0: i32 = 1838;
 /// Right edge of the victim name's pen advance.
 pub const VICTIM_TEXT_X1: f32 = 1832.0;
 /// Capital height of the names.
-pub const NAME_CAP: f32 = 14.0;
+pub const NAME_CAP: f32 = 11.0;
 /// Baseline of the names below the row top.
-pub const BASELINE: f32 = 24.0;
+pub const BASELINE: f32 = 21.0;
 /// Horizontal offsets of the content in the frames after the cover bar.
 pub const SLIDE_IN: [f32; 3] = [-60.0, -25.0, -8.0];
 

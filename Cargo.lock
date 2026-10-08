@@ -194,6 +194,7 @@ dependencies = [
 name = "blurrd-detect"
 version = "0.1.0"
 dependencies = [
+ "blurrd-blur",
  "blurrd-core",
  "blurrd-testkit",
  "criterion",

@@ -15,12 +15,17 @@ blurrd-core.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+blurrd-blur.workspace = true
 blurrd-testkit.workspace = true
 criterion.workspace = true
 proptest.workspace = true
 
 [[bench]]
 name = "classes"
+harness = false
+
+[[bench]]
+name = "killfeed"
 harness = false
 
 [lints]

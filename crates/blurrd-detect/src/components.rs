@@ -25,7 +25,8 @@ pub struct Component {
 /// Reusable buffers for [`components`].
 #[derive(Debug, Clone, Default)]
 pub struct ComponentScratch {
-    seen: Vec<bool>,
+    /// Non-zero for set pixels of the ROI that no component has taken yet.
+    pending: Vec<u8>,
     stack: Vec<(i32, i32)>,
 }
 
@@ -46,10 +47,19 @@ pub fn components(
     let Some(roi) = mask.bounds().and_then(|b| b.intersection(&roi)) else {
         return;
     };
-    let (w, h) = (roi.width() as usize, roi.height() as usize);
-    scratch.seen.clear();
-    scratch.seen.resize(w * h, false);
-    let index = |x: i32, y: i32| (y - roi.y0) as usize * w + (x - roi.x0) as usize;
+    let (w, h) = (roi.width() as i32, roi.height() as i32);
+    // Copy the ROI's bits once; the scan then reads plain bytes, and
+    // taking a pixel into a component clears it.
+    let pending = &mut scratch.pending;
+    pending.clear();
+    pending.resize(w as usize * h as usize, 0);
+    let bit = mask.bit();
+    let (x0, x1) = (roi.x0 as usize, roi.x1 as usize);
+    for (y, dst) in (roi.y0..roi.y1).zip(pending.chunks_exact_mut(w as usize)) {
+        for (d, &f) in dst.iter_mut().zip(&mask.row(y as u32)[x0..x1]) {
+            *d = f & bit;
+        }
+    }
     let neighbours: &[(i32, i32)] = match connectivity {
         Connectivity::Four => &[(1, 0), (-1, 0), (0, 1), (0, -1)],
         Connectivity::Eight => &[
@@ -63,34 +73,38 @@ pub fn components(
             (-1, -1),
         ],
     };
-    for y in roi.y0..roi.y1 {
-        for x in roi.x0..roi.x1 {
-            if scratch.seen[index(x, y)] || !mask.get(x, y) {
-                continue;
-            }
-            scratch.seen[index(x, y)] = true;
-            scratch.stack.push((x, y));
-            let (mut x0, mut y0, mut x1, mut y1, mut area) = (x, y, x + 1, y + 1, 0u32);
-            while let Some((px, py)) = scratch.stack.pop() {
-                area += 1;
-                x0 = x0.min(px);
-                y0 = y0.min(py);
-                x1 = x1.max(px + 1);
-                y1 = y1.max(py + 1);
-                for &(dx, dy) in neighbours {
-                    let (nx, ny) = (px + dx, py + dy);
-                    let inside = nx >= roi.x0 && nx < roi.x1 && ny >= roi.y0 && ny < roi.y1;
-                    if inside && !scratch.seen[index(nx, ny)] && mask.get(nx, ny) {
-                        scratch.seen[index(nx, ny)] = true;
-                        scratch.stack.push((nx, ny));
-                    }
+    let index = |x: i32, y: i32| (y * w + x) as usize;
+    let mut next = 0;
+    while let Some(offset) = pending[next..].iter().position(|&p| p != 0) {
+        let start = next + offset;
+        next = start + 1;
+        pending[start] = 0;
+        let (x, y) = (start as i32 % w, start as i32 / w);
+        scratch.stack.push((x, y));
+        let (mut bx0, mut by0, mut bx1, mut by1, mut area) = (x, y, x + 1, y + 1, 0u32);
+        while let Some((px, py)) = scratch.stack.pop() {
+            area += 1;
+            bx0 = bx0.min(px);
+            by0 = by0.min(py);
+            bx1 = bx1.max(px + 1);
+            by1 = by1.max(py + 1);
+            for &(dx, dy) in neighbours {
+                let (nx, ny) = (px + dx, py + dy);
+                if nx >= 0 && nx < w && ny >= 0 && ny < h && pending[index(nx, ny)] != 0 {
+                    pending[index(nx, ny)] = 0;
+                    scratch.stack.push((nx, ny));
                 }
             }
-            out.push(Component {
-                bounds: RectI { x0, y0, x1, y1 },
-                area,
-            });
         }
+        out.push(Component {
+            bounds: RectI {
+                x0: bx0 + roi.x0,
+                y0: by0 + roi.y0,
+                x1: bx1 + roi.x0,
+                y1: by1 + roi.y0,
+            },
+            area,
+        });
     }
 }
 

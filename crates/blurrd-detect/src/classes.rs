@@ -25,6 +25,8 @@
     reason = "colour maths uses the conventional names r, g, b, h, s, v"
 )]
 
+use blurrd_core::RectI;
+
 use crate::image::{BitMask, GrayImage, RgbView};
 use crate::morph::{MorphScratch, white_tophat};
 
@@ -308,6 +310,10 @@ pub struct PixelClasses {
     flags: Vec<u8>,
     rows: RowScratch,
     scratch: MorphScratch,
+    /// `mn` of the area [`PixelClasses::compute_rect`] runs the top-hat on.
+    part_mn: GrayImage,
+    /// The top-hat of `part_mn`.
+    part_tophat: GrayImage,
 }
 
 impl PixelClasses {
@@ -348,6 +354,91 @@ impl PixelClasses {
                 && chroma <= params.text_max_chroma
             {
                 *flag |= Class::Text.bit();
+            }
+        }
+    }
+
+    /// Classifies only the pixels of `rect` (clipped to the view) and
+    /// leaves the rest of the planes as they are.
+    ///
+    /// Detectors that need a few bands of a large crop use this instead of
+    /// [`PixelClasses::compute`]: the planes keep the size of `view`, and
+    /// inside `rect` every channel and flag is exactly what `compute` gives
+    /// for the whole view (the top-hat sees the same neighbourhood, and the
+    /// borders of the view stay borders). In a margin of
+    /// `2 × (tophat_size / 2)` pixels around `rect` the colour flags, `mn` and
+    /// the chroma are set as well, but the [`Class::Text`] flag is cleared
+    /// and the top-hat is unspecified. Pixels further away keep the values
+    /// of earlier calls (0 after the view size changed), so a caller that
+    /// classifies several areas of one frame must not let the margin of
+    /// one area overlap another area it still reads.
+    pub fn compute_rect(&mut self, view: &RgbView<'_>, rect: RectI, params: &ClassParams) {
+        let (w, h) = (view.width(), view.height());
+        if (w, h) != (self.width, self.height) {
+            self.width = w;
+            self.height = h;
+            for plane in [&mut self.mn, &mut self.chroma, &mut self.tophat] {
+                plane.resize(w, h);
+                plane.data_mut().fill(0);
+            }
+            self.flags.clear();
+            self.flags.resize(w as usize * h as usize, 0);
+        }
+        let Some(inner) = RectI::new(0, 0, w as i32, h as i32)
+            .ok()
+            .and_then(|b| b.intersection(&rect))
+        else {
+            return;
+        };
+        let k = params.tophat_size;
+        // The opening at a pixel reads the source up to `2 × (k / 2)`
+        // pixels away (erosion, then dilation, both anchored at `k / 2`).
+        let margin = 2 * (k / 2) as i32;
+        let outer = RectI {
+            x0: (inner.x0 - margin).max(0),
+            y0: (inner.y0 - margin).max(0),
+            x1: (inner.x1 + margin).min(w as i32),
+            y1: (inner.y1 + margin).min(h as i32),
+        };
+        let (ox0, ox1) = (outer.x0 as usize, outer.x1 as usize);
+        let width = w as usize;
+        self.part_mn.resize(outer.width(), outer.height());
+        for y in outer.y0..outer.y1 {
+            let start = y as usize * width;
+            let pixels = &view.row(y as u32).as_chunks::<3>().0[ox0..ox1];
+            let mn = &mut self.mn.data_mut()[start + ox0..start + ox1];
+            let chroma = &mut self.chroma.data_mut()[start + ox0..start + ox1];
+            let flags = &mut self.flags[start + ox0..start + ox1];
+            self.rows.classify_row(pixels, params, mn, chroma, flags);
+            let part_row = (y - outer.y0) as usize * (ox1 - ox0);
+            self.part_mn.data_mut()[part_row..part_row + ox1 - ox0].copy_from_slice(mn);
+        }
+        white_tophat(
+            &self.part_mn,
+            k,
+            k,
+            &mut self.part_tophat,
+            &mut self.scratch,
+        );
+        let (ix0, ix1) = (inner.x0 as usize, inner.x1 as usize);
+        for y in inner.y0..inner.y1 {
+            let start = y as usize * width;
+            let part = self.part_tophat.row((y - outer.y0) as u32);
+            let tophat = &part[ix0 - ox0..ix1 - ox0];
+            self.tophat.data_mut()[start + ix0..start + ix1].copy_from_slice(tophat);
+            let text = tophat
+                .iter()
+                .zip(&self.mn.data()[start + ix0..start + ix1])
+                .zip(&self.chroma.data()[start + ix0..start + ix1]);
+            for (flag, ((&th, &mn), &chroma)) in
+                self.flags[start + ix0..start + ix1].iter_mut().zip(text)
+            {
+                if th >= params.text_min_tophat
+                    && mn >= params.text_min_mn
+                    && chroma <= params.text_max_chroma
+                {
+                    *flag |= Class::Text.bit();
+                }
             }
         }
     }
@@ -402,6 +493,8 @@ impl PixelClasses {
 
 #[cfg(test)]
 mod tests {
+    use blurrd_core::RectI;
+
     use super::{Class, ClassParams, PixelClasses, hsv};
     use crate::image::RgbView;
 
@@ -511,6 +604,63 @@ mod tests {
             .map(|i| [(i >> 16) as u8, (i >> 8) as u8, i as u8])
             .collect();
         check_rows(&colours, &ClassParams::default());
+    }
+
+    #[test]
+    fn classifying_a_rect_matches_the_whole_crop_inside_it() {
+        let (w, h) = (61u32, 47u32);
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        let data: Vec<u8> = (0..3 * w * h)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                // Mostly bright pixels, so text strokes occur.
+                if x.is_multiple_of(3) {
+                    (x >> 8) as u8
+                } else {
+                    160 + (x >> 16) as u8 % 96
+                }
+            })
+            .collect();
+        let view = RgbView::new(&data, w, h, 3 * w as usize).unwrap();
+        for k in [5, 7, 8] {
+            let params = ClassParams {
+                tophat_size: k,
+                text_min_tophat: 10,
+                ..ClassParams::default()
+            };
+            let mut whole = PixelClasses::new();
+            whole.compute(&view, &params);
+            let mut part = PixelClasses::new();
+            let rects = [
+                RectI::new(20, 15, 40, 30).unwrap(),
+                RectI::new(0, 0, 9, 47).unwrap(),
+                RectI::new(50, 40, 70, 60).unwrap(),
+                RectI::new(-5, 10, 3, 12).unwrap(),
+            ];
+            for rect in rects {
+                part.compute_rect(&view, rect, &params);
+                let inner = rect
+                    .intersection(&RectI::new(0, 0, 61, 47).unwrap())
+                    .unwrap();
+                let mut text = 0;
+                for y in inner.y0 as u32..inner.y1 as u32 {
+                    for x in inner.x0 as u32..inner.x1 as u32 {
+                        let i = (y * w + x) as usize;
+                        assert_eq!(part.flags()[i], whole.flags()[i], "k {k} at ({x}, {y})");
+                        assert_eq!(part.tophat().get(x, y), whole.tophat().get(x, y));
+                        assert_eq!(part.mn().get(x, y), whole.mn().get(x, y));
+                        text += u32::from(whole.has(x, y, Class::Text));
+                    }
+                }
+                assert!(
+                    text > 0 || inner.area() < 100,
+                    "k {k}: the test needs text strokes"
+                );
+            }
+            assert_eq!((part.width(), part.height()), (w, h));
+        }
     }
 
     #[test]
