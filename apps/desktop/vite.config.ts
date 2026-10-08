@@ -34,6 +34,10 @@ export default defineConfig({
     target: tauriPlatform === "windows" ? "chrome130" : "baseline-widely-available",
     minify: tauriDebug ? false : "oxc",
     sourcemap: tauriDebug,
+    // The app loads its bundle from the installation folder, not over a
+    // network, so one chunk starts fastest; Vite's 500 kB warning is for
+    // web pages. Warn when the bundle doubles instead.
+    chunkSizeWarningLimit: 1024,
   },
   test: {
     environment: "happy-dom",

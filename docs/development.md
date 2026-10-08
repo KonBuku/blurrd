@@ -235,11 +235,14 @@ differ by more than the 1 % tolerance, so small changes would be missed.)
 The window has no native title bar (`decorations: false`); the frontend
 draws its own with window controls. `src-tauri/capabilities/default.json`
 grants the main window only the window calls of that title bar, the log
-plugin's `log` command, and reading and writing the settings store that the
-Rust side opens at start (the frontend cannot open other store files). The app writes JSON lines to
+plugin's `log` command, reading and writing the settings store that the
+Rust side opens at start (the frontend cannot open other store files), and
+the open dialog for adding recordings. The app writes JSON lines to
 `%LOCALAPPDATA%\io.github.konbuku.blurrd\logs\blurrd.log` (debug builds
 also print to stdout) and remembers the window size and position. Starting
-it a second time focuses the running window.
+it a second time focuses the running window and hands the files on the
+second command line to it (event `second-instance`), which adds them to
+the queue.
 
 ### Window shell
 
@@ -274,6 +277,39 @@ restore with the button and by double-clicking the title bar, drag the
 title bar to a screen edge (snap) and to the top (maximize), Win+arrow
 keys, Win+Z (snap layouts), and that a theme chosen in Settings survives
 a restart.
+
+### Queue and import
+
+Recordings join the queue from the + button and the queue menu (file and
+folder dialogs, Ctrl+O and Ctrl+Shift+O), from files dropped anywhere on
+the window (Tauri drag and drop events; an accent veil says how many items
+a drop adds) and from a second start. `src/features/import/import.tsx`
+shows each new path as "Reading…" at once, asks the backend to probe the
+paths (`probe_media` in `src/ipc/commands.ts`; folders expand to the
+videos inside them) and lists every file it cannot use in one toast.
+Paths already in the queue are skipped, compared case-insensitively.
+
+`src/store/queue.ts` holds the items, the selection and the filter;
+`src/lib/queue-status.ts` is the status model of design 8.1 (queued,
+reading, analyzing, ready, exporting, verifying, done, done with warnings,
+unverified, failed, canceled) with the status text, and
+`src/features/queue/StatusGlyph.tsx` the glyph of each status; a status is
+never shown by colour alone. The list (`QueueList.tsx`) is a virtualized
+multi-select listbox: only the visible rows are in the DOM, so whole
+recording folders stay smooth. Click, Ctrl+click and Shift+click select;
+arrows, Page Up/Down, Home and End move (Shift extends), Ctrl+A selects
+all, Delete removes; the context menu copies paths and removes. A filter
+field appears above eight items. `e2e/queue.spec.ts` covers the import
+paths, the keyboard and mouse selection, the context menu, the filter, an
+axe scan in both themes, and drops 200 files to check that the list keeps
+fewer than 30 rows in the DOM and scrolls at the idle page's frame rate
+with no long tasks.
+
+The mock backend (`src/ipc/mock`) has a small fake file system for this:
+`window.blurrdMock.dialogResult` is what the next dialog returns,
+`folders` maps folder paths to their files, `drop()`, `dragEnter()`,
+`dragLeave()` and `secondInstance()` emit the events of the real shell, and
+`probeError` makes the probe fail.
 
 ### Design tokens and typography
 

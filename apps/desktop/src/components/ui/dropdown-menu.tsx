@@ -16,6 +16,13 @@ export const DropdownMenuGroup = MenuPrimitive.Group;
 /** A group of {@link DropdownMenuRadioItem}s, one of which is selected. */
 export const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
 
+/**
+ * Menu panel styles shared with the context menu: menu colour, 8 px
+ * radius, 4 px padding, shadow, 100 ms fade and zoom.
+ */
+export const menuContentClass =
+  "z-50 flex min-w-32 flex-col gap-0.5 overflow-x-hidden overflow-y-auto rounded-lg border border-popover-border bg-menu p-1 text-popover-foreground shadow-md duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95";
+
 /** The menu panel: menu colour, 8 px radius, 4 px padding, shadow. */
 export function DropdownMenuContent({
   className,
@@ -28,7 +35,8 @@ export function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 flex max-h-(--radix-dropdown-menu-content-available-height) min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) flex-col gap-0.5 overflow-x-hidden overflow-y-auto rounded-lg border border-popover-border bg-menu p-1 text-popover-foreground shadow-md duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+          menuContentClass,
+          "max-h-(--radix-dropdown-menu-content-available-height) origin-(--radix-dropdown-menu-content-transform-origin)",
           className,
         )}
         {...props}
@@ -39,6 +47,12 @@ export function DropdownMenuContent({
 
 const itemClass =
   "relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-ui-base/relaxed outline-none select-none data-disabled:pointer-events-none data-disabled:text-foreground-subtlest data-highlighted:bg-menu-hover [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
+
+/**
+ * Command item styles shared with the context menu; destructive items
+ * (`data-variant="destructive"`) use the destructive colour.
+ */
+export const menuItemClass = `${itemClass} data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive data-[variant=destructive]:data-highlighted:text-destructive-foreground`;
 
 export type DropdownMenuItemProps = ComponentProps<typeof MenuPrimitive.Item> & {
   /** Destructive items use the destructive colour. */
@@ -55,11 +69,7 @@ export function DropdownMenuItem({
     <MenuPrimitive.Item
       data-slot="dropdown-menu-item"
       data-variant={variant}
-      className={cn(
-        itemClass,
-        "data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive data-[variant=destructive]:data-highlighted:text-destructive-foreground",
-        className,
-      )}
+      className={cn(menuItemClass, className)}
       {...props}
     />
   );

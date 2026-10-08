@@ -1,0 +1,178 @@
+/**
+ * The status of a file in the queue (design 8.1, "Per-file status model")
+ * and its text. The glyph for each tone and kind lives in
+ * `features/queue/StatusGlyph.tsx`; status is never shown by colour alone.
+ */
+import { formatCount, formatDuration } from "./media";
+
+/** Where a file is in its life cycle. */
+export type QueueStatus =
+  /** Waiting to be analyzed. */
+  | { readonly kind: "queued" }
+  /** The file is being read (probe). */
+  | { readonly kind: "probing"; readonly folder: boolean }
+  /** Analysis is running. */
+  | {
+      readonly kind: "analyzing";
+      readonly progress: number | null;
+      readonly fps: number | null;
+    }
+  /** Analysis finished; `boxes` is the number of blur boxes found. */
+  | { readonly kind: "ready"; readonly boxes: number | null }
+  /** Rendering is running. */
+  | {
+      readonly kind: "exporting";
+      readonly progress: number | null;
+      readonly fps: number | null;
+      readonly etaMs: number | null;
+    }
+  /** Verification is running. */
+  | { readonly kind: "verifying"; readonly pass: number; readonly passes: number }
+  /** Exported; `verified` is false when verification was switched off. */
+  | { readonly kind: "done"; readonly verified: boolean }
+  /** Exported, but verification reported possible leaks. */
+  | { readonly kind: "warnings"; readonly leaks: number }
+  /**
+   * Exported as `_UNVERIFIED` (verification could not finish); waits for
+   * the user to review and accept the report (plan 7.2).
+   */
+  | { readonly kind: "unverified" }
+  /** Failed with a short reason; `detail` holds technical information. */
+  | { readonly kind: "failed"; readonly reason: string; readonly detail: string | null }
+  /** Canceled by the user. */
+  | { readonly kind: "canceled" };
+
+/** Kinds of {@link QueueStatus}. */
+export type QueueStatusKind = QueueStatus["kind"];
+
+/** Colour role of a status glyph; the text always says the same. */
+export type StatusTone = "neutral" | "muted" | "success" | "warning" | "destructive";
+
+const JOINER = " · ";
+
+function percent(progress: number | null): string | null {
+  return progress === null ? null : `${Math.floor(Math.min(Math.max(progress, 0), 1) * 100)}%`;
+}
+
+function fps(value: number | null): string | null {
+  return value === null ? null : `${formatCount(Math.round(value))} fps`;
+}
+
+function plural(count: number, one: string, many: string): string {
+  return `${formatCount(count)} ${count === 1 ? one : many}`;
+}
+
+/** Joins the parts that are present with the status separator. */
+function parts(...items: (string | null)[]): string {
+  return items.filter((item): item is string => item !== null).join(JOINER);
+}
+
+/** The status line of a queue item, for example "Analyzing · 46% · 820 fps". */
+export function statusText(status: QueueStatus): string {
+  switch (status.kind) {
+    case "queued":
+      return "Queued";
+    case "probing":
+      return status.folder ? "Reading folder…" : "Reading file…";
+    case "analyzing":
+      return parts("Analyzing", percent(status.progress), fps(status.fps));
+    case "ready":
+      return parts("Ready", status.boxes === null ? null : plural(status.boxes, "box", "boxes"));
+    case "exporting":
+      return parts(
+        "Exporting",
+        percent(status.progress),
+        fps(status.fps),
+        status.etaMs === null ? null : `${formatDuration(status.etaMs / 1000)} left`,
+      );
+    case "verifying":
+      return `Verifying${JOINER}pass ${status.pass}/${status.passes}`;
+    case "done":
+      return status.verified ? "Done · verified clean" : "Done · not verified";
+    case "warnings":
+      return `Done${JOINER}${plural(status.leaks, "possible leak", "possible leaks")}`;
+    case "unverified":
+      return "Unverified · review the report";
+    case "failed":
+      return status.reason;
+    case "canceled":
+      return "Canceled";
+  }
+}
+
+/** Colour role of the status glyph. */
+export function statusTone(status: QueueStatus): StatusTone {
+  switch (status.kind) {
+    case "queued":
+    case "canceled":
+      return "muted";
+    case "done":
+      return status.verified ? "success" : "neutral";
+    case "warnings":
+    case "unverified":
+      return "warning";
+    case "failed":
+      return "destructive";
+    default:
+      return "neutral";
+  }
+}
+
+/** Whether a job (probe, analysis, export or verification) is running. */
+export function isRunning(status: QueueStatus): boolean {
+  return (
+    status.kind === "probing" ||
+    status.kind === "analyzing" ||
+    status.kind === "exporting" ||
+    status.kind === "verifying"
+  );
+}
+
+/** Whether the file has reached an end state ("Clear finished" removes these). */
+export function isFinished(status: QueueStatus): boolean {
+  return (
+    status.kind === "done" ||
+    status.kind === "warnings" ||
+    status.kind === "unverified" ||
+    status.kind === "failed" ||
+    status.kind === "canceled"
+  );
+}
+
+/**
+ * Progress from 0 to 1 for the inline bar, `null` for a running job of
+ * unknown length, `undefined` when no bar is shown.
+ */
+export function statusProgress(status: QueueStatus): number | null | undefined {
+  switch (status.kind) {
+    case "probing":
+      return null;
+    case "analyzing":
+    case "exporting":
+      return status.progress;
+    case "verifying":
+      return status.passes > 0 ? (status.pass - 1) / status.passes : null;
+    default:
+      return undefined;
+  }
+}
+
+/** Order of statuses for "Sort by status": what needs attention first. */
+const SORT_ORDER: Readonly<Record<QueueStatusKind, number>> = {
+  failed: 0,
+  unverified: 1,
+  warnings: 2,
+  exporting: 3,
+  verifying: 4,
+  analyzing: 5,
+  probing: 6,
+  ready: 7,
+  queued: 8,
+  done: 9,
+  canceled: 10,
+};
+
+/** Rank of a status when sorting by status (lower first). */
+export function statusRank(status: QueueStatus): number {
+  return SORT_ORDER[status.kind];
+}

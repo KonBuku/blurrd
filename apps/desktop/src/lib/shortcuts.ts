@@ -4,7 +4,14 @@
  */
 
 /** Ids of the shortcuts the app handles. */
-export type ShortcutId = "toggleQueue" | "toggleInspector" | "openSettings" | "closeOverlay";
+export type ShortcutId =
+  | "addFiles"
+  | "addFolder"
+  | "removeFromQueue"
+  | "toggleQueue"
+  | "toggleInspector"
+  | "openSettings"
+  | "closeOverlay";
 
 /** One keyboard shortcut. */
 export interface Shortcut {
@@ -22,6 +29,33 @@ export interface Shortcut {
 
 /** The shortcuts by id, in the order they are listed. */
 export const SHORTCUTS: Readonly<Record<ShortcutId, Shortcut>> = {
+  addFiles: {
+    id: "addFiles",
+    label: "Add recordings",
+    keys: ["Ctrl", "O"],
+    key: "o",
+    ctrl: true,
+    alt: false,
+    shift: false,
+  },
+  addFolder: {
+    id: "addFolder",
+    label: "Add a folder of recordings",
+    keys: ["Ctrl", "Shift", "O"],
+    key: "o",
+    ctrl: true,
+    alt: false,
+    shift: true,
+  },
+  removeFromQueue: {
+    id: "removeFromQueue",
+    label: "Remove the selected recordings (in the queue)",
+    keys: ["Delete"],
+    key: "Delete",
+    ctrl: false,
+    alt: false,
+    shift: false,
+  },
   toggleQueue: {
     id: "toggleQueue",
     label: "Show or hide the queue",

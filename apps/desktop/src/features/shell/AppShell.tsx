@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { DropOverlay } from "@/features/import/DropOverlay";
+import { browseFiles, browseFolder } from "@/features/import/import";
 import { INSPECTOR_ID, InspectorTabs } from "@/features/inspector/Inspector";
 import { INSPECTOR_TOGGLE_ID, PreviewFrame } from "@/features/preview/PreviewFrame";
 import { QUEUE_SIDEBAR_ID, QueueSidebar } from "@/features/queue/QueueSidebar";
@@ -19,7 +21,8 @@ import { TitleBar } from "./TitleBar";
  * sidebar on the shell colour, the preview frame and the inspector frame,
  * separated by 4 px gaps that double as resize handles. Below 1180 px the
  * inspector becomes an overlay sheet toggled from the preview header.
- * The settings view replaces the preview and inspector frames.
+ * The settings view replaces the preview and inspector frames. Files
+ * dropped anywhere on the window join the queue.
  */
 export function AppShell() {
   const windowWidth = useWindowWidth();
@@ -115,6 +118,7 @@ export function AppShell() {
           </SheetContent>
         </Sheet>
       )}
+      <DropOverlay />
     </div>
   );
 }
@@ -130,6 +134,15 @@ function useGlobalShortcuts() {
       const match = matchShortcut(event);
       const ui = useUiStore.getState();
       switch (match?.id) {
+        case "addFiles":
+          void browseFiles();
+          break;
+        case "addFolder":
+          void browseFolder();
+          break;
+        case "removeFromQueue":
+          // Handled by the queue list, where the selection has focus.
+          return;
         case "toggleQueue":
           ui.toggleSidebar();
           break;

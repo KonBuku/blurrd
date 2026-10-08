@@ -6,10 +6,7 @@ import { SettingsGroup, SettingsPage, SettingsRow } from "./SettingsRow";
 /** Settings › Shortcuts: the keyboard shortcuts of the window. */
 export function ShortcutSettings() {
   return (
-    <SettingsPage
-      title="Shortcuts"
-      description="Keyboard shortcuts that work anywhere in the window."
-    >
+    <SettingsPage title="Shortcuts" description="Keyboard shortcuts of the main window.">
       <SettingsGroup>
         {Object.values(SHORTCUTS).map((shortcut) => (
           <SettingsRow

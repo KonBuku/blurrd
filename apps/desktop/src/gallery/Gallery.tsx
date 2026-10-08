@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { ControlSections } from "./ControlSections";
 import { FeedbackSections } from "./FeedbackSections";
 import { FoundationSections } from "./FoundationSections";
+import { QueueSections } from "./QueueSections";
 
 /**
  * Every design token and component of the desktop app on one page, for the
@@ -24,6 +25,7 @@ export function Gallery() {
         <FoundationSections />
         <ControlSections />
         <FeedbackSections />
+        <QueueSections />
       </main>
       <Toaster />
     </div>
