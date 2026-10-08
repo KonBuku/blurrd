@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "prepare": "lefthook install",
+    "dev": "cargo xtask stage-dlls && pnpm --filter @blurrd/desktop tauri dev",
+    "build": "pnpm --filter @blurrd/desktop tauri build",
+    "typecheck": "pnpm --recursive typecheck",
+    "test": "pnpm --recursive test",
     "lint": "oxlint --deny-warnings",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt && cargo fmt --all",

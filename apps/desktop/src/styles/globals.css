@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/* Design tokens replace this minimal base in M20. */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, "Segoe UI", sans-serif;
+  }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "blurrd-app"
+description = "The blurrd desktop app: Tauri shell around the blurrd engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "blurrd_app"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
+
+[lints]
+workspace = true

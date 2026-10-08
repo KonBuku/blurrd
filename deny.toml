@@ -3,6 +3,10 @@
 
 [graph]
 all-features = false
+# blurrd ships for Windows x64 only. Restricting the graph keeps the
+# Linux and macOS webview stacks of Tauri (GTK 3, WebKitGTK, Cocoa), which
+# are never built or shipped, out of the advisory and license checks.
+targets = ["x86_64-pc-windows-msvc"]
 
 [advisories]
 version = 2

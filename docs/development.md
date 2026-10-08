@@ -23,21 +23,22 @@ policy and the commit conventions.
 
 ## Repository layout
 
-| Path                    | Contents                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------- |
-| `crates/blurrd-core`    | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`.     |
-| `crates/blurrd-blur`    | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.      |
-| `crates/blurrd-video`   | FFmpeg probing, decoding, seeking and the render (encode, mux); the only `unsafe` crate. |
-| `crates/blurrd-detect`  | HUD and screen detectors with their temporal models, pixel classes, morphology.          |
-| `crates/blurrd-ocr`     | OCR for the verification: PP-OCRv5 detection and recognition on ONNX Runtime.            |
-| `crates/blurrd-engine`  | Jobs of the CLI and the app: analysis pipeline, tracks, OCR name dictionary, cache.      |
-| `crates/blurrd-cli`     | The `blurrd` command-line tool (see [cli.md](cli.md)).                                   |
-| `crates/blurrd-testkit` | Development only: synthetic HUD fixtures with ground truth, quality metrics, proposals.  |
-| `xtask`                 | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).          |
-| `docs`                  | Developer and user documentation.                                                        |
-| `scripts`               | Node scripts for repository tasks (`release.mjs`).                                       |
-| `assets/brand`          | Logo and brand assets with their generator.                                              |
-| `tests/fonts`           | The OFL font of the synthetic fixtures and the pins of the fetched Noto fonts.           |
+| Path                    | Contents                                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| `apps/desktop`          | The desktop app: React frontend in `src/`, Tauri shell (crate `blurrd-app`) in `src-tauri/`. |
+| `crates/blurrd-core`    | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`.         |
+| `crates/blurrd-blur`    | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.          |
+| `crates/blurrd-video`   | FFmpeg probing, decoding, seeking and the render (encode, mux); the only `unsafe` crate.     |
+| `crates/blurrd-detect`  | HUD and screen detectors with their temporal models, pixel classes, morphology.              |
+| `crates/blurrd-ocr`     | OCR for the verification: PP-OCRv5 detection and recognition on ONNX Runtime.                |
+| `crates/blurrd-engine`  | Jobs of the CLI and the app: analysis pipeline, tracks, OCR name dictionary, cache.          |
+| `crates/blurrd-cli`     | The `blurrd` command-line tool (see [cli.md](cli.md)).                                       |
+| `crates/blurrd-testkit` | Development only: synthetic HUD fixtures with ground truth, quality metrics, proposals.      |
+| `xtask`                 | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).              |
+| `docs`                  | Developer and user documentation.                                                            |
+| `scripts`               | Node scripts for repository tasks (`release.mjs`).                                           |
+| `assets/brand`          | Logo and brand assets with their generator.                                                  |
+| `tests/fonts`           | The OFL font of the synthetic fixtures and the pins of the fetched Noto fonts.               |
 
 ## Rust workspace
 
@@ -182,6 +183,26 @@ pnpm fmt:check        # check formatting without writing, as in CI
 oxlint is configured in `.oxlintrc.json` and oxfmt in `.oxfmtrc.json`.
 `CODE_OF_CONDUCT.md` is excluded from formatting because it is the verbatim
 Contributor Covenant text.
+
+## Desktop app
+
+The desktop app lives in `apps/desktop`: a React 19 frontend built with
+Vite 8, TypeScript 7 (strict) and Tailwind CSS 4 in `src/`, and the Tauri 2
+shell in `src-tauri/` (the workspace crate `blurrd-app`). Run these from the
+repository root:
+
+```sh
+pnpm dev              # stage the FFmpeg DLLs, start Vite and open the app with hot reload
+pnpm build            # release build of the app and its NSIS installer
+pnpm typecheck        # tsc --noEmit (TypeScript 7)
+pnpm test             # Vitest unit tests (happy-dom)
+```
+
+`pnpm dev` runs `cargo xtask stage-dlls` first, so install the pinned
+FFmpeg build once with `cargo xtask fetch-ffmpeg`. Inside `apps/desktop`,
+`pnpm dev` and `pnpm build` start or build only the frontend (Vite on
+port 1420), and `pnpm tauri <command>` runs the Tauri CLI. The installer is
+written to `target/release/bundle/nsis/`.
 
 ## Git hooks
 
