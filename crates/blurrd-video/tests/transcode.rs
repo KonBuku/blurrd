@@ -12,10 +12,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use blurrd_blur::CpuBlur;
 use blurrd_core::{EncoderSetting, NvencSessions, RectI};
 use blurrd_video::{
-    DecodeOptions, Decoder, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder,
-    VideoError, YuvRoi, output_color, probe,
+    DecodeOptions, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder, VideoError,
+    output_color, probe,
 };
-use support::{ClipSpec, TempClip, box_table, decode_table, pixel_params, write_clip};
+use support::{ClipSpec, TempClip, box_table, decode_table, pictures, pixel_params, write_clip};
 
 /// Renders `source` into `output` with `encoder`, one box on frames
 /// `boxes` (none when the range is empty).
@@ -202,32 +202,6 @@ fn renders_edit_list_sources() {
         render(source.path(), output.path(), "mpeg4", (0, 3), None).unwrap();
         assert_same_timeline(source.path(), output.path());
     }
-}
-
-/// Every decoded picture of `path` (all planes, without padding).
-#[allow(
-    clippy::unwrap_used,
-    reason = "test helper: an error is a test failure"
-)]
-fn pictures(path: &Path) -> Vec<Vec<u8>> {
-    let mut decoder = Decoder::open(path, &DecodeOptions::default()).unwrap();
-    let mut out = Vec::new();
-    let mut roi = YuvRoi::new();
-    while let Some(frame) = decoder.next_frame().unwrap() {
-        let full = RectI::new(
-            0,
-            0,
-            frame.width().cast_signed(),
-            frame.height().cast_signed(),
-        );
-        frame.roi_yuv(full.unwrap(), &mut roi).unwrap();
-        let (u, v) = roi.chroma();
-        let mut picture = roi.luma().to_vec();
-        picture.extend_from_slice(u);
-        picture.extend_from_slice(v.unwrap_or_default());
-        out.push(picture);
-    }
-    out
 }
 
 #[test]

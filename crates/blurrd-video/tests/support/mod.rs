@@ -510,3 +510,28 @@ pub fn pixel_params(info: &blurrd_core::MediaInfo) -> blurrd_blur::PixelParams {
     )
     .unwrap()
 }
+
+/// Every picture of `path`, decoded in software: luma, then the U and V
+/// planes, without padding (8-bit sources).
+pub fn pictures(path: &Path) -> Vec<Vec<u8>> {
+    let mut decoder =
+        blurrd_video::Decoder::open(path, &blurrd_video::DecodeOptions::default()).unwrap();
+    let mut out = Vec::new();
+    let mut roi = blurrd_video::YuvRoi::new();
+    while let Some(frame) = decoder.next_frame().unwrap() {
+        let full = blurrd_core::RectI::new(
+            0,
+            0,
+            frame.width().cast_signed(),
+            frame.height().cast_signed(),
+        )
+        .unwrap();
+        frame.roi_yuv(full, &mut roi).unwrap();
+        let (u, v) = roi.chroma();
+        let mut picture = roi.luma().to_vec();
+        picture.extend_from_slice(u);
+        picture.extend_from_slice(v.unwrap_or_default());
+        out.push(picture);
+    }
+    out
+}
