@@ -3,9 +3,11 @@ import { Copy, Minus, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { logWarning } from "@/lib/log";
+import { cn } from "@/lib/utils";
 
+/** 28 px square ghost buttons with an 8 px radius, inset in the bar. */
 const buttonClass =
-  "grid h-10 w-11 place-items-center text-neutral-700 outline-none hover:bg-neutral-200 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-inset dark:text-neutral-300 dark:hover:bg-neutral-800";
+  "grid size-7 place-items-center rounded-lg text-foreground-subtle transition-colors hover:bg-hover hover:text-foreground";
 
 /** Click handler that runs a window call and logs its failure. */
 function run(action: string, call: () => Promise<void>) {
@@ -58,7 +60,7 @@ export function WindowControls() {
   const appWindow = getCurrentWindow();
 
   return (
-    <div className="flex h-full items-stretch">
+    <div className="flex items-center gap-0.5">
       <button
         type="button"
         aria-label="Minimize"
@@ -76,16 +78,16 @@ export function WindowControls() {
         onClick={run("maximizing the window", () => appWindow.toggleMaximize())}
       >
         {maximized ? (
-          <Copy className="size-3.5 -scale-x-100" aria-hidden />
+          <Copy className="size-4 -scale-x-100" aria-hidden />
         ) : (
-          <Square className="size-3.5" aria-hidden />
+          <Square className="size-4" aria-hidden />
         )}
       </button>
       <button
         type="button"
         aria-label="Close"
         title="Close"
-        className={`${buttonClass} hover:bg-red-600 hover:text-white dark:hover:bg-red-600 dark:hover:text-white`}
+        className={cn(buttonClass, "hover:bg-destructive hover:text-destructive-foreground")}
         onClick={run("closing the window", () => appWindow.close())}
       >
         <X className="size-4" aria-hidden />

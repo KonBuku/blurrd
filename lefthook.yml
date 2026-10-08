@@ -14,6 +14,9 @@ pre-commit:
     - name: oxlint
       glob: "*.{js,mjs,cjs,ts,tsx}"
       run: pnpm exec oxlint --deny-warnings {staged_files}
+    - name: typography
+      glob: "apps/desktop/src/**/*.{ts,tsx,css,html}"
+      run: pnpm lint:typography
     - name: typos
       run: typos --force-exclude {staged_files}
 

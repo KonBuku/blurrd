@@ -1,8 +1,10 @@
+import { LucideProvider } from "lucide-react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { forwardUncaughtErrors } from "./lib/log";
+import { followSystemTheme } from "./lib/theme";
 import "./styles/globals.css";
 
 const container = document.getElementById("root");
@@ -18,9 +20,13 @@ if (import.meta.env.MODE === "mock") {
 }
 
 forwardUncaughtErrors();
+followSystemTheme();
 
+// Icons use a 1.5 px stroke everywhere; components set only their size.
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <LucideProvider strokeWidth={1.5}>
+      <App />
+    </LucideProvider>
   </StrictMode>,
 );

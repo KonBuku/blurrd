@@ -19,9 +19,11 @@
   "dependencies": {
     "@tauri-apps/api": "2.12.1",
     "@tauri-apps/plugin-log": "2.10.0",
+    "clsx": "2.1.1",
     "lucide-react": "1.52.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

@@ -11,6 +11,7 @@
     "test": "pnpm --recursive test",
     "lint": "oxlint --deny-warnings",
     "lint:fix": "oxlint --fix",
+    "lint:typography": "node scripts/check-typography.mjs",
     "fmt": "oxfmt && cargo fmt --all",
     "fmt:check": "oxfmt --check && cargo fmt --all --check",
     "changelog": "git-cliff --unreleased",

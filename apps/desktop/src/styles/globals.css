@@ -1,6 +1,195 @@
+/*
+ * blurrd design tokens and base styles.
+ *
+ * Every colour, text size and easing the app uses is a token defined here.
+ * Tailwind's default palette and text scale are switched off, so a palette
+ * utility like `bg-neutral-200` or a default text size produces nothing;
+ * components use the semantic tokens (`bg-panel`, `text-foreground-subtle`,
+ * `text-ui-sm`, ...). `scripts/check-typography.mjs` rejects the default
+ * text sizes in CI.
+ *
+ * Light values sit in `@theme`; the `.dark` class on <html> overrides them.
+ * Hierarchy comes from three surface steps (window shell, inset content
+ * panel, cards) and three text opacities (100/60/40 %, 30 % in dark), not
+ * from colour. The single accent (`ring`, `accent-strong`) is reserved for
+ * non-text indicators: focus ring, playhead, selected box, progress and
+ * drop target.
+ */
 @import "tailwindcss";
 
-/* Design tokens replace this minimal base in M20. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+
+  /* Tailwind's default sans stack resolves to Segoe UI Variable on
+     Windows 11; no UI font is bundled. */
+  --font-mono:
+    "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+
+  /* One variable drives the interface text size (Settings > Appearance). */
+  --text-ui-xl: calc(var(--ui-font-size) + 4px);
+  --text-ui-xl--line-height: 1.5;
+  --text-ui-lg: calc(var(--ui-font-size) + 2px);
+  --text-ui-lg--line-height: 1.5;
+  --text-ui-base: var(--ui-font-size);
+  --text-ui-base--line-height: 1.5;
+  --text-ui-caption: calc(var(--ui-font-size) - 1px);
+  --text-ui-caption--line-height: 1.5;
+  --text-ui-sm: calc(var(--ui-font-size) - 2px);
+  --text-ui-sm--line-height: 1.5;
+  --text-ui-xs: calc(var(--ui-font-size) - 4px);
+  --text-ui-xs--line-height: 1.5;
+  /* Timeline ruler labels only. */
+  --text-ui-2xs: calc(var(--ui-font-size) - 5px);
+  --text-ui-2xs--line-height: 1.5;
+
+  --tracking-label: 0.09em;
+
+  --ease-toast: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* ---- Light ---- */
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  --color-background-win-alt: #ececee;
+  --color-background: #f8f8f8;
+  --color-panel: #ffffff;
+  --color-header: #ffffff;
+  --color-sidebar: #f0f0f0;
+  --color-card: #ffffff;
+  --color-card-border: rgba(13, 13, 13, 0.1);
+  --color-popover: #ffffff;
+  --color-popover-header: #f8f8f8;
+  --color-popover-foreground: #262626;
+  --color-popover-border: rgba(13, 13, 13, 0.1);
+  --color-menu: #ffffff;
+  --color-menu-hover: #f0f0f0;
+  --color-toast: #ffffff;
+  --color-tooltip: #f0f0f0;
+  --color-tooltip-foreground: #0d0d0d;
+  --color-tag: #e6e6e6;
+  --color-tag-foreground: #5c5c5c;
+  --color-tab-bar: #f0f0f0;
+  --color-tab-active: #ffffff;
+
+  --color-surface: rgba(13, 13, 13, 0.03);
+  --color-surface-hover: rgba(13, 13, 13, 0.05);
+  --color-hover: rgba(13, 13, 13, 0.05);
+  --color-selected: rgba(13, 13, 13, 0.05);
+  --color-border: rgba(13, 13, 13, 0.1);
+  --color-border-hover: rgba(13, 13, 13, 0.15);
+
+  --color-input: #ffffff;
+  --color-input-focused: #ffffff;
+  --color-input-border: rgba(13, 13, 13, 0.1);
+  --color-input-border-hover: rgba(13, 13, 13, 0.15);
+  --color-input-border-focused: rgba(13, 13, 13, 0.15);
+
+  --color-primary: #000000;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #e6e6e6;
+  --color-secondary-foreground: #262626;
+  --color-brand: #000000;
+
+  --color-foreground: #262626;
+  --color-foreground-subtle: color-mix(in oklab, #262626 60%, transparent);
+  --color-foreground-subtlest: color-mix(in oklab, #262626 40%, transparent);
+  --color-foreground-inverse: #ffffff;
+
+  --color-accent: #ebf4ff;
+  --color-accent-foreground: #0066dd;
+  --color-accent-strong: #0b7fff;
+  --color-ring: #0b7fff;
+  --color-link: #0066dd;
+
+  --color-success: #1e8a3e;
+  --color-success-foreground: #ffffff;
+  --color-warning: #e07b00;
+  --color-warning-foreground: #ffffff;
+  --color-destructive: #e03131;
+  --color-destructive-foreground: #ffffff;
+  --color-confirmation: #eaf7ee;
+  --color-confirmation-foreground: #166b32;
+
+  /* Letterbox behind the video preview, both themes. */
+  --color-video-stage: #0d0d0d;
+}
+
+:root {
+  --ui-font-size: 14px;
+  color-scheme: light;
+}
+
+/* ---- Dark ---- */
+.dark {
+  color-scheme: dark;
+
+  --color-background-win-alt: #2b2b2b;
+  --color-background: #161616;
+  --color-panel: #202020;
+  --color-header: #202020;
+  --color-sidebar: #161616;
+  --color-card: #2b2b2b;
+  --color-card-border: rgba(255, 255, 255, 0.1);
+  --color-popover: #2b2b2b;
+  --color-popover-header: #202020;
+  --color-popover-foreground: #d4d4d4;
+  --color-popover-border: rgba(255, 255, 255, 0.1);
+  --color-menu: #2b2b2b;
+  --color-menu-hover: #363636;
+  --color-toast: #2b2b2b;
+  --color-tooltip: #2b2b2b;
+  --color-tooltip-foreground: #f8f8f8;
+  --color-tag: #363636;
+  --color-tag-foreground: #adadad;
+  --color-tab-bar: #202020;
+  --color-tab-active: #161616;
+
+  --color-surface: rgba(255, 255, 255, 0.05);
+  --color-surface-hover: rgba(255, 255, 255, 0.1);
+  --color-hover: rgba(255, 255, 255, 0.05);
+  --color-selected: rgba(255, 255, 255, 0.1);
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-hover: rgba(255, 255, 255, 0.15);
+
+  --color-input: #2b2b2b;
+  --color-input-focused: #2b2b2b;
+  --color-input-border: rgba(255, 255, 255, 0.1);
+  --color-input-border-hover: rgba(255, 255, 255, 0.15);
+  --color-input-border-focused: rgba(255, 255, 255, 0.15);
+
+  --color-primary: #ffffff;
+  --color-primary-foreground: #000000;
+  --color-secondary: #363636;
+  --color-secondary-foreground: #d4d4d4;
+  --color-brand: #ffffff;
+
+  --color-foreground: #d4d4d4;
+  --color-foreground-subtle: color-mix(in oklab, #d4d4d4 60%, transparent);
+  --color-foreground-subtlest: color-mix(in oklab, #d4d4d4 30%, transparent);
+  --color-foreground-inverse: #000000;
+
+  --color-accent: #001d3d;
+  --color-accent-foreground: #80beff;
+  --color-accent-strong: #4099ff;
+  --color-ring: #4099ff;
+  --color-link: #80beff;
+
+  --color-success: #46bf72;
+  --color-success-foreground: #000000;
+  --color-warning: #ff8a30;
+  --color-warning-foreground: #000000;
+  --color-destructive: #ff5c5c;
+  --color-destructive-foreground: #ffffff;
+  --color-confirmation: rgba(70, 191, 114, 0.16);
+  --color-confirmation-foreground: #87d9a4;
+}
+
 @layer base {
   html,
   body,
@@ -10,6 +199,69 @@
 
   body {
     margin: 0;
-    font-family: system-ui, "Segoe UI", sans-serif;
+    overflow: hidden;
+    background-color: var(--color-background-win-alt);
+    color: var(--color-foreground);
+    font-family: var(--default-font-family);
+    font-size: var(--text-ui-base);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    /* A desktop app, not a document: text is selectable only where it is
+       meant to be copied. */
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  [data-selectable] {
+    user-select: text;
+  }
+
+  /* Keyboard focus stays visible on every control: a 2 px ring in the
+     accent colour (at least 3:1 against both panel colours). Mouse focus
+     shows nothing (`:focus-visible`). */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 1px;
+  }
+
+  /* Thin pill scrollbars in the border colour on a transparent track. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background: var(--color-border);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-border-hover);
+  }
+
+  /* Only opacity changes remain when the user asks for less motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

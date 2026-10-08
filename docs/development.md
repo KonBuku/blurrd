@@ -176,6 +176,7 @@ repository tooling to exact versions.
 pnpm install          # install the tooling
 pnpm lint             # oxlint, warnings are errors
 pnpm lint:fix         # apply oxlint's safe fixes
+pnpm lint:typography  # only text-ui-* sizes in the desktop frontend
 pnpm fmt              # format JavaScript, TypeScript, JSON, YAML, TOML, CSS and Markdown (oxfmt) and Rust
 pnpm fmt:check        # check formatting without writing, as in CI
 ```
@@ -223,6 +224,22 @@ plugin's `log` command. The app writes JSON lines to
 also print to stdout) and remembers the window size and position. Starting
 it a second time focuses the running window.
 
+### Design tokens and typography
+
+`src/styles/globals.css` defines every colour, text size and easing of the
+user interface as a Tailwind theme token, with the light values in `@theme`
+and the dark overrides under the `.dark` class (set on `<html>` from the
+system theme by `src/lib/theme.ts`). Tailwind's default palette and text
+scale are switched off: use the semantic tokens (`bg-panel`,
+`text-foreground-subtle`, `border-border`, ...) and the `text-ui-*` sizes,
+which all follow one interface-size variable. Compose class names with
+`cn` from `src/lib/utils.ts`, which knows the `text-ui-*` sizes. Lucide
+icons get their 1.5 px stroke from a provider at the root.
+
+```sh
+pnpm lint:typography  # reject Tailwind's default and fixed text sizes in apps/desktop/src
+```
+
 ## Git hooks
 
 `pnpm install` installs the Git hooks with [lefthook](https://lefthook.dev)
@@ -230,7 +247,7 @@ it a second time focuses the running window.
 
 | Hook         | Checks                                                                                                                                                 |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pre-commit` | rustfmt, oxfmt and oxlint on the staged files, typos                                                                                                   |
+| `pre-commit` | rustfmt, oxfmt and oxlint on the staged files, the typography check, typos                                                                             |
 | `commit-msg` | commitlint (`commitlint.config.js`): Conventional Commits, header at most 72 characters, body lines at most 72 characters, scopes from CONTRIBUTING.md |
 | `pre-push`   | clippy on the whole workspace with `-D warnings`                                                                                                       |
 
@@ -245,7 +262,7 @@ change is merged; the installer job runs only after a merge.
 
 | Job                | Runner  | Checks                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`             | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history                                                                                                                                   |
+| `lint`             | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typography check, typos, gitleaks over the full history                                                                                                                 |
 | `frontend`         | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, Playwright end-to-end tests in Chromium against the mock backend (report uploaded on failure)                                                                                                 |
 | `rust (windows)`   | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
 | `deny`             | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                           |
