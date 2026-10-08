@@ -33,13 +33,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use blurrd_blur::{BlurBackend, PixelParams, prepare_boxes};
-use blurrd_core::{EncoderSetting, FrameBoxTable, KeyframePolicy, MediaInfo, NvencSessions};
+use blurrd_core::{
+    AudioMode, EncoderSetting, ExportSettings, FrameBoxTable, KeyframePolicy, MediaInfo,
+    MetadataMode, MoovMode, NvencSessions,
+};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use ffmpeg_the_third::Dictionary;
 
 use crate::frames::FramePool;
 use crate::mux::Muxer;
 use crate::segments::{Scheduler, Segment};
+use crate::streams::{SideOptions, SidePacket, SideStreams, SkippedStream};
 use crate::{
     DecodeOptions, Decoder, EncodeOptions, EncodedPacket, EncoderFallback, EncoderInput, PtsTable,
     VideoEncoder, VideoError, VideoFrame,
@@ -49,6 +53,12 @@ use crate::{
 const FRAME_QUEUE: usize = 8;
 /// Encoded packets waiting for the muxer, per session.
 const PACKET_QUEUE: usize = 64;
+/// Audio, subtitle and data packets waiting for the muxer (several
+/// seconds of audio).
+const SIDE_QUEUE: usize = 512;
+/// How far (in seconds) the other streams may run ahead of the video in
+/// the file; keeps the interleaving tight without waiting.
+const SIDE_LEAD: f64 = 0.5;
 /// Default size of the output write buffer.
 const DEFAULT_AVIO_BUFFER: usize = 4 * 1024 * 1024;
 /// Containers the output may use, by file extension.
@@ -60,6 +70,18 @@ const SPLIT_ENCODER: &str = "h264_nvenc";
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MuxOptions {
+    /// Audio streams: copied unchanged (the default), re-encoded as AAC, or
+    /// removed.
+    pub audio: AudioMode,
+    /// Whether subtitle streams are copied (when the container can store
+    /// them; others are left out and listed in the report).
+    pub copy_subtitles: bool,
+    /// Container metadata. `Technical` keeps stream languages, timecodes
+    /// and the video's rotation and drops recorder titles, comments,
+    /// creation times and account tags.
+    pub metadata: MetadataMode,
+    /// Where MP4/MOV outputs keep their index (see [`MoovLayout`]).
+    pub moov: MoovMode,
     /// Size of the write buffer in bytes (clamped to 64 KB – 16 MB).
     pub avio_buffer: usize,
 }
@@ -67,9 +89,44 @@ pub struct MuxOptions {
 impl Default for MuxOptions {
     fn default() -> Self {
         Self {
+            audio: AudioMode::Copy,
+            copy_subtitles: true,
+            metadata: MetadataMode::Technical,
+            moov: MoovMode::Reserve,
             avio_buffer: DEFAULT_AVIO_BUFFER,
         }
     }
+}
+
+impl MuxOptions {
+    /// The stream and container part of the user's export settings.
+    pub fn from_export(export: &ExportSettings) -> Self {
+        Self {
+            audio: export.audio,
+            copy_subtitles: export.copy_subtitles,
+            metadata: export.metadata,
+            moov: export.moov,
+            ..Self::default()
+        }
+    }
+}
+
+/// Where the index (`moov` box) of the output ended up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MoovLayout {
+    /// The container is not MP4/MOV.
+    NotApplicable,
+    /// Written into space reserved before the media data: ready for
+    /// streaming without a second pass over the file.
+    Reserved {
+        /// Bytes reserved (the index plus padding).
+        bytes: u64,
+    },
+    /// Moved to the front by FFmpeg's faststart rewrite after writing.
+    Faststart,
+    /// Left at the end of the file.
+    AtEnd,
 }
 
 /// What a finished render did.
@@ -91,6 +148,10 @@ pub struct TranscodeReport {
     pub sessions: u8,
     /// Encoders that failed to open before it.
     pub fallbacks: Vec<EncoderFallback>,
+    /// Streams of the input that are not in the output.
+    pub skipped_streams: Vec<SkippedStream>,
+    /// Where the MP4/MOV index was written.
+    pub moov: MoovLayout,
     /// Wall-clock time of [`Transcoder::run`].
     pub elapsed: Duration,
 }
@@ -106,6 +167,7 @@ struct Session {
 /// A render job: opened (decoders and encoders chosen), then run once.
 pub struct Transcoder {
     pts: Arc<PtsTable>,
+    input: PathBuf,
     output: PathBuf,
     temp: PathBuf,
     mux: MuxOptions,
@@ -190,6 +252,7 @@ impl Transcoder {
         }
         Ok(Self {
             pts,
+            input: info.path.clone(),
             output: output.to_path_buf(),
             temp,
             mux,
@@ -277,11 +340,14 @@ impl Transcoder {
             encoder,
             sessions,
             fallbacks,
+            skipped_streams: stats.skipped,
+            moov: stats.moov,
             elapsed: started.elapsed(),
         })
     }
 
-    /// Runs the stages of every session into `muxer`.
+    /// Runs the stages of every session and the other streams into
+    /// `muxer`.
     fn transcode(
         self,
         muxer: &mut Muxer,
@@ -293,6 +359,8 @@ impl Transcoder {
     ) -> Result<Stats, VideoError> {
         let Self {
             pts,
+            input,
+            mux,
             sessions,
             source_keyframes,
             match_keyframes,
@@ -301,9 +369,8 @@ impl Transcoder {
         let Some(lead) = sessions.first() else {
             return Err(VideoError::Unsupported(String::from("no encoder session")));
         };
-        let stream = muxer.add_video(&lead.encoder)?;
-        muxer.write_header(Dictionary::new())?;
-        let (encoder_tb, stream_tb) = (lead.encoder.time_base(), muxer.time_base(stream));
+        let prepared = prepare_output(muxer, &input, &mux, &lead.encoder, pts.len())?;
+        let (target, side) = (prepared.target, prepared.side);
 
         let session_count = u32::try_from(sessions.len()).unwrap_or(1);
         let scheduler = Mutex::new(Scheduler::new(pts.len(), &source_keyframes, session_count));
@@ -313,6 +380,7 @@ impl Transcoder {
         };
         let control = Control::default();
         let (packet_tx, packet_rx) = bounded(PACKET_QUEUE * sessions.len());
+        let (side_tx, side_rx) = bounded(SIDE_QUEUE);
         let pts: &PtsTable = &pts;
         let mut written = 0u32;
         let blurred = std::thread::scope(|scope| {
@@ -350,13 +418,19 @@ impl Transcoder {
                 })
                 .collect();
             drop(packet_tx);
-            let mux_result =
-                mux_packets(&packet_rx, muxer, pts, stream, encoder_tb, stream_tb, |n| {
-                    written = n;
-                    progress(n);
-                });
+            scope.spawn(move || control.guard(side.run(&side_tx, || control.aborted())));
+            let video = VideoPackets {
+                packets: &packet_rx,
+                pts,
+                target,
+            };
+            let mux_result = mux_packets(&video, &side_rx, muxer, |n| {
+                written = n;
+                progress(n);
+            });
             control.guard(mux_result);
             drop(packet_rx);
+            drop(side_rx);
             let mut blurred = BlurStats::default();
             for encoder in encoders {
                 match encoder.join() {
@@ -376,8 +450,114 @@ impl Transcoder {
         Ok(Stats {
             frames: written,
             blurred,
+            skipped: prepared.skipped,
+            moov: prepared.moov,
         })
     }
+}
+
+/// Where the video packets go and the time bases between the encoder and
+/// the stream.
+#[derive(Clone, Copy)]
+struct VideoTarget {
+    stream: usize,
+    encoder_tb: ffmpeg_the_third::Rational,
+    stream_tb: ffmpeg_the_third::Rational,
+}
+
+/// The output streams, ready for packets.
+struct Prepared {
+    /// The video stream.
+    target: VideoTarget,
+    /// The other streams' reader.
+    side: SideStreams,
+    skipped: Vec<SkippedStream>,
+    moov: MoovLayout,
+}
+
+/// Adds the video stream (described by the first session's encoder) and
+/// the other streams of `input` to `muxer` and writes the header.
+fn prepare_output(
+    muxer: &mut Muxer,
+    input: &Path,
+    mux: &MuxOptions,
+    encoder: &VideoEncoder,
+    frames: u32,
+) -> Result<Prepared, VideoError> {
+    let stream = muxer.add_video(encoder)?;
+    let side_options = SideOptions {
+        audio: mux.audio,
+        subtitles: mux.copy_subtitles,
+        metadata: mux.metadata,
+    };
+    let mut side = SideStreams::open(input, stream, side_options, muxer)?;
+    let (header, moov) = moov_options(muxer, mux.moov, frames, &side, encoder.extradata());
+    muxer.write_header(header)?;
+    side.header_written(muxer);
+    Ok(Prepared {
+        target: VideoTarget {
+            stream,
+            encoder_tb: encoder.time_base(),
+            stream_tb: muxer.time_base(stream),
+        },
+        skipped: side.skipped().to_vec(),
+        side,
+        moov,
+    })
+}
+
+/// Muxer options for the `moov` placement of MP4/MOV outputs, and the
+/// placement that results.
+///
+/// With [`MoovMode::Reserve`], space for the index is reserved before the
+/// media data (`moov_size`), so the file is ready for streaming without
+/// rewriting it at the end. The reservation is an upper bound computed
+/// from the packet counts; when a stream's count cannot be bounded, the
+/// muxer moves the index with a faststart rewrite instead.
+fn moov_options(
+    muxer: &Muxer,
+    mode: MoovMode,
+    frames: u32,
+    side: &SideStreams,
+    extradata: &[u8],
+) -> (Dictionary, MoovLayout) {
+    let mut options = Dictionary::new();
+    if !matches!(muxer.format_name().as_str(), "mp4" | "mov") {
+        return (options, MoovLayout::NotApplicable);
+    }
+    let faststart = |options: &mut Dictionary| {
+        options.set("movflags", "+faststart");
+        MoovLayout::Faststart
+    };
+    let layout = match mode {
+        MoovMode::Reserve => {
+            if let Some(side_packets) = side.packet_bound() {
+                let tracks = 1 + side.track_count() as u64;
+                let bytes = moov_bound(
+                    u64::from(frames) + side_packets,
+                    tracks,
+                    extradata.len() as u64,
+                );
+                options.set("moov_size", bytes.to_string());
+                MoovLayout::Reserved { bytes }
+            } else {
+                tracing::info!("packet counts unknown, moving the index with a faststart rewrite");
+                faststart(&mut options)
+            }
+        }
+        MoovMode::Faststart => faststart(&mut options),
+        _ => MoovLayout::AtEnd,
+    };
+    (options, layout)
+}
+
+/// Bytes the `moov` box needs at most for `samples` packets in `tracks`
+/// tracks: 48 bytes per sample (the worst case of one entry in each of
+/// stsz, stts, ctts, stsc, co64 and stss plus an sdtp byte), 4 KB per
+/// track for its fixed boxes and codec headers, the video codec headers,
+/// and 64 KB for the movie header and metadata.
+fn moov_bound(samples: u64, tracks: u64, extradata: u64) -> u64 {
+    64 * 1024 + tracks * 4096 + extradata + samples * 48
 }
 
 /// Whether `encoder` runs as two sessions with the `sessions` setting:
@@ -422,6 +602,8 @@ fn second_session(
 struct Stats {
     frames: u32,
     blurred: BlurStats,
+    skipped: Vec<SkippedStream>,
+    moov: MoovLayout,
 }
 
 /// Frames an encode stage blurred and the time it spent on them (copy
@@ -653,22 +835,37 @@ impl EncodeStage<'_> {
     }
 }
 
-/// Writes the video packets in frame order with their durations from the
-/// PTS table. Packets of a segment that is ahead of the one being written
-/// wait in a reorder buffer. Calls `written` with the number of packets
+/// The video side of the muxer: the merged packets of every session.
+struct VideoPackets<'a> {
+    packets: &'a Receiver<EncodedPacket>,
+    pts: &'a PtsTable,
+    target: VideoTarget,
+}
+
+/// Writes the video packets in frame order, with their durations from the
+/// PTS table, and the other streams' packets interleaved with them.
+///
+/// Packets of a segment that is ahead of the one being written wait in a
+/// reorder buffer. After each video packet, the other streams' packets up
+/// to [`SIDE_LEAD`] seconds later are written; the rest follow once the
+/// video is complete. Calls `written` with the number of video packets
 /// written after each one.
 fn mux_packets(
-    packets: &Receiver<EncodedPacket>,
+    video: &VideoPackets<'_>,
+    side: &Receiver<SidePacket>,
     muxer: &mut Muxer,
-    pts: &PtsTable,
-    stream: usize,
-    encoder_tb: ffmpeg_the_third::Rational,
-    stream_tb: ffmpeg_the_third::Rational,
     mut written: impl FnMut(u32),
 ) -> Result<(), VideoError> {
+    let pts = video.pts;
+    let time_base = pts.time_base();
+    let mut side = Interleaver {
+        packets: side,
+        peeked: None,
+        open: true,
+    };
     let mut waiting = BTreeMap::new();
     let mut next = 0u32;
-    for packet in packets {
+    for packet in video.packets {
         let index = packet.pts().and_then(|p| pts.index_of(p)).ok_or_else(|| {
             VideoError::Timestamps(format!(
                 "the encoder returned a packet with PTS {:?}, which is no frame of the video",
@@ -677,23 +874,67 @@ fn mux_packets(
         })?;
         waiting.insert(index, packet.into_inner());
         while let Some(mut packet) = waiting.remove(&next) {
+            let seconds = packet.pts().unwrap_or(0) as f64 * f64::from(time_base.num)
+                / f64::from(time_base.den);
             packet.set_duration(frame_duration(pts, next));
             // Without B-frames, decoding order is presentation order.
             packet.set_dts(packet.pts());
-            packet.set_stream(stream);
-            packet.rescale_ts(encoder_tb, stream_tb);
+            packet.set_stream(video.target.stream);
+            packet.rescale_ts(video.target.encoder_tb, video.target.stream_tb);
             muxer.write(&mut packet)?;
             next += 1;
             written(next);
+            side.write_until(Some(seconds + SIDE_LEAD), muxer)?;
         }
     }
-    if waiting.is_empty() {
-        Ok(())
-    } else {
-        Err(VideoError::FrameCountMismatch {
+    if !waiting.is_empty() {
+        return Err(VideoError::FrameCountMismatch {
             expected: pts.len(),
             found: next,
-        })
+        });
+    }
+    side.write_until(None, muxer)
+}
+
+/// The other streams' packets, written in step with the video.
+struct Interleaver<'a> {
+    packets: &'a Receiver<SidePacket>,
+    /// The next packet, received but not written yet.
+    peeked: Option<SidePacket>,
+    /// Whether more packets may come.
+    open: bool,
+}
+
+impl Interleaver<'_> {
+    /// Writes the packets whose time is at most `limit` seconds, without
+    /// waiting for packets that have not arrived; with `None`, writes every
+    /// remaining packet, waiting until the reader is done.
+    fn write_until(&mut self, limit: Option<f64>, muxer: &mut Muxer) -> Result<(), VideoError> {
+        loop {
+            if self.peeked.is_none() && self.open {
+                let received = match limit {
+                    Some(_) => self.packets.try_recv().map_err(|e| e.is_disconnected()),
+                    None => self.packets.recv().map_err(|_| true),
+                };
+                match received {
+                    Ok(packet) => self.peeked = Some(packet),
+                    Err(disconnected) => {
+                        self.open &= !disconnected;
+                        return Ok(());
+                    }
+                }
+            }
+            match self.peeked.take() {
+                Some(packet) if limit.is_none_or(|limit| packet.seconds <= limit) => {
+                    let mut packet = packet.packet;
+                    muxer.write(&mut packet)?;
+                }
+                other => {
+                    self.peeked = other;
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 

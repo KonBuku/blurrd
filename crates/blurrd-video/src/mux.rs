@@ -162,11 +162,7 @@ impl Muxer {
     /// Adds the video stream described by an open encoder. Returns the
     /// stream index.
     pub(crate) fn add_video(&mut self, encoder: &VideoEncoder) -> Result<usize, VideoError> {
-        // SAFETY: the context is valid and its header is not written yet.
-        let stream = unsafe { ffi::avformat_new_stream(self.ctx, ptr::null()) };
-        if stream.is_null() {
-            return Err(out_of_memory());
-        }
+        let stream = self.new_stream()?;
         // SAFETY: `stream` was just created in this context; its codec
         // parameters are valid.
         unsafe {
@@ -175,6 +171,139 @@ impl Muxer {
             (*stream).time_base = encoder.time_base().into();
             Ok(usize::try_from((*stream).index).unwrap_or(0))
         }
+    }
+
+    /// The muxer's short name, for example `mp4`, `mov` or `matroska`.
+    pub(crate) fn format_name(&self) -> String {
+        // SAFETY: `oformat` of a valid output context points to a static
+        // format description whose name is a static C string.
+        unsafe { std::ffi::CStr::from_ptr((*(*self.ctx).oformat).name) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Whether the container can store a stream of `codec`.
+    pub(crate) fn supports(&self, codec: ffi::AVCodecID) -> bool {
+        // SAFETY: `oformat` is valid; the query only reads static tables.
+        unsafe { ffi::avformat_query_codec((*self.ctx).oformat, codec, 0) == 1 }
+    }
+
+    /// Adds a stream that copies the input stream `input` (codec
+    /// parameters, including coded side data such as the display matrix,
+    /// and time base). Returns the stream index.
+    ///
+    /// # Safety
+    ///
+    /// `input` must point to a valid stream of an open input.
+    pub(crate) unsafe fn add_copy(
+        &mut self,
+        input: *const ffi::AVStream,
+    ) -> Result<usize, VideoError> {
+        let stream = self.new_stream()?;
+        // SAFETY: both streams and their parameters are valid.
+        unsafe {
+            let ret = ffi::avcodec_parameters_copy((*stream).codecpar, (*input).codecpar);
+            if ret < 0 {
+                return Err(VideoError::encode("copying stream parameters")(
+                    ffmpeg_the_third::Error::from(ret),
+                ));
+            }
+            (*(*stream).codecpar).codec_tag = 0;
+            (*stream).time_base = (*input).time_base;
+            (*stream).disposition = (*input).disposition;
+            Ok(usize::try_from((*stream).index).unwrap_or(0))
+        }
+    }
+
+    /// Adds a stream described by an open encoder context. Returns the
+    /// stream index.
+    ///
+    /// # Safety
+    ///
+    /// `encoder` must point to a valid, open encoder context.
+    pub(crate) unsafe fn add_encoded(
+        &mut self,
+        encoder: *const ffi::AVCodecContext,
+    ) -> Result<usize, VideoError> {
+        let stream = self.new_stream()?;
+        // SAFETY: the stream and the encoder context are valid.
+        unsafe {
+            let ret = ffi::avcodec_parameters_from_context((*stream).codecpar, encoder);
+            if ret < 0 {
+                return Err(VideoError::encode("copying encoder parameters")(
+                    ffmpeg_the_third::Error::from(ret),
+                ));
+            }
+            (*(*stream).codecpar).codec_tag = 0;
+            (*stream).time_base = (*encoder).time_base;
+            Ok(usize::try_from((*stream).index).unwrap_or(0))
+        }
+    }
+
+    /// Copies coded side data of `kind` (for example the display matrix,
+    /// which holds the rotation) from input stream parameters to a stream.
+    ///
+    /// # Safety
+    ///
+    /// `input` must point to valid codec parameters; `stream` must be an
+    /// index returned by this muxer before the header was written.
+    pub(crate) unsafe fn copy_side_data(
+        &mut self,
+        stream: usize,
+        input: *const ffi::AVCodecParameters,
+        kind: ffi::AVPacketSideDataType,
+    ) -> Result<(), VideoError> {
+        // SAFETY: both parameter sets are valid; the side data entry and its
+        // buffer are owned by `input` and copied by `av_packet_side_data_new`.
+        unsafe {
+            let found = ffi::av_packet_side_data_get(
+                (*input).coded_side_data,
+                (*input).nb_coded_side_data,
+                kind,
+            );
+            if found.is_null() {
+                return Ok(());
+            }
+            let par = (**(*self.ctx).streams.add(stream)).codecpar;
+            let entry = ffi::av_packet_side_data_new(
+                &raw mut (*par).coded_side_data,
+                &raw mut (*par).nb_coded_side_data,
+                kind,
+                (*found).size,
+                0,
+            );
+            if entry.is_null() {
+                return Err(out_of_memory());
+            }
+            ptr::copy_nonoverlapping((*found).data, (*entry).data, (*found).size);
+        }
+        Ok(())
+    }
+
+    /// Sets a metadata tag of the container (`stream: None`) or a stream.
+    pub(crate) fn set_tag(&mut self, stream: Option<usize>, key: &str, value: &str) {
+        let (Ok(key), Ok(value)) = (CString::new(key), CString::new(value)) else {
+            return;
+        };
+        // SAFETY: the dictionary belongs to the valid context or one of its
+        // streams; `av_dict_set` copies key and value.
+        unsafe {
+            let dict = match stream {
+                None => &raw mut (*self.ctx).metadata,
+                Some(index) => &raw mut (**(*self.ctx).streams.add(index)).metadata,
+            };
+            ffi::av_dict_set(dict, key.as_ptr(), value.as_ptr(), 0);
+        }
+    }
+
+    /// A new stream in the context (before the header).
+    fn new_stream(&mut self) -> Result<*mut ffi::AVStream, VideoError> {
+        // SAFETY: the context is valid and its header is not written yet.
+        let stream = unsafe { ffi::avformat_new_stream(self.ctx, ptr::null()) };
+        if stream.is_null() {
+            return Err(out_of_memory());
+        }
+        Ok(stream)
     }
 
     /// Writes the container header with muxer options.

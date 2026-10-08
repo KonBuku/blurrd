@@ -167,3 +167,45 @@ fn real_render_hevc_split_encode_throughput() {
         assert!(fps >= 650.0, "HEVC split encode {fps:.0} fps < 650");
     }
 }
+
+#[test]
+#[ignore = "needs BLURRD_TEST_MEDIA and an NVIDIA GPU"]
+fn real_render_copies_audio_and_reserves_the_index() {
+    use blurrd_video::MoovLayout;
+    use ffmpeg_the_third::media::Type;
+    use support::{stream_packets, top_level_boxes};
+
+    let source = media(CLIP);
+    let (pts, _) = decode_table(&source);
+    let pts = Arc::new(pts);
+    let output =
+        std::env::temp_dir().join(format!("blurrd-real-streams-{}.mp4", std::process::id()));
+    let options = EncodeOptions::default();
+    let (report, _) = render(&source, &pts, &sixteen_boxes(pts.len()), &options, &output);
+    let source_audio = stream_packets(&source, Type::Audio);
+    let output_audio = stream_packets(&output, Type::Audio);
+    let boxes = top_level_boxes(&output);
+    let out_info = probe(&output).unwrap();
+    let source_info = probe(&source).unwrap();
+    std::fs::remove_file(&output).unwrap();
+    println!(
+        "{CLIP}: encoder {} ({} sessions), {} audio packets, index {:?}, boxes {boxes:?}",
+        report.encoder,
+        report.sessions,
+        output_audio.len(),
+        report.moov
+    );
+    assert_eq!(report.encoder, "h264_nvenc", "Auto picks NVENC");
+    assert_eq!(output_audio.len(), source_audio.len(), "audio packet count");
+    assert!(
+        output_audio == source_audio,
+        "audio packets are bit-identical"
+    );
+    assert!(matches!(report.moov, MoovLayout::Reserved { .. }));
+    assert_eq!(boxes[..2], ["ftyp", "moov"], "index before the media data");
+    assert_eq!(
+        out_info.color,
+        blurrd_video::output_color(&source_info.color, source_info.height),
+        "normalised colour tags"
+    );
+}

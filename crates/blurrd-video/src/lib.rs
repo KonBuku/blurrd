@@ -33,6 +33,9 @@
 //!   and the output appears under its name only when it is complete.
 //!   H.264 on NVENC runs as two sessions over keyframe-aligned segments
 //!   (the GPU's two encoder engines); HEVC and AV1 split each frame instead.
+//!   Audio, subtitle and data packets are copied unchanged (or audio is
+//!   re-encoded as AAC), recorder metadata is stripped by default, and
+//!   MP4/MOV outputs get their index in space reserved at the front.
 //! - [`sys::gpu`]: the machine's GPUs from DXGI, identified by LUID.
 //! - [`PtsTable`]: the PTS of every presentation frame, persisted as
 //!   `pts.bin` in the project cache. Rendering and seeking compare decoded
@@ -62,6 +65,7 @@ mod rgb;
 mod roi;
 mod seek;
 mod segments;
+mod streams;
 pub mod sys;
 mod transcode;
 
@@ -79,7 +83,8 @@ pub use pts::PtsTable;
 pub use rgb::{RgbConverter, RgbImage};
 pub use roi::{RoiLayout, YuvRoi};
 pub use seek::{FrameSeeker, SeekerOptions};
-pub use transcode::{MuxOptions, TranscodeReport, Transcoder};
+pub use streams::SkippedStream;
+pub use transcode::{MoovLayout, MuxOptions, TranscodeReport, Transcoder};
 
 /// Sets up FFmpeg for blurrd. Safe to call more than once; only the first
 /// call does the work.
