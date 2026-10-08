@@ -25,7 +25,7 @@ Global options (before or after the command):
 Shows what blurrd knows about a recording: codec, picture size, frame rate
 (and whether it varies), frame and keyframe counts, colour tags, B-frames,
 edit lists, audio and subtitle streams. With `--json` it prints the
-`MediaInfo` object (see `crates/blurrd-core/bindings/MediaInfo.ts`).
+`MediaInfo` object (see `apps/desktop/src/bindings/MediaInfo.ts`).
 
 ## `blurrd analyze`
 
@@ -164,7 +164,7 @@ state (`fixed`, `OPEN`) and its box in source pixels. It never shows text.
 
 With `--json`, `analyze`, `render` and `run` print the job's events, one per
 line, in the form the desktop app receives them
-(`crates/blurrd-core/bindings/JobEvent.ts`), tagged by `type`: `Stage`,
+(`apps/desktop/src/bindings/JobEvent.ts`), tagged by `type`: `Stage`,
 `Started`, `Progress` (at most 20 per second), `Warning`, then `Finished`,
 `Canceled` or `Failed`. The last line is a report. A render's report:
 

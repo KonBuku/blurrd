@@ -6,7 +6,7 @@
     "THIRD-PARTY-NOTICES.md",
     "pnpm-lock.yaml",
     "**/src-tauri/gen/**",
-    "crates/blurrd-core/bindings/**",
+    "apps/desktop/src/bindings/**",
     "docs/schema/**"
   ]
 }

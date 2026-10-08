@@ -19,13 +19,11 @@ use ts_rs::{Config, TS};
 /// Exports one root type and every type it uses.
 type ExportFn = fn(&Config) -> Result<(), ts_rs::ExportError>;
 
-/// The bindings directory: `TS_RS_EXPORT_DIR`, or the default inside
-/// `blurrd-core` when xtask runs without cargo's environment.
+/// The bindings directory: `TS_RS_EXPORT_DIR`, or the desktop frontend's
+/// `src/bindings` when xtask runs without cargo's environment.
 pub(crate) fn bindings_dir(root: &Path) -> PathBuf {
-    std::env::var_os("TS_RS_EXPORT_DIR").map_or_else(
-        || root.join("crates").join("blurrd-core").join("bindings"),
-        PathBuf::from,
-    )
+    std::env::var_os("TS_RS_EXPORT_DIR")
+        .map_or_else(|| root.join("apps/desktop/src/bindings"), PathBuf::from)
 }
 
 /// Writes the TypeScript bindings of every IPC root type and the types they

@@ -3,9 +3,9 @@
 xtask = "run --quiet --package xtask --"
 
 [env]
-# TypeScript bindings written by `cargo xtask bindings` (ts-rs). They move
-# into apps/desktop/src/bindings/ when the desktop app exists.
-TS_RS_EXPORT_DIR = { value = "crates/blurrd-core/bindings", relative = true }
+# TypeScript bindings written by `cargo xtask bindings` (ts-rs) for the
+# desktop frontend.
+TS_RS_EXPORT_DIR = { value = "apps/desktop/src/bindings", relative = true }
 # u64/i64 fields (sizes, revisions, milliseconds) arrive as JSON numbers.
 TS_RS_LARGE_INT = "number"
 # FFmpeg headers and import libraries for ffmpeg-sys-the-third, installed by

@@ -146,7 +146,7 @@ payloads and the persisted files. Two xtask commands generate files from
 them, and both outputs are committed:
 
 ```sh
-cargo xtask bindings   # TypeScript types (ts-rs) into crates/blurrd-core/bindings/
+cargo xtask bindings   # TypeScript types (ts-rs) into apps/desktop/src/bindings/
 cargo xtask schema     # JSON Schemas of project, settings, presets and verify reports into docs/schema/
 ```
 
