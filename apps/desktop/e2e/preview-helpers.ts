@@ -28,6 +28,19 @@ export async function openRecording(page: Page, path: string) {
   await expect(page.getByTestId("preview-canvas")).toHaveAttribute("data-frame", /^\d+$/);
 }
 
+/**
+ * Seeks the video element to the middle of `frame` of the fixture (WebM
+ * timestamps in whole milliseconds) and waits until the canvas shows it.
+ */
+export async function seekFrame(page: Page, frame: number) {
+  await page.evaluate((f) => {
+    const video = document.querySelector("video");
+    const [start, end] = [f, f + 1].map((n) => Math.round((n * 1000) / 60));
+    if (video && start !== undefined && end !== undefined) video.currentTime = (start + end) / 2000;
+  }, frame);
+  await expect(page.getByTestId("preview-canvas")).toHaveAttribute("data-frame", String(frame));
+}
+
 /** The presented frame index the canvas reports. */
 export async function canvasFrame(page: Page): Promise<number> {
   return Number(await page.getByTestId("preview-canvas").getAttribute("data-frame"));

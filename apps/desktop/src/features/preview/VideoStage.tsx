@@ -77,8 +77,12 @@ export function VideoStage({ data, children, onStatus }: VideoStageProps) {
     [source.proxy, webglProblem, onStatus],
   );
 
-  // The stage mounts per project, which starts at its first frame.
-  useEffect(() => resetPlayback(), []);
+  // The stage mounts per project, which starts at its first frame with
+  // nothing selected.
+  useEffect(() => {
+    resetPlayback();
+    usePreviewStore.getState().select(null);
+  }, []);
 
   useEffect(() => {
     if (!controller) return undefined;

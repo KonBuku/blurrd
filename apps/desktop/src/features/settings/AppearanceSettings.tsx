@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, type ToggleOption } from "@/components/ui/toggle-group";
 import { DEFAULT_APPEARANCE, UI_FONT_SIZES } from "@/lib/appearance";
 import { useSettingsStore } from "@/store/settings";
@@ -29,12 +30,16 @@ const MOTION_OPTIONS: readonly ToggleOption<ReduceMotion>[] = [
   { value: "Off", label: "Off" },
 ];
 
-/** Settings › Appearance: theme, interface size and motion (design 8.5). */
+/**
+ * Settings › Appearance: theme, interface size, motion and the timeline
+ * thumbnails (design 8.5).
+ */
 export function AppearanceSettings() {
   const appearance = useSettingsStore((state) => state.appearance);
   const status = useSettingsStore((state) => state.status);
   const update = useSettingsStore((state) => state.updateAppearance);
   const sizeLabel = useId();
+  const thumbsLabel = useId();
 
   return (
     <SettingsPage title="Appearance" description="How blurrd looks on this PC.">
@@ -91,6 +96,18 @@ export function AppearanceSettings() {
               options={MOTION_OPTIONS}
               value={appearance.reduce_motion}
               onValueChange={(reduce_motion) => update({ reduce_motion })}
+            />
+          }
+        />
+        <SettingsRow
+          label="Timeline thumbnails"
+          labelId={thumbsLabel}
+          description="Show a strip of frame thumbnails under the timeline lanes."
+          control={
+            <Switch
+              aria-labelledby={thumbsLabel}
+              checked={appearance.timeline_thumbs}
+              onCheckedChange={(timeline_thumbs) => update({ timeline_thumbs })}
             />
           }
         />

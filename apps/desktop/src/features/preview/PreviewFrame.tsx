@@ -12,8 +12,13 @@ import { INSPECTOR_ID } from "@/features/inspector/Inspector";
 import { Frame, FrameHeader, FrameTitle } from "@/features/shell/Frame";
 import { baseName, previewSummary } from "@/lib/media";
 import { SHORTCUTS } from "@/lib/shortcuts";
+import { usePreviewStore } from "@/store/preview";
 import { useQueueStore } from "@/store/queue";
 
+import { useVerifyReport } from "@/features/timeline/useTimelineData";
+import { Timeline } from "@/features/timeline/Timeline";
+
+import { BoxOverlay } from "./BoxOverlay";
 import { PreviewToolbar } from "./PreviewToolbar";
 import { useProject } from "./useProject";
 import { VideoStage, type StageStatus } from "./VideoStage";
@@ -111,6 +116,8 @@ interface ProjectPreviewProps {
 /** The preview of one file: header with its facts and controls, then the stage. */
 function ProjectPreview({ path, toggle }: ProjectPreviewProps) {
   const state = useProject(path);
+  const report = useVerifyReport(state.status === "ready" ? state.data.project.id : "");
+  const showBoxes = usePreviewStore((store) => store.showBoxes);
   const [status, setStatus] = useState<StageStatus>({ proxy: false, webglProblem: null });
   const onStatus = useCallback((next: StageStatus) => setStatus(next), []);
   const project = state.status === "ready" ? state.data.project : null;
@@ -144,7 +151,16 @@ function ProjectPreview({ path, toggle }: ProjectPreviewProps) {
           </div>
         </div>
       )}
-      {state.status === "ready" && <VideoStage data={state.data} onStatus={onStatus} />}
+      {state.status === "ready" && (
+        <>
+          <VideoStage data={state.data} onStatus={onStatus}>
+            {(box) =>
+              showBoxes && <BoxOverlay data={state.data} report={report.data ?? null} box={box} />
+            }
+          </VideoStage>
+          <Timeline data={state.data} report={report.data ?? null} />
+        </>
+      )}
     </Frame>
   );
 }

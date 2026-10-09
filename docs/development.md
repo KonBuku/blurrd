@@ -373,6 +373,33 @@ its own blur of the HUD regions around a paused frame
 (`blurrd://exact/<project>/<frame>.json` and the JPEG patches,
 `src/ipc/media.ts`) and draws those patches over the WebGL result.
 
+"Boxes" (header) shows the box overlay (`BoxOverlay.tsx`,
+`overlay-model.ts`): every box the export blurs on the presented frame
+with a 1 px stroke and a 10 % fill in its region colour, open leaks of the
+last verification with a dashed destructive stroke (accepted ones and
+names outside the regions dashed in the warning colour) and edits that no
+longer match a detection dashed and transparent. Each item is a button
+named like its tooltip ("Round banner · player name · frames 70–160");
+clicking selects it. A halo in the background colour keeps the strokes
+visible on any footage. Items are positioned from source rectangles with
+the stage box, so they stay within one source pixel of the video at
+every zoom (`e2e/overlay.spec.ts` measures 25–400 %).
+
+The timeline under the stage (`src/features/timeline`) shows a ruler,
+one density lane per region with boxes (`get_timeline_density`, 2,048
+buckets resampled to pixel columns, at least 2 px for a single frame),
+warning-outlined spans where a region fell back to its safe slot boxes
+(with a warning button on the lane label), the Verify lane (green = OCR
+clean, hatched = not verified yet or changed since the report, red = open
+leak), leak markers (buttons: jump to the leak and select its box), the
+optional thumbnail strip (Settings › Appearance › Timeline thumbnails)
+and the playhead with its timecode. Click or drag scrubs to the frame
+under the pointer, Ctrl+wheel zooms around it (down to 30 frames), the
+wheel pans, and the view follows the playhead. The track is a
+`role="slider"`: arrows step one frame, Page Up/Down one second, Home/End
+jump to the ends. Hovering shows the nearest thumbnail, the timecode, the
+frame number and the boxes per region.
+
 Preview blur parity: `e2e/blur-parity.spec.ts` blurs reference frames
 with the WebGL renderer and compares them with the frames `CpuBlur`
 produced. Write the reference frames first (synthetic frames; `--i420`

@@ -19,6 +19,8 @@ export interface PreviewState {
   readonly zoom: Zoom;
   /** Source point at the stage centre; `null` = the frame centre. */
   readonly center: Point | null;
+  /** Key of the selected overlay item (track, edit or leak), if any. */
+  readonly selected: string | null;
   readonly setMode: (mode: PreviewMode) => void;
   readonly setSplit: (split: number) => void;
   readonly toggleBoxes: () => void;
@@ -26,6 +28,7 @@ export interface PreviewState {
   /** Sets the zoom, and the point at the stage centre when given. */
   readonly setZoom: (zoom: Zoom, center?: Point | null) => void;
   readonly setCenter: (center: Point) => void;
+  readonly select: (key: string | null) => void;
 }
 
 /** View state of the preview stage (not persisted: every session starts at Fit). */
@@ -36,6 +39,7 @@ export const usePreviewStore = create<PreviewState>()((set) => ({
   exact: false,
   zoom: "fit",
   center: null,
+  selected: null,
   setMode: (mode) => set({ mode }),
   setSplit: (split) => set({ split: Math.min(Math.max(split, 0), 1) }),
   toggleBoxes: () => set((state) => ({ showBoxes: !state.showBoxes })),
@@ -46,4 +50,5 @@ export const usePreviewStore = create<PreviewState>()((set) => ({
       center: zoom === "fit" ? null : center === undefined ? state.center : center,
     })),
   setCenter: (center) => set({ center }),
+  select: (selected) => set({ selected }),
 }));

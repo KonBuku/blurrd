@@ -1,4 +1,4 @@
-import { ChevronDown, TriangleAlert } from "lucide-react";
+import { ChevronDown, SquareDashed, TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,8 @@ export function zoomLabel(zoom: Zoom): string {
 export function PreviewToolbar({ status }: { readonly status: StageStatus }) {
   const mode = usePreviewStore((state) => state.mode);
   const setMode = usePreviewStore((state) => state.setMode);
+  const showBoxes = usePreviewStore((state) => state.showBoxes);
+  const toggleBoxes = usePreviewStore((state) => state.toggleBoxes);
   const exact = usePreviewStore((state) => state.exact);
   const toggleExact = usePreviewStore((state) => state.toggleExact);
   const zoom = usePreviewStore((state) => state.zoom);
@@ -76,6 +78,23 @@ export function PreviewToolbar({ status }: { readonly status: StageStatus }) {
         onValueChange={setMode}
         disabled={status.webglProblem !== null}
       />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={showBoxes}
+            className="aria-pressed:bg-selected aria-pressed:text-accent-foreground"
+            onClick={toggleBoxes}
+          >
+            <SquareDashed />
+            Boxes
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          Show the blurred boxes, leaks and inactive edits
+        </TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
