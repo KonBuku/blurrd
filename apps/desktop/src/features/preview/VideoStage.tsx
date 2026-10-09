@@ -79,10 +79,10 @@ export function VideoStage({ data, children, onStatus }: VideoStageProps) {
   );
 
   // The stage mounts per project, which starts at its first frame with
-  // nothing selected.
+  // nothing selected and no tool active.
   useEffect(() => {
     resetPlayback();
-    usePreviewStore.getState().select(null);
+    usePreviewStore.getState().resetEditing();
   }, []);
 
   useEffect(() => {

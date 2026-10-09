@@ -8,6 +8,7 @@
  */
 import type { NameKind } from "@/bindings/NameKind";
 import type { Override } from "@/bindings/Override";
+import type { OverrideBinding } from "@/bindings/OverrideBinding";
 import type { RectI } from "@/bindings/RectI";
 import type { Region } from "@/bindings/Region";
 import type { Track } from "@/bindings/Track";
@@ -32,6 +33,10 @@ export interface FrameBox extends BlurBox {
   readonly uid: string | null;
   /** First and last frame of the track or edit. */
   readonly span: readonly [number, number];
+  /** The detector's box before the user's edits (the `Add` box for edits). */
+  readonly source: RectI;
+  /** The `Adjust` edit that moved this track box, if one did. */
+  readonly adjustUid: string | null;
 }
 
 const MASK64 = (1n << 64n) - 1n;
@@ -114,6 +119,53 @@ function firstSegment(track: Track, frame: number): number {
 }
 
 /**
+ * Binds every `Suppress`/`Adjust` edit to the track of its region whose
+ * segments within the edit's frames overlap its anchor best (at least the
+ * edit's minimum IoU; ties go to the earlier track), like the engine's
+ * `Resolution::new`. `active[i]` says whether edit `i` is active (`Add`
+ * edits always are); `bound[t]` lists the edits bound to track `t`.
+ */
+function bindEdits(
+  tracks: readonly Track[],
+  overrides: readonly Override[],
+): { readonly active: boolean[]; readonly bound: number[][] } {
+  const bound: number[][] = tracks.map(() => []);
+  const active = overrides.map((edit, index) => {
+    const anchor = anchorOf(edit);
+    if (!anchor) return true;
+    const [f0, f1] = frames(edit);
+    let best = -1;
+    let bestScore = 0;
+    for (const [t, track] of tracks.entries()) {
+      if (track.region !== edit.region) continue;
+      let score = 0;
+      for (let s = firstSegment(track, f0); s < track.segments.length; s += 1) {
+        const segment = track.segments[s];
+        if (!segment || segment.f0 > f1) break;
+        score = Math.max(score, iou(segment.rect, anchor[0]));
+      }
+      if (score >= anchor[1] && (best === -1 || score > bestScore)) {
+        best = t;
+        bestScore = score;
+      }
+    }
+    if (best === -1) return false;
+    bound[best]?.push(index);
+    return true;
+  });
+  return { active, bound };
+}
+
+/** The binding state of every edit, as `get_tracks` reports it. */
+export function overrideBindings(
+  tracks: readonly Track[],
+  overrides: readonly Override[],
+): OverrideBinding[] {
+  const { active } = bindEdits(tracks, overrides);
+  return overrides.map((edit, i) => ({ uid: edit.uid, status: active[i] ? "Bound" : "Unbound" }));
+}
+
+/**
  * The boxes of a plan by frame. Build once per plan revision; `boxesAt`
  * is cheap enough to call on every presented video frame.
  */
@@ -136,32 +188,8 @@ export class IntervalIndex {
     this.frameCount = frameCount;
     this.tracks = tracks;
     this.overrides = overrides;
-    const bound: number[][] = tracks.map(() => []);
-    this.active = overrides.map((edit, index) => {
-      const anchor = anchorOf(edit);
-      if (!anchor) return true;
-      const [f0, f1] = frames(edit);
-      // The track of the edit's region with the highest IoU over the
-      // edit's frames wins; ties go to the earlier track.
-      let best = -1;
-      let bestScore = 0;
-      for (const [t, track] of tracks.entries()) {
-        if (track.region !== edit.region) continue;
-        let score = 0;
-        for (let s = firstSegment(track, f0); s < track.segments.length; s += 1) {
-          const segment = track.segments[s];
-          if (!segment || segment.f0 > f1) break;
-          score = Math.max(score, iou(segment.rect, anchor[0]));
-        }
-        if (score >= anchor[1] && (best === -1 || score > bestScore)) {
-          best = t;
-          bestScore = score;
-        }
-      }
-      if (best === -1) return false;
-      bound[best]?.push(index);
-      return true;
-    });
+    const { active, bound } = bindEdits(tracks, overrides);
+    this.active = active;
     this.bound = bound;
     const buckets: number[][] = Array.from(
       { length: Math.max(1, Math.ceil(frameCount / BUCKET)) },
@@ -198,8 +226,9 @@ export class IntervalIndex {
       if (!track || !visible(track.region)) continue;
       const segment = track.segments[firstSegment(track, frame)];
       if (!segment || segment.f0 > frame) continue;
-      const rect = this.apply(t, frame, segment.rect);
-      if (!rect) continue;
+      const applied = this.apply(t, frame, segment.rect);
+      if (!applied) continue;
+      const { rect, adjustUid } = applied;
       const anchor = track.segments[0]?.rect ?? segment.rect;
       out.push({
         rect,
@@ -211,6 +240,8 @@ export class IntervalIndex {
         trackId: track.id,
         uid: null,
         span: [track.segments[0]?.f0 ?? segment.f0, track.segments.at(-1)?.f1 ?? segment.f1],
+        source: segment.rect,
+        adjustUid,
       });
     }
     // Buckets list tracks in track order, so the order matches the export.
@@ -226,6 +257,8 @@ export class IntervalIndex {
         trackId: null,
         uid: edit.uid,
         span: [edit.f0, edit.f1],
+        source: edit.rect,
+        adjustUid: null,
       });
     });
     return out;
@@ -241,15 +274,26 @@ export class IntervalIndex {
     return starts.findLast((start) => start < frame) ?? null;
   }
 
-  /** Applies the edits bound to track `t` to its box on `frame`. */
-  private apply(t: number, frame: number, rect: RectI): RectI | null {
+  /**
+   * Applies the edits bound to track `t` to its box on `frame`: the box
+   * to blur and the `Adjust` edit that set it, or `null` when hidden.
+   */
+  private apply(
+    t: number,
+    frame: number,
+    rect: RectI,
+  ): { readonly rect: RectI; readonly adjustUid: string | null } | null {
     let out = rect;
+    let adjustUid: string | null = null;
     for (const index of this.bound[t] ?? []) {
       const edit = this.overrides[index];
       if (!edit || edit.f0 > frame || edit.f1 < frame) continue;
       if (edit.op === "Suppress" && iou(rect, edit.anchor) >= SUPPRESS_MIN_IOU) return null;
-      if (edit.op === "Adjust" && iou(rect, edit.anchor) >= ADJUST_MIN_IOU) out = edit.rect;
+      if (edit.op === "Adjust" && iou(rect, edit.anchor) >= ADJUST_MIN_IOU) {
+        out = edit.rect;
+        adjustUid = edit.uid;
+      }
     }
-    return out;
+    return { rect: out, adjustUid };
   }
 }

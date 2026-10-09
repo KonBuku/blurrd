@@ -2,7 +2,7 @@
  * Typed wrappers of the engine commands (plan 9.1). Argument and result
  * types come from the generated bindings where they exist; types the
  * engine does not generate yet are declared here and documented in plan
- * section 18 (M23 and M24 decisions). Every command rejects with an
+ * section 18 (M23, M24 and M25 decisions). Every command rejects with an
  * `AppError` (see `ipc/errors.ts`).
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -11,6 +11,7 @@ import type { AppError } from "@/bindings/AppError";
 import type { BlurParams } from "@/bindings/BlurParams";
 import type { Capabilities } from "@/bindings/Capabilities";
 import type { DensityLanes } from "@/bindings/DensityLanes";
+import type { FrameRange } from "@/bindings/FrameRange";
 import type { MediaInfo } from "@/bindings/MediaInfo";
 import type { Override } from "@/bindings/Override";
 import type { OverrideBinding } from "@/bindings/OverrideBinding";
@@ -148,4 +149,28 @@ export function getTimelineDensity(projectId: string, buckets: number): Promise<
 /** The last verification report, or `null` before the first one. */
 export function getVerifyReport(projectId: string): Promise<VerifyReport | null> {
   return invoke<VerifyReport | null>("get_verify_report", { projectId });
+}
+
+/**
+ * What `set_overrides` answers: the new project revision and the frame
+ * ranges that edits changed since the last verification (verified again
+ * before export).
+ */
+export interface OverridesSaved {
+  readonly revision: number;
+  readonly unverified_ranges: readonly FrameRange[];
+}
+
+/**
+ * Replaces the edits of a project with `overrides` (the full list). The
+ * backend rejects the call with a `StaleRevision` error when the project
+ * changed since `baseRev` (another save, a re-analysis); the caller then
+ * reloads.
+ */
+export function setOverrides(
+  projectId: string,
+  baseRev: number,
+  overrides: readonly Override[],
+): Promise<OverridesSaved> {
+  return invoke<OverridesSaved>("set_overrides", { projectId, baseRev, overrides });
 }

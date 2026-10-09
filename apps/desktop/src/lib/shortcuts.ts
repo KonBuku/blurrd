@@ -31,7 +31,15 @@ export type ShortcutId =
   | "previousMark"
   | "zoomIn"
   | "zoomOut"
-  | "zoomFit";
+  | "zoomFit"
+  | "manualBox"
+  | "setIn"
+  | "deleteBox"
+  | "nudgeBox"
+  | "growBox"
+  | "undo"
+  | "redo"
+  | "cancelEdit";
 
 /** Where a shortcut applies. */
 export type ShortcutScope = "window" | "preview";
@@ -63,6 +71,17 @@ export interface Shortcut extends KeyBinding {
 /** A binding without Ctrl or Alt. */
 function plain(key: string, label: string, shift = false): KeyBinding {
   return { keys: shift ? ["Shift", label] : [label], key, ctrl: false, alt: false, shift };
+}
+
+/** A binding with Alt (and Shift when `shift`). */
+function alt(key: string, label: string, shift = false): KeyBinding {
+  return {
+    keys: shift ? ["Alt", "Shift", label] : ["Alt", label],
+    key,
+    ctrl: false,
+    alt: true,
+    shift,
+  };
 }
 
 /** A binding with Ctrl. */
@@ -166,7 +185,14 @@ export const SHORTCUTS: Readonly<Record<ShortcutId, Shortcut>> = {
   ),
   showAfter: shortcut("showAfter", "Show the blurred result", plain("a", "A"), PREVIEW),
   showSplit: shortcut("showSplit", "Show before and after side by side", plain("s", "S"), PREVIEW),
-  toggleBoxes: shortcut("toggleBoxes", "Show or hide the box overlay", plain("o", "O"), PREVIEW),
+  // One key, two jobs: O ends the manual box (the out point to I's in
+  // point) while there is one to end, otherwise it toggles the overlay.
+  toggleBoxes: shortcut(
+    "toggleBoxes",
+    "Show or hide the box overlay; while drawing or with a manual box selected, end the box on this frame",
+    plain("o", "O"),
+    PREVIEW,
+  ),
   nextMark: shortcut("nextMark", "Next detection or leak", plain("n", "N"), PREVIEW_REPEAT),
   previousMark: shortcut(
     "previousMark",
@@ -180,6 +206,52 @@ export const SHORTCUTS: Readonly<Record<ShortcutId, Shortcut>> = {
   }),
   zoomOut: shortcut("zoomOut", "Zoom the preview out", ctrl("-", ["Ctrl", "-"]), PREVIEW_REPEAT),
   zoomFit: shortcut("zoomFit", "Fit the preview to the stage", ctrl("0", ["Ctrl", "0"]), PREVIEW),
+  manualBox: shortcut("manualBox", "Draw a manual box", plain("m", "M"), PREVIEW),
+  setIn: shortcut(
+    "setIn",
+    "Start the manual box on this frame (while drawing or with a manual box selected)",
+    plain("i", "I"),
+    PREVIEW,
+  ),
+  deleteBox: shortcut(
+    "deleteBox",
+    "Delete the selected manual box or edit, or hide the selected detection",
+    plain("Delete", "Delete"),
+    { ...PREVIEW, alternatives: [plain("Backspace", "Backspace")] },
+  ),
+  nudgeBox: shortcut("nudgeBox", "Move the selected box by one pixel", alt("ArrowLeft", "←"), {
+    ...PREVIEW_REPEAT,
+    alternatives: [alt("ArrowRight", "→"), alt("ArrowUp", "↑"), alt("ArrowDown", "↓")],
+  }),
+  growBox: shortcut(
+    "growBox",
+    "Resize the selected box by one pixel (right and bottom edge)",
+    alt("ArrowLeft", "←", true),
+    {
+      ...PREVIEW_REPEAT,
+      alternatives: [
+        alt("ArrowRight", "→", true),
+        alt("ArrowUp", "↑", true),
+        alt("ArrowDown", "↓", true),
+      ],
+    },
+  ),
+  undo: shortcut("undo", "Undo the last box edit", ctrl("z", ["Ctrl", "Z"]), PREVIEW_REPEAT),
+  redo: shortcut(
+    "redo",
+    "Redo the last undone box edit",
+    ctrl("z", ["Ctrl", "Shift", "Z"], { shift: true }),
+    {
+      ...PREVIEW_REPEAT,
+      alternatives: [ctrl("y", ["Ctrl", "Y"])],
+    },
+  ),
+  cancelEdit: shortcut(
+    "cancelEdit",
+    "Stop drawing, or clear the box selection",
+    plain("Escape", "Esc"),
+    PREVIEW,
+  ),
 };
 
 /** The bindings of a shortcut, the first one first. */
@@ -200,6 +272,8 @@ const ARIA_NAMES: Readonly<Record<string, string>> = {
   Esc: "Escape",
   "←": "ArrowLeft",
   "→": "ArrowRight",
+  "↑": "ArrowUp",
+  "↓": "ArrowDown",
   "+": "Plus",
 };
 
@@ -290,7 +364,8 @@ const NAVIGATION_KEYS: ReadonlySet<string> = new Set([
  * Whether the element an event comes from uses its key itself, so that a
  * preview shortcut must leave it alone: dialogs and menus take every key,
  * text fields every key without Ctrl, composite widgets (lists, sliders,
- * radio groups) their navigation keys, buttons and options Space.
+ * radio groups) their navigation keys, buttons and options Space, the
+ * queue list its Delete and Backspace.
  */
 export function targetOwnsKey(event: KeyboardEvent): boolean {
   const { target } = event;
@@ -299,7 +374,11 @@ export function targetOwnsKey(event: KeyboardEvent): boolean {
   const editable =
     target.closest("input,textarea,select") !== null ||
     (target instanceof HTMLElement && target.isContentEditable);
-  if (editable && !(event.ctrlKey || event.metaKey)) return true;
+  // Text fields keep plain keys and their own undo and redo.
+  const textUndo = (event.ctrlKey || event.metaKey) && /^[yz]$/i.test(event.key);
+  if (editable && (!(event.ctrlKey || event.metaKey) || textUndo)) return true;
   if (NAVIGATION_KEYS.has(event.key) && target.closest(NAVIGATING_ROLES)) return true;
+  if ((event.key === "Delete" || event.key === "Backspace") && target.closest('[role="listbox"]'))
+    return true;
   return event.key === " " && target.closest(PRESSABLE) !== null;
 }

@@ -13,7 +13,7 @@ import type { Segment } from "@/bindings/Segment";
 import type { Track } from "@/bindings/Track";
 import type { VerifyReport } from "@/bindings/VerifyReport";
 import type { ProjectSummary, PtsTable, TrackSet } from "@/ipc/commands";
-import { IntervalIndex } from "@/lib/interval-index";
+import { IntervalIndex, overrideBindings } from "@/lib/interval-index";
 
 import {
   FIXTURE,
@@ -156,7 +156,7 @@ function mockOverrides(frames: number): Override[] {
   ];
 }
 
-/** `get_tracks` of the mock. */
+/** The initial `get_tracks` answer of the mock for `path` (before any edit). */
 export function mockTracks(path: string): TrackSet {
   const frames = frameCount(path);
   if (path.toLowerCase().includes("fresh")) {
@@ -164,22 +164,25 @@ export function mockTracks(path: string): TrackSet {
   }
   const tracks = plateTracks(frames);
   const overrides = mockOverrides(frames);
-  const index = new IntervalIndex(frames, tracks, overrides);
   return {
     revision: 3,
     tracks,
     overrides,
-    bindings: overrides.map((edit, i) => ({
-      uid: edit.uid,
-      status: index.active[i] ? "Bound" : "Unbound",
-    })),
+    bindings: overrideBindings(tracks, overrides),
     health: [{ region: "TextChat", f0: Math.min(180, frames - 1), f1: Math.min(200, frames - 1) }],
   };
 }
 
-/** `get_timeline_density`, computed like `BlurPlan::density`. */
-export function mockDensity(path: string, buckets: number): DensityLanes {
-  const { tracks, overrides } = mockTracks(path);
+/**
+ * `get_timeline_density` of the track set `stored` (by default the fixture's
+ * initial one), computed like `BlurPlan::density`.
+ */
+export function mockDensity(
+  path: string,
+  buckets: number,
+  stored: TrackSet = mockTracks(path),
+): DensityLanes {
+  const { tracks, overrides } = stored;
   const frames = frameCount(path);
   const count = Math.min(buckets, frames);
   const index = new IntervalIndex(frames, tracks, overrides);

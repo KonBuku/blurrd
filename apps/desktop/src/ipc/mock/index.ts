@@ -9,10 +9,12 @@ import { clearMocks, mockConvertFileSrc, mockIPC, mockWindows } from "@tauri-app
 
 import type { AppError } from "@/bindings/AppError";
 import type { Capabilities } from "@/bindings/Capabilities";
+import type { Override } from "@/bindings/Override";
 import type { SessionEntry } from "@/ipc/commands";
 
 import { MOCK_CAPABILITIES } from "./capabilities";
 
+import { MockProjects } from "./edits";
 import { createEventBus } from "./events";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
 import {
@@ -20,7 +22,6 @@ import {
   mockDensity,
   mockProject,
   mockPts,
-  mockTracks,
   mockVerifyReport,
   projectId,
 } from "./project";
@@ -69,6 +70,13 @@ export interface MockBackend {
   readonly sessionFile: () => SessionEntry[] | null;
   /** Every `blurrd://` request (Exact patches, thumbnails) in order. */
   readonly schemeRequests: SchemeRequest[];
+  /**
+   * The stored projects (tracks, edits, revision, unverified ranges); tests
+   * read them and simulate other writers and re-analyses with them.
+   */
+  readonly projects: MockProjects;
+  /** How long `set_overrides` takes, in milliseconds. */
+  saveDelayMs: number;
 }
 
 /** Name of the settings file, as opened by the real shell. */
@@ -144,6 +152,8 @@ export function installMockBackend(): MockBackend {
       return text === null ? null : (JSON.parse(text) as SessionEntry[]);
     },
     schemeRequests: [],
+    projects: new MockProjects(),
+    saveDelayMs: 0,
   };
   const installedAt = performance.now();
   const store = (cmd: string, args: StoreArgs) => {
@@ -207,14 +217,25 @@ export function installMockBackend(): MockBackend {
       case "open_project": {
         const { path } = args as { path: string };
         projects.set(projectId(path), path);
-        return mockProject(path);
+        const project = mockProject(path);
+        const { unverified } = backend.projects.state(path);
+        return { ...project, verify: { ...project.verify, unverified_ranges: unverified } };
       }
       case "get_tracks":
-        return mockTracks(pathOf(args));
+        return backend.projects.state(pathOf(args)).set;
+      case "set_overrides": {
+        const { baseRev, overrides } = args as { baseRev: number; overrides: Override[] };
+        const path = pathOf(args);
+        await delay(backend.saveDelayMs);
+        return backend.projects.setOverrides(path, baseRev, overrides);
+      }
       case "get_pts":
         return mockPts(pathOf(args));
-      case "get_timeline_density":
-        return mockDensity(pathOf(args), (args as { buckets: number }).buckets);
+      case "get_timeline_density": {
+        const path = pathOf(args);
+        const { buckets } = args as { buckets: number };
+        return mockDensity(path, buckets, backend.projects.state(path).set);
+      }
       case "get_verify_report":
         return mockVerifyReport(pathOf(args));
       case "save_session":

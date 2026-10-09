@@ -2,6 +2,8 @@ import { memo, useCallback, useEffect, useState } from "react";
 
 import type { VerifyReport } from "@/bindings/VerifyReport";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { setItemRect } from "@/features/editing/actions";
+import { SelectionFrame } from "@/features/editing/SelectionFrame";
 import { REGIONS, type RegionFamily } from "@/lib/regions";
 import type { StageBox } from "@/lib/stage";
 import { cn } from "@/lib/utils";
@@ -30,7 +32,7 @@ function itemClass(item: OverlayItem, selected: boolean): string {
       : "border border-dashed border-warning";
   }
   const family = item.region === null ? "manual" : REGIONS[item.region].family;
-  if (item.kind === "unbound")
+  if (item.kind === "unbound" || item.kind === "hidden")
     return cn("border border-dashed", FAMILY_CLASSES[family], "bg-transparent");
   return cn("border", FAMILY_CLASSES[family]);
 }
@@ -105,6 +107,7 @@ const OverlayButton = memo(function OverlayButton({
           type="button"
           data-no-pan
           data-overlay={item.kind}
+          data-key={item.key}
           aria-label={item.label}
           aria-pressed={selected}
           className={cn(
@@ -135,15 +138,19 @@ export interface BoxOverlayProps {
 /**
  * The box overlay over the preview frame (design 8.1): every blurred box
  * with a 1 px stroke and 10 % fill in its region colour, leaks of the last
- * verification with a dashed destructive stroke, and inactive (unbound)
- * edits dashed. Positions are source rectangles scaled with the stage box
+ * verification with a dashed destructive stroke, and boxes the user hid
+ * and inactive (unbound) edits dashed. Positions are source rectangles scaled with the stage box
  * shared with the canvas, so they line up at every zoom. Each item is a
- * button with its description as name and tooltip; clicking selects it.
+ * button with its description as name and tooltip; clicking selects it,
+ * and a selected manual or detector box gets handles to move and resize
+ * it (`SelectionFrame`).
  */
 export function BoxOverlay({ data, report, box }: BoxOverlayProps) {
   const selected = usePreviewStore((state) => state.selected);
   const select = usePreviewStore((state) => state.select);
   const items = useOverlayItems(data, report);
+  const chosen = items.find((item) => item.key === selected);
+  const editable = chosen?.edit && chosen.edit.kind !== "edit" ? chosen : null;
 
   return (
     <div className="pointer-events-none absolute inset-0" data-testid="box-overlay">
@@ -156,6 +163,16 @@ export function BoxOverlay({ data, report, box }: BoxOverlayProps) {
           onSelect={select}
         />
       ))}
+      {editable?.edit && (
+        <SelectionFrame
+          rect={editable.rect}
+          edit={editable.edit}
+          box={box}
+          width={data.project.media.width}
+          height={data.project.media.height}
+          onCommit={setItemRect}
+        />
+      )}
     </div>
   );
 }

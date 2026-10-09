@@ -9,6 +9,8 @@ import { colourModel, pixelParams, type ColourModel, type PixelParams } from "@/
 import { FrameClock } from "@/lib/frames";
 import { IntervalIndex } from "@/lib/interval-index";
 
+import { useProjectEdits } from "@/features/editing/useProjectEdits";
+
 /** Everything the preview needs about the shown file, once loaded. */
 export interface LoadedProject {
   readonly project: ProjectSummary;
@@ -29,7 +31,9 @@ export type ProjectState =
 
 /**
  * Opens the project of `path` and reads its tracks and timestamps (cached
- * per project for the session; a new revision is a new query).
+ * per project for the session). The edits come from the edit store, which
+ * loads and saves them (`useProjectEdits`), so the index follows every
+ * edit, undo and redo at once.
  */
 export function useProject(path: string): ProjectState {
   const project = useQuery({ queryKey: ["project", path], queryFn: () => openProject(path) });
@@ -44,19 +48,28 @@ export function useProject(path: string): ProjectState {
     queryFn: () => getPts(id ?? ""),
     enabled: id !== undefined,
   });
+  const overrides = useProjectEdits(path, id, tracks.data);
+  // The clock only depends on the timestamps: a saved edit updates the
+  // project's verify state, which must not restart the playback.
+  const [fpsNum, fpsDen] = project.data?.media.fps ?? [0, 0];
+  const clock = useMemo(
+    () => (pts.data ? new FrameClock(pts.data.pts, pts.data.time_base, [fpsNum, fpsDen]) : null),
+    [pts.data, fpsNum, fpsDen],
+  );
   const data = useMemo((): LoadedProject | null => {
-    if (!project.data || !tracks.data || !pts.data) return null;
+    if (!project.data || !tracks.data || !clock || !overrides) return null;
     const { media } = project.data;
     return {
       project: project.data,
-      tracks: tracks.data,
-      clock: new FrameClock(pts.data.pts, pts.data.time_base, media.fps),
-      index: new IntervalIndex(pts.data.pts.length, tracks.data.tracks, tracks.data.overrides),
+      // The edits on screen, saved or about to be (the edit store owns them).
+      tracks: { ...tracks.data, overrides },
+      clock,
+      index: new IntervalIndex(clock.count, tracks.data.tracks, overrides),
       params: pixelParams(project.data.blur, project.data.sy),
       colour: colourModel(media.color.matrix, media.color.range),
       enabled: new Set(project.data.enabled),
     };
-  }, [project.data, tracks.data, pts.data]);
+  }, [project.data, tracks.data, clock, overrides]);
   const failure = project.error ?? tracks.error ?? pts.error;
   if (failure) return { status: "error", error: toAppError(failure) };
   return data ? { status: "ready", data } : { status: "loading" };

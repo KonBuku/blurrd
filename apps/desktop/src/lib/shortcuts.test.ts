@@ -39,6 +39,20 @@ describe("shortcuts", () => {
     );
     expect(matchShortcut(key({ key: "o", code: "KeyO" }), "preview")?.id).toBe("toggleBoxes");
     expect(matchShortcut(key({ key: "o", code: "KeyO" }), "window")).toBeUndefined();
+    expect(
+      matchShortcut(key({ key: "Z", code: "KeyZ", ctrlKey: true, shiftKey: true }), "preview")?.id,
+    ).toBe("redo");
+    expect(matchShortcut(key({ key: "y", code: "KeyY", ctrlKey: true }), "preview")?.id).toBe(
+      "redo",
+    );
+    expect(matchShortcut(key({ key: "z", code: "KeyZ", ctrlKey: true }), "preview")?.id).toBe(
+      "undo",
+    );
+    expect(matchShortcut(key({ key: "ArrowUp", altKey: true }), "preview")?.id).toBe("nudgeBox");
+    expect(
+      matchShortcut(key({ key: "ArrowUp", altKey: true, shiftKey: true }), "preview")?.id,
+    ).toBe("growBox");
+    expect(matchShortcut(key({ key: "Backspace" }), "preview")?.id).toBe("deleteBox");
     expect(matchShortcut(key({ key: " " }), "window")).toBeUndefined();
   });
 
@@ -85,5 +99,10 @@ describe("shortcuts", () => {
     expect(targetOwnsKey(key({ key: " " }, el("slider")))).toBe(false);
     expect(targetOwnsKey(key({ key: "a" }, el("inDialog")))).toBe(true);
     expect(targetOwnsKey(key({ key: "ArrowLeft" }, el("plain")))).toBe(false);
+    // Text fields keep their own undo; the queue list its Delete.
+    expect(targetOwnsKey(key({ key: "z", ctrlKey: true }, el("text")))).toBe(true);
+    expect(targetOwnsKey(key({ key: "z", ctrlKey: true }, el("plain")))).toBe(false);
+    expect(targetOwnsKey(key({ key: "Delete" }, el("list")))).toBe(true);
+    expect(targetOwnsKey(key({ key: "Delete" }, el("plain")))).toBe(false);
   });
 });

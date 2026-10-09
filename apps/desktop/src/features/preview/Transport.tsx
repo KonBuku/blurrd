@@ -23,7 +23,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
+import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EditControls } from "@/features/editing/EditControls";
 import { formatTimecode } from "@/lib/frames";
 import { formatCount } from "@/lib/media";
 import { SHORTCUTS, ariaKeys, shortcutText, type ShortcutId } from "@/lib/shortcuts";
@@ -128,7 +130,8 @@ function PositionButton({ data }: { readonly data: LoadedProject }) {
  * play-pause / next frame / last, the timecode of the presented frame
  * and the duration (click switches to frame numbers: the 0-based decoded
  * frame index and the last index), the J / L shuttle speed while it runs,
- * the speed menu and the preview audio. Every move goes through the
+ * the edit controls (manual box tool, undo, redo, save state), the
+ * speed menu and the preview audio. Every move goes through the
  * playback controller, so the shown frame is always a presented one.
  */
 export function Transport({ data }: { readonly data: LoadedProject }) {
@@ -201,6 +204,8 @@ export function Transport({ data }: { readonly data: LoadedProject }) {
           {rateLabel(Math.abs(shuttle))}
         </Badge>
       )}
+      <Separator orientation="vertical" className="mx-1 h-5" />
+      <EditControls data={data} />
       <div className="flex-1" />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

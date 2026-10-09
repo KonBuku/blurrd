@@ -385,6 +385,38 @@ visible on any footage. Items are positioned from source rectangles with
 the stage box, so they stay within one source pixel of the video at
 every zoom (`e2e/overlay.spec.ts` measures 25–400 %).
 
+Editing (`src/features/editing`, `src/lib/edits.ts`, `src/store/edits.ts`):
+M (or the square-plus button in the transport) starts the manual box
+tool; dragging a rectangle on the stage adds a Manual box (an `Add` edit)
+over one second either side of the frame where the tool started, or
+over the in and out points set with I and O while the tool is active.
+A selected manual or detector box gets eight resize handles and can be
+dragged; Alt+arrows move it by one source pixel, Alt+Shift+arrows resize
+it. Moving a detector box adds an `Adjust` edit over its track (changed
+again on the next move, removed when the box is back where the detector
+put it); Delete hides a detector box (`Suppress`), removes a manual box
+or another edit, and on a hidden box (dashed, "hidden box") shows it
+again. With a manual box selected, I and O set its frames (O toggles the
+overlay otherwise). Esc leaves the tool, then clears the selection.
+
+The edit store owns the override list of the shown project: every edit
+is one zundo history step (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, the transport
+buttons; 500 steps per project). `OverrideSync` sends the full list with
+the revision it was based on (`set_overrides(project_id, base_rev,
+overrides)`, debounced 150 ms, one request at a time) and updates the
+cached tracks and the project's unverified ranges with the answer; the
+transport shows "Saving…", "Saved" or "Not saved" with Retry. A
+`StaleRevision` answer (another writer or a finished re-analysis) reloads
+the stored edits, drops the local history and says so in a toast; a new
+stored revision while nothing is being saved is taken over the same
+way. After a re-analysis, `Suppress` and `Adjust` edits rebind by IoU;
+those without a match stay in the list, dashed and inactive.
+`src/features/editing/override-sync.test.ts` makes 100 seeded random
+edits against the mock backend, undoes all of them and checks that the
+stored list, its bindings and the boxes of every frame are identical to
+the start; `e2e/editing.spec.ts` drives the tool, the handles, undo and
+redo, a stale revision and a re-analysis in the browser.
+
 The timeline under the stage (`src/features/timeline`) shows a ruler,
 one density lane per region with boxes (`get_timeline_density`, 2,048
 buckets resampled to pixel columns, at least 2 px for a single frame),
@@ -415,7 +447,9 @@ listed in Settings › Shortcuts): Space / K play or pause, J / L shuttle,
 ← / → one frame, Shift+← / → one second, Home / End, B / A / S for
 Before / After / Split, O for the box overlay, N / Shift+N for the next
 or previous detection, user box or unfixed leak, Ctrl+= / Ctrl+- /
-Ctrl+0 to zoom. They are ignored while a dialog or menu is open, in text
+Ctrl+0 to zoom, and the editing keys above. Ctrl+Z / Ctrl+Y in a text
+field stay the field's own undo and redo, Delete in the queue list
+removes recordings. They are ignored while a dialog or menu is open, in text
 fields, and for keys the focused control uses itself (arrows in the
 queue list or a slider, Space on a button).
 
@@ -452,7 +486,11 @@ them with FFmpeg (libvpx-vp9 and libx265) into `e2e/fixtures/media`
 (ignored by git) before the end-to-end tests run; run `pnpm fixtures`
 inside `apps/desktop` before `pnpm dev:mock`. Paths containing "hevc"
 open the HEVC fixture with a VP9 proxy, paths containing "fresh" are not
-analysed yet. Without FFmpeg the preview tests skip locally and fail in CI.
+analysed yet. The mock keeps the edits per opened file
+(`src/ipc/mock/edits.ts`): `set_overrides` rejects a stale `base_rev`
+and invalid edits, stores a new revision and marks the frames of changed
+edits unverified; `window.blurrdMock.projects.touch(path)` and
+`.reanalyze(path, dy)` simulate another writer and a re-analysis. Without FFmpeg the preview tests skip locally and fail in CI.
 
 ### Design tokens and typography
 

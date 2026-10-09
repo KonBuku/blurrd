@@ -15,6 +15,7 @@ import { SHORTCUTS } from "@/lib/shortcuts";
 import { usePreviewStore } from "@/store/preview";
 import { useQueueStore } from "@/store/queue";
 
+import { ManualBoxTool } from "@/features/editing/ManualBoxTool";
 import { useVerifyReport } from "@/features/timeline/useTimelineData";
 import { Timeline } from "@/features/timeline/Timeline";
 
@@ -119,6 +120,7 @@ function ProjectPreview({ path, toggle }: ProjectPreviewProps) {
   const state = useProject(path);
   const report = useVerifyReport(state.status === "ready" ? state.data.project.id : "");
   const showBoxes = usePreviewStore((store) => store.showBoxes);
+  const tool = usePreviewStore((store) => store.tool);
   const [status, setStatus] = useState<StageStatus>({ proxy: false, webglProblem: null });
   const onStatus = useCallback((next: StageStatus) => setStatus(next), []);
   const project = state.status === "ready" ? state.data.project : null;
@@ -155,9 +157,14 @@ function ProjectPreview({ path, toggle }: ProjectPreviewProps) {
       {state.status === "ready" && (
         <>
           <VideoStage data={state.data} onStatus={onStatus}>
-            {(box) =>
-              showBoxes && <BoxOverlay data={state.data} report={report.data ?? null} box={box} />
-            }
+            {(box) => (
+              <>
+                {showBoxes && (
+                  <BoxOverlay data={state.data} report={report.data ?? null} box={box} />
+                )}
+                {tool && <ManualBoxTool data={state.data} box={box} range={tool.range} />}
+              </>
+            )}
           </VideoStage>
           <Transport data={state.data} />
           <Timeline data={state.data} report={report.data ?? null} />

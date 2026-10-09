@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Region } from "@/bindings/Region";
 import { mockTracks, mockVerifyReport } from "@/ipc/mock/project";
+import { hideTrackBox } from "@/lib/edits";
 import { IntervalIndex } from "@/lib/interval-index";
 
 import { nextMark, overlayItems } from "./overlay-model";
@@ -51,6 +52,30 @@ describe("overlayItems", () => {
     expect(info?.label).toBe(
       "Outside the HUD · name outside the blurred regions (information) · frames 40–44",
     );
+  });
+
+  it("tells how each item can be edited and shows hidden boxes", () => {
+    const items = overlayItems(31, index, ALL, tracks, report);
+    const feed = items.find((item) => item.kind === "box" && item.region === "KillFeed");
+    expect(feed?.edit).toMatchObject({
+      kind: "track",
+      target: { region: "KillFeed", adjustUid: null },
+    });
+    const manual = items.find((item) => item.region === "Manual");
+    expect(manual?.edit).toMatchObject({ kind: "manual", range: [0, 239] });
+    expect(items.find((item) => item.kind === "leak")?.edit).toBeNull();
+    expect(items.find((item) => item.kind === "unbound")?.edit).toMatchObject({ kind: "edit" });
+
+    // Hiding the box turns it into a dashed "hidden box" item.
+    const target = feed?.edit?.kind === "track" ? feed.edit.target : null;
+    if (!target || !feed) throw new Error("no kill feed box");
+    const hidden = hideTrackBox(tracks.overrides, target, "00000000-0000-4000-8000-0000000000aa");
+    const after = new IntervalIndex(240, tracks.tracks, hidden);
+    const next = overlayItems(31, after, ALL, { ...tracks, overrides: hidden }, report);
+    expect(next.some((item) => item.key === feed.key)).toBe(false);
+    const item = next.find((candidate) => candidate.kind === "hidden");
+    expect(item?.rect).toEqual(target.source);
+    expect(item?.label).toMatch(/^Kill feed · hidden box · frames /);
   });
 
   it("skips disabled regions", () => {
