@@ -9,8 +9,11 @@
 //!   OCR as unavailable instead.
 //! - [`ModelSet`] holds the PP-OCRv5 mobile detection and recognition
 //!   models, checked against the SHA-256 values pinned in `models.toml`.
-//! - [`OcrEngine`] creates their sessions with fixed input shapes on
-//!   DirectML (the GPU picked by LUID) or the CPU and warms each one up.
+//! - [`OcrEngine`] runs them with fixed input shapes on DirectML (the GPU
+//!   picked by LUID) or the CPU: [`OcrEngine::detect`] finds text lines in
+//!   a protected zone ([`TextMap`], with the DB post-processing written in
+//!   this crate) and [`OcrEngine::recognize`] reads crops with CTC
+//!   decoding.
 //!
 //! Recognised text stays in memory. Logs, errors and reports never contain
 //! it (architecture plan 10).
@@ -20,14 +23,19 @@
     reason = "image sizes are at most a few thousand pixels, so coordinates never wrap in i32"
 )]
 
+mod det;
 mod engine;
 mod error;
+mod image;
 mod models;
 mod rec;
+mod resample;
 mod runtime;
 
-pub use engine::{Ep, GpuAdapter, OcrEngine, OcrOptions, ShapeStats, ZoneId, ZoneSpec};
+pub use det::{BIN_THRESHOLD, BOX_THRESHOLD, ProbMap, TextBox, TextMap, UNCLIP_RATIO};
+pub use engine::{Ep, GpuAdapter, OcrEngine, OcrOptions, OcrRead, ShapeStats, ZoneId, ZoneSpec};
 pub use error::OcrError;
+pub use image::RgbView;
 pub use models::{DET_MODEL, ModelSet, PinnedFile, REC_DICT, REC_MODEL};
-pub use rec::{REC_HEIGHT, WIDTH_BUCKETS};
+pub use rec::{REC_HEIGHT, Recognition, WIDTH_BUCKETS};
 pub use runtime::OrtRuntime;

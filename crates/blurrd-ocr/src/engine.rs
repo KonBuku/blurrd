@@ -13,17 +13,20 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Instant;
 
-use blurrd_core::{Luid, OcrProvider};
+use blurrd_core::{Luid, OcrProvider, RectI};
 use ort::ep::{self, ExecutionProviderDispatch};
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::{TensorRef, ValueType};
 
+use crate::det::{self, TextMap};
 use crate::error::OcrError;
+use crate::image::RgbView;
 use crate::models::ModelSet;
-use crate::rec::{REC_HEIGHT, WIDTH_BUCKETS};
+use crate::rec::{self, REC_HEIGHT, Recognition, WIDTH_BUCKETS};
 use crate::runtime::OrtRuntime;
 
 /// Recognition batch per width bucket on a GPU. Wider inputs produce larger
@@ -73,8 +76,10 @@ impl fmt::Display for ZoneId {
 
 /// A protected zone and the fixed size its crops are detected at.
 ///
-/// Crops are scaled (aspect kept) to fit the content size and placed into
-/// the top-left of the input; the input is the content size rounded up to
+/// Crops are scaled to fit the content size with their natural aspect
+/// ratio ([`RgbView::pixel_aspect`] undone, so a stretched HUD reaches the
+/// model at the same text size as a native one) and placed into the
+/// top-left of the input; the input is the content size rounded up to
 /// multiples of 32 (`DBNet` downsamples by 32).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ZoneSpec {
@@ -133,6 +138,18 @@ impl Default for OcrOptions {
     }
 }
 
+/// A recognised text line with its position: one entry of
+/// [`OcrEngine::read`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct OcrRead {
+    /// Where the text is, in pixels of the zone image.
+    pub rect: RectI,
+    /// Detection score of the box.
+    pub det_score: f32,
+    /// The recognised text and its confidence.
+    pub rec: Recognition,
+}
+
 /// Run-time statistics of one session (one fixed shape).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ShapeStats {
@@ -147,22 +164,51 @@ pub struct ShapeStats {
     pub total_ms: f64,
     /// Slowest of those runs, in milliseconds.
     pub max_ms: f32,
-    /// Runs that took longer than creating the session. A recompilation
-    /// of the graph would; each one is logged as a warning.
+    /// Runs slower than [`ShapeStats::slow_threshold_ms`]; each one is
+    /// logged as a warning.
+    ///
+    /// This is a stall detector, not proof that no recompilation happened:
+    /// a recompilation much cheaper than the session's creation stays
+    /// below the threshold. The guarantee that the graph is never
+    /// recompiled rests on construction instead: every input dimension is
+    /// pinned when the session is built, the built session's input shape
+    /// is checked against the requested one, and every tensor is built
+    /// with exactly that shape.
     pub slow_runs: u64,
+    /// A run slower than this counts as a stall: on DirectML the session's
+    /// creation plus its warm-up, which a full graph compilation repeats.
+    /// The CPU provider compiles nothing per shape, so there it is
+    /// infinite and slow runs (a loaded CPU) are not counted.
+    pub slow_threshold_ms: f32,
 }
 
 impl ShapeStats {
-    /// Adds a run of `ms` milliseconds; returns whether it was slower than
-    /// creating the session.
+    /// Adds a run of `ms` milliseconds; returns whether it counts as a
+    /// stall ([`ShapeStats::slow_threshold_ms`]).
     fn record(&mut self, ms: f32) -> bool {
         self.runs += 1;
         self.total_ms += f64::from(ms);
         self.max_ms = self.max_ms.max(ms);
-        let slow = ms > self.create_ms;
+        let slow = ms > self.slow_threshold_ms;
         self.slow_runs += u64::from(slow);
         slow
     }
+
+    /// Whether the stalls stay within what a GPU shared with other work
+    /// causes: at most one slow run per [`ShapeStats::STALL_RUNS`] runs,
+    /// at least one allowed.
+    ///
+    /// Slow runs are a load metric, not evidence of a recompilation (see
+    /// [`ShapeStats::slow_runs`]), so an exact zero would fail whenever
+    /// another process holds the GPU for a moment. A shape compiled again
+    /// on every run would make every run slow, far above this rate.
+    pub fn stalls_tolerable(&self) -> bool {
+        self.slow_runs <= (self.runs / Self::STALL_RUNS).max(1)
+    }
+
+    /// Runs per tolerated slow run in [`ShapeStats::stalls_tolerable`]
+    /// (0.1 %).
+    pub const STALL_RUNS: u64 = 1000;
 
     /// Mean duration of the runs after warm-up, in milliseconds.
     pub fn mean_ms(&self) -> f32 {
@@ -223,8 +269,9 @@ impl FixedSession {
             tracing::warn!(
                 shape = ?self.shape,
                 ms,
-                create_ms = self.stats.create_ms,
-                "an OCR run took longer than creating its session (recompilation or a stalled GPU)"
+                threshold_ms = self.stats.slow_threshold_ms,
+                "an OCR run took longer than creating and warming up its session \
+                 (recompilation or a stalled GPU)"
             );
         }
         read(shape, data)
@@ -241,6 +288,9 @@ pub struct OcrEngine {
     fallback: Option<String>,
     det: BTreeMap<ZoneId, (ZoneSpec, FixedSession)>,
     rec: Vec<FixedSession>,
+    rec_batch: [u32; 3],
+    classes: usize,
+    charset: Arc<[String]>,
 }
 
 impl OcrEngine {
@@ -326,7 +376,10 @@ impl OcrEngine {
             let fixed = session(models.det(), &det_free, shape)?;
             det.insert(
                 zone.id,
-                (*zone, warm_up(fixed, shape, "warming up detection")?),
+                (
+                    *zone,
+                    warm_up(fixed, shape, target, "warming up detection")?,
+                ),
             );
         }
         let rec_batch = match target {
@@ -344,11 +397,11 @@ impl OcrEngine {
                 width as usize,
             ];
             let fixed = session(models.rec(), &rec_free, shape)?;
-            let fixed = warm_up(fixed, shape, "warming up recognition")?;
+            let fixed = warm_up(fixed, shape, target, "warming up recognition")?;
             classes = output_classes(&fixed)?;
             rec_sessions.push(fixed);
         }
-        let charset = models.charset();
+        let charset = models.charset().clone();
         if classes != charset.len() + 1 {
             return Err(OcrError::Signature(format!(
                 "the recognition model has {classes} classes but the character list has {} \
@@ -367,6 +420,9 @@ impl OcrEngine {
             fallback: None,
             det,
             rec: rec_sessions,
+            rec_batch,
+            classes,
+            charset,
         })
     }
 
@@ -378,6 +434,121 @@ impl OcrEngine {
     /// Why [`Ep::Auto`] fell back to the CPU, if it did.
     pub fn fallback(&self) -> Option<&str> {
         self.fallback.as_deref()
+    }
+
+    /// Detects text lines in a crop of `zone`. The crop is scaled into the
+    /// zone's fixed detection size with its natural aspect ratio (see
+    /// [`RgbView::pixel_aspect`]); boxes are in pixels of the crop.
+    ///
+    /// # Errors
+    ///
+    /// [`OcrError::InvalidInput`] for an unknown zone, [`OcrError::Session`]
+    /// when the model fails.
+    pub fn detect(&mut self, zone: ZoneId, image: RgbView<'_>) -> Result<TextMap, OcrError> {
+        let (spec, session) = self
+            .det
+            .get_mut(&zone)
+            .ok_or_else(|| OcrError::InvalidInput(format!("{zone} has no detection session")))?;
+        let mut input = vec![0.0f32; 3 * spec.width as usize * spec.height as usize];
+        let placement = det::preprocess(
+            image,
+            (spec.content_width, spec.content_height),
+            (spec.width, spec.height),
+            &mut input,
+        );
+        let input_w = spec.width;
+        session.run(&input, "running text detection", |shape, data| {
+            if shape.len() != 4
+                || shape[1] != 1
+                || data.len() != (spec.width * spec.height) as usize
+            {
+                return Err(OcrError::Signature(format!(
+                    "detection output shape {shape:?} for input {}x{}",
+                    spec.width, spec.height
+                )));
+            }
+            Ok(det::postprocess(data, input_w, placement, image.bounds()))
+        })
+    }
+
+    /// Recognises the text in each crop (one line of text per crop), in
+    /// order.
+    ///
+    /// # Errors
+    ///
+    /// [`OcrError::Session`] or [`OcrError::Signature`] when the model
+    /// fails.
+    pub fn recognize(&mut self, crops: &[RgbView<'_>]) -> Result<Vec<Recognition>, OcrError> {
+        let mut results: Vec<Option<Recognition>> = vec![None; crops.len()];
+        let mut by_bucket: [Vec<usize>; 3] = Default::default();
+        for (i, crop) in crops.iter().enumerate() {
+            let scaled = rec::scaled_width(*crop);
+            by_bucket[rec::bucket_for(scaled)].push(i);
+        }
+        for (bucket, indices) in by_bucket.iter().enumerate() {
+            let width = WIDTH_BUCKETS[bucket];
+            let batch = self.rec_batch[bucket] as usize;
+            let item = (3 * REC_HEIGHT * width) as usize;
+            let mut input = vec![0.0f32; batch * item];
+            for chunk in indices.chunks(batch) {
+                let mut columns = Vec::with_capacity(chunk.len());
+                for (slot, &i) in chunk.iter().enumerate() {
+                    columns.push(rec::preprocess(
+                        crops[i],
+                        width,
+                        &mut input[slot * item..][..item],
+                    ));
+                }
+                // Clear the slots a previous, fuller chunk left behind.
+                for slot in chunk.len()..batch {
+                    input[slot * item..][..item].fill(0.0);
+                }
+                let (classes, charset) = (self.classes, &self.charset);
+                let decoded =
+                    self.rec[bucket].run(&input, "running text recognition", |shape, data| {
+                        rec::decode_batch(shape, data, &columns, width, batch, classes, charset)
+                    })?;
+                for (&i, read) in chunk.iter().zip(decoded) {
+                    results[i] = Some(read);
+                }
+            }
+        }
+        Ok(results
+            .into_iter()
+            .map(|r| {
+                r.unwrap_or(Recognition {
+                    text: String::new(),
+                    conf: 0.0,
+                })
+            })
+            .collect())
+    }
+
+    /// Detects the text lines of a zone crop and recognises each of them.
+    ///
+    /// # Errors
+    ///
+    /// As [`OcrEngine::detect`] and [`OcrEngine::recognize`].
+    pub fn read(&mut self, zone: ZoneId, image: RgbView<'_>) -> Result<Vec<OcrRead>, OcrError> {
+        let map = self.detect(zone, image)?;
+        // Detection clips every box to the image, so each box has a crop;
+        // a box without one is skipped together with its crop, which keeps
+        // boxes and reads aligned.
+        let (boxes, crops): (Vec<&det::TextBox>, Vec<RgbView<'_>>) = map
+            .boxes
+            .iter()
+            .filter_map(|b| image.crop(b.rect).map(|crop| (b, crop)))
+            .unzip();
+        let reads = self.recognize(&crops)?;
+        Ok(boxes
+            .into_iter()
+            .zip(reads)
+            .map(|(b, rec)| OcrRead {
+                rect: b.rect,
+                det_score: b.score,
+                rec,
+            })
+            .collect())
     }
 
     /// Statistics of every session: detection per zone, then recognition
@@ -541,6 +712,8 @@ fn create_session(
         ],
         stats: ShapeStats {
             create_ms: started.elapsed().as_secs_f32() * 1000.0,
+            // Nothing counts as slow before the warm-up sets the threshold.
+            slow_threshold_ms: f32::INFINITY,
             ..ShapeStats::default()
         },
     })
@@ -551,6 +724,7 @@ fn create_session(
 fn warm_up(
     mut fixed: FixedSession,
     shape: [usize; 4],
+    target: Target,
     action: &'static str,
 ) -> Result<FixedSession, OcrError> {
     if fixed.shape != shape {
@@ -566,6 +740,10 @@ fn warm_up(
     fixed.stats = ShapeStats {
         create_ms: fixed.stats.create_ms,
         warmup_ms,
+        slow_threshold_ms: match target {
+            Target::Cpu => f32::INFINITY,
+            Target::DirectMl(_) => fixed.stats.create_ms + warmup_ms,
+        },
         ..ShapeStats::default()
     };
     tracing::debug!(?shape, warmup_ms, "warmed up OCR session");
@@ -594,7 +772,7 @@ fn output_classes(fixed: &FixedSession) -> Result<usize, OcrError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ZoneId, ZoneSpec, overrides};
+    use super::{ShapeStats, ZoneId, ZoneSpec, overrides};
 
     #[test]
     fn pins_free_dimensions_by_position() {
@@ -626,5 +804,35 @@ mod tests {
         assert_eq!((native.content_width, native.width), (1260, 1280));
         let small = ZoneSpec::for_crop(ZoneId(2), 10, 10, 1.0);
         assert_eq!((small.width, small.height), (32, 32));
+    }
+
+    #[test]
+    fn tolerates_rare_stalls_only() {
+        let mut stats = ShapeStats {
+            slow_threshold_ms: 100.0,
+            ..ShapeStats::default()
+        };
+        // One stall is tolerated at any run count.
+        assert!(stats.record(500.0));
+        assert!(stats.stalls_tolerable(), "{stats:?}");
+        for _ in 0..1999 {
+            assert!(!stats.record(5.0));
+        }
+        // Two in 2,001 runs are 0.1 %: tolerated.
+        stats.record(500.0);
+        assert_eq!((stats.runs, stats.slow_runs), (2001, 2));
+        assert!(stats.stalls_tolerable(), "{stats:?}");
+        // A third is above 0.1 %.
+        stats.record(500.0);
+        assert!(!stats.stalls_tolerable());
+        // A shape compiled on every run fails at once.
+        let mut recompiling = ShapeStats {
+            slow_threshold_ms: 100.0,
+            ..ShapeStats::default()
+        };
+        for _ in 0..3 {
+            recompiling.record(500.0);
+        }
+        assert!(!recompiling.stalls_tolerable());
     }
 }

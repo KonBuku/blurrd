@@ -207,6 +207,7 @@ name = "blurrd-ocr"
 version = "0.1.0"
 dependencies = [
  "blurrd-core",
+ "blurrd-testkit",
  "ort",
  "serde",
  "sha2",

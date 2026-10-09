@@ -69,6 +69,8 @@ fn cpu_provider_builds_fixed_shape_sessions() {
     for (_, stats) in engine.stats() {
         assert!(stats.warmup_ms > 0.0);
         assert_eq!(stats.runs, 0);
+        // The CPU compiles nothing per shape: no run counts as one.
+        assert!(stats.slow_threshold_ms.is_infinite());
     }
 }
 
@@ -136,4 +138,23 @@ fn gpu_directml_is_active() {
     );
     let explicit = OcrEngine::new(&runtime, &models, &options(Ep::DirectMl)).unwrap();
     assert_eq!(explicit.active_provider(), OcrProvider::DirectMl);
+    // Every session is built for its fixed shape (batched recognition).
+    let shapes: Vec<[usize; 4]> = explicit.stats().iter().map(|(s, _)| *s).collect();
+    assert_eq!(
+        shapes,
+        [
+            [1, 3, 96, 320],
+            [16, 3, 48, 160],
+            [8, 3, 48, 320],
+            [4, 3, 48, 640]
+        ]
+    );
+    // The stall threshold is creation plus warm-up, which a full graph
+    // compilation on DirectML would repeat.
+    for (shape, stats) in explicit.stats() {
+        assert!(
+            (stats.slow_threshold_ms - stats.create_ms - stats.warmup_ms).abs() < 1e-3,
+            "{shape:?}: {stats:?}"
+        );
+    }
 }
