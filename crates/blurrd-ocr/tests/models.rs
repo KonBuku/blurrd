@@ -28,10 +28,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use blurrd_core::RectI;
-use blurrd_ocr::{Ep, ModelSet, OcrEngine, OcrOptions, RgbView, ZoneId, ZoneSpec};
+use blurrd_ocr::{Ep, ModelSet, OcrEngine, OcrOptions, RgbView, ZoneId, ZoneSpec, fold};
 use blurrd_testkit::font::{Script, TextStyle};
 use blurrd_testkit::{FontSet, NameStyle, Rng, synth_name};
-use support::{Canvas, fold};
+use support::Canvas;
 
 /// Capital height of HUD names at 1080p, in pixels.
 const CAP_PX: f32 = 11.0;

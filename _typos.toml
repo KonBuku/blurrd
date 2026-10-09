@@ -14,3 +14,7 @@ wdth = "wdth"
 Alle = "Alle"
 # Command-line key of the match-end screen region (plan 5.7).
 matchend = "matchend"
+# German system chat verb in the OCR name rules (crates/blurrd-engine).
+ist = "ist"
+# VALORANT agent name in the OCR whitelist (crates/blurrd-ocr).
+yoru = "yoru"

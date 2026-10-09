@@ -14,6 +14,10 @@
 //!   a protected zone ([`TextMap`], with the DB post-processing written in
 //!   this crate) and [`OcrEngine::recognize`] reads crops with CTC
 //!   decoding.
+//! - [`NameDictionary`] collects the names read on the source (in memory
+//!   only), [`Whitelist`] lists the HUD words that are never names and
+//!   [`CropDedup`] skips crops that did not change since their zone was
+//!   last OCR'd.
 //!
 //! Recognised text stays in memory. Logs, errors and reports never contain
 //! it (architecture plan 10).
@@ -23,7 +27,9 @@
     reason = "image sizes are at most a few thousand pixels, so coordinates never wrap in i32"
 )]
 
+mod dedup;
 mod det;
+mod dictionary;
 mod engine;
 mod error;
 mod image;
@@ -32,7 +38,9 @@ mod rec;
 mod resample;
 mod runtime;
 
+pub use dedup::CropDedup;
 pub use det::{BIN_THRESHOLD, BOX_THRESHOLD, ProbMap, TextBox, TextMap, UNCLIP_RATIO};
+pub use dictionary::{NameDictionary, NameStats, Whitelist, fold, name_len};
 pub use engine::{Ep, GpuAdapter, OcrEngine, OcrOptions, OcrRead, ShapeStats, ZoneId, ZoneSpec};
 pub use error::OcrError;
 pub use image::RgbView;

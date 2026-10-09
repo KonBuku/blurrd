@@ -1,0 +1,453 @@
+//! Pass 0 of the verification: the name dictionary from the protected
+//! zones.
+//!
+//! OCR reads the whole protected zones of the unblurred source, not only
+//! the detector boxes, so names a detector missed still enter the
+//! dictionary (architecture plan 7.2, step 1). A zone crop is read every
+//! [`DictionaryBuilder::CADENCE`]th frame and on every frame where a
+//! structure signal is on, and only when it changed since the zone was last
+//! read ([`CropDedup`]). Each recognised line is reduced to its name part
+//! with rules per zone (chat sender before the colon, no voice location
+//! lines, no HUD words) before it enters the in-memory [`NameDictionary`].
+//! Crops carry the pixel aspect ratio of the HUD (`sy / sx`), so OCR
+//! undoes a stretched or squeezed HUD and reads every layout at the same
+//! text size.
+//!
+//! The analysis job of the engine (milestone M14) feeds the builder from
+//! its frame pipeline on an OCR worker; verification (M17) reads the
+//! dictionary.
+
+use std::time::Instant;
+
+use blurrd_core::{HudGeometry, RectI};
+use blurrd_detect::killfeed::FEED_ROI;
+use blurrd_ocr::{
+    CropDedup, NameDictionary, OcrEngine, OcrError, OcrRead, RgbView, Whitelist, ZoneId, ZoneSpec,
+    fold,
+};
+
+/// The left HUD panel (voice chat and text chat) of plan 5.4, in reference
+/// pixels of a 1920 × 1080 frame.
+pub const LEFT_PANEL_ROI: RectI = RectI {
+    x0: 0,
+    y0: 550,
+    x1: 780,
+    y1: 1040,
+};
+
+/// Detection input pixels per reference pixel, whatever the source
+/// resolution. HUD names are about 11 reference pixels tall; enlarged
+/// twice they are found and separated from the icons next to them most
+/// reliably (measured in M16 against scale 1.5, plan section 18).
+pub const DET_SCALE: f32 = 2.0;
+
+/// What a protected zone contains, which decides how its lines are read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ZoneKind {
+    /// The kill feed and the banner name strip (top right).
+    FeedAndBanner,
+    /// Voice chat and text chat (bottom left).
+    LeftPanel,
+}
+
+/// A protected zone of the source frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtectedZone {
+    /// What it contains.
+    pub kind: ZoneKind,
+    /// Its OCR zone (one fixed detection size each).
+    pub id: ZoneId,
+    /// Where it is in the source frame, in source pixels (clipped to the
+    /// frame).
+    pub rect: RectI,
+    /// Where it is in the 1920 × 1080 reference frame.
+    pub reference: RectI,
+}
+
+/// The protected zones of a `width` × `height` source whose HUD sits at
+/// `geometry` (right-anchored kill feed, left-anchored panel).
+pub fn protected_zones(geometry: &HudGeometry, width: u32, height: u32) -> Vec<ProtectedZone> {
+    let frame = RectI {
+        x0: 0,
+        y0: 0,
+        x1: width as i32,
+        y1: height as i32,
+    };
+    let map = |r: RectI, x_of: &dyn Fn(i32) -> f32| {
+        let y = |v: i32| geometry.oy + v as f32 * geometry.sy;
+        RectI::new(
+            x_of(r.x0).floor() as i32,
+            y(r.y0).floor() as i32,
+            x_of(r.x1).ceil() as i32,
+            y(r.y1).ceil() as i32,
+        )
+        .ok()
+        .and_then(|rect| rect.intersection(&frame))
+    };
+    let right = |x: i32| geometry.anchor_right - (1920 - x) as f32 * geometry.sx;
+    let left = |x: i32| geometry.anchor_left + x as f32 * geometry.sx;
+    [
+        (
+            ZoneKind::FeedAndBanner,
+            ZoneId(0),
+            FEED_ROI,
+            map(FEED_ROI, &right),
+        ),
+        (
+            ZoneKind::LeftPanel,
+            ZoneId(1),
+            LEFT_PANEL_ROI,
+            map(LEFT_PANEL_ROI, &left),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(kind, id, reference, rect)| {
+        rect.map(|rect| ProtectedZone {
+            kind,
+            id,
+            rect,
+            reference,
+        })
+    })
+    .collect()
+}
+
+/// Counters of pass 0. They hold no text and nothing derived from text.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Pass0Stats {
+    /// Whole frames passed to [`DictionaryBuilder::push_frame`].
+    pub frames: u64,
+    /// Zone crops offered.
+    pub zone_crops: u64,
+    /// Zone crops that were OCR'd (the rest were unchanged).
+    pub zone_crops_read: u64,
+    /// Text lines recognised.
+    pub lines: u64,
+    /// Name reads added to the dictionary.
+    pub name_reads: u64,
+    /// Time spent in OCR, in seconds.
+    pub ocr_seconds: f64,
+}
+
+/// Builds the name dictionary from the protected zones of the source.
+#[derive(Debug)]
+pub struct DictionaryBuilder {
+    zones: Vec<ProtectedZone>,
+    /// Natural width over natural height of one source pixel of the HUD.
+    pixel_aspect: f32,
+    dedup: CropDedup,
+    whitelist: Whitelist,
+    dictionary: NameDictionary,
+    stats: Pass0Stats,
+}
+
+impl DictionaryBuilder {
+    /// Zones are read every this many frames (plus every structure frame).
+    pub const CADENCE: u32 = 6;
+
+    /// A builder for a `width` × `height` source with the HUD at
+    /// `geometry`, with the default [`Whitelist`].
+    pub fn new(geometry: &HudGeometry, width: u32, height: u32) -> Self {
+        Self {
+            zones: protected_zones(geometry, width, height),
+            pixel_aspect: geometry.sy / geometry.sx,
+            dedup: CropDedup::new(),
+            whitelist: Whitelist::hud_default(),
+            dictionary: NameDictionary::new(),
+            stats: Pass0Stats::default(),
+        }
+    }
+
+    /// The zones and their detection sizes, for [`blurrd_ocr::OcrOptions`].
+    /// Sizes depend only on the reference geometry, so every resolution
+    /// uses the same shapes.
+    pub fn zone_specs(&self) -> Vec<ZoneSpec> {
+        self.zones
+            .iter()
+            .map(|z| ZoneSpec::for_crop(z.id, z.reference.width(), z.reference.height(), DET_SCALE))
+            .collect()
+    }
+
+    /// The protected zones.
+    pub fn zones(&self) -> &[ProtectedZone] {
+        &self.zones
+    }
+
+    /// Whether frame `index` is read: every [`Self::CADENCE`]th frame and
+    /// every frame with a structure signal on.
+    pub const fn wants(index: u32, structure_on: bool) -> bool {
+        structure_on || index.is_multiple_of(Self::CADENCE)
+    }
+
+    /// Reads one crop of a protected zone (the pixels of [`ProtectedZone::rect`]
+    /// of a source frame) and adds the names found, unless the crop did not
+    /// change since the zone was last read.
+    ///
+    /// # Errors
+    ///
+    /// [`OcrError::InvalidInput`] for a zone this builder does not have,
+    /// other [`OcrError`]s when OCR fails.
+    pub fn push_zone(
+        &mut self,
+        ocr: &mut OcrEngine,
+        zone: ZoneId,
+        crop: RgbView<'_>,
+    ) -> Result<(), OcrError> {
+        let kind = self
+            .zones
+            .iter()
+            .find(|z| z.id == zone)
+            .map(|z| z.kind)
+            .ok_or_else(|| OcrError::InvalidInput(format!("{zone} is not a protected zone")))?;
+        self.stats.zone_crops += 1;
+        if !self.dedup.should_ocr(zone, crop) {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let reads = ocr.read(zone, crop.with_pixel_aspect(self.pixel_aspect))?;
+        self.stats.ocr_seconds += started.elapsed().as_secs_f64();
+        self.stats.zone_crops_read += 1;
+        self.stats.lines += reads.len() as u64;
+        for read in &reads {
+            self.stats.name_reads += add_names(&mut self.dictionary, &self.whitelist, kind, read);
+        }
+        Ok(())
+    }
+
+    /// Reads every protected zone of a whole source frame
+    /// ([`Self::push_zone`] for each).
+    ///
+    /// # Errors
+    ///
+    /// [`OcrError`] when OCR fails.
+    pub fn push_frame(&mut self, ocr: &mut OcrEngine, frame: RgbView<'_>) -> Result<(), OcrError> {
+        self.stats.frames += 1;
+        let zones: Vec<(ZoneId, RectI)> = self.zones.iter().map(|z| (z.id, z.rect)).collect();
+        for (zone, rect) in zones {
+            if let Some(crop) = frame.crop(rect) {
+                self.push_zone(ocr, zone, crop)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The dictionary so far.
+    pub fn dictionary(&self) -> &NameDictionary {
+        &self.dictionary
+    }
+
+    /// The counters so far.
+    pub fn stats(&self) -> Pass0Stats {
+        self.stats
+    }
+
+    /// The dictionary and the counters.
+    pub fn finish(self) -> (NameDictionary, Pass0Stats) {
+        (self.dictionary, self.stats)
+    }
+}
+
+/// Adds the name parts of one recognised line; returns how many reads were
+/// added.
+fn add_names(
+    dict: &mut NameDictionary,
+    whitelist: &Whitelist,
+    kind: ZoneKind,
+    read: &OcrRead,
+) -> u64 {
+    name_candidates(kind, &read.rec.text, whitelist)
+        .iter()
+        .map(|name| u64::from(dict.insert(name, read.rec.conf)))
+        .sum()
+}
+
+/// The parts of a recognised line that can be player names.
+///
+/// - Left panel, chat line `(Channel) Name (Role): message`: the sender.
+/// - Left panel, system line `(System) Name phrase`: the words before the
+///   phrase ([`system_line_name`]).
+/// - Left panel, voice location line (`in B Main - Team`): nothing.
+/// - Anything that consists only of whitelisted words: nothing.
+/// - A line longer than a name (16 folded characters) with spaces, for
+///   example a killer and a victim merged into one box: each word that is
+///   not whitelisted and has at least three characters.
+fn name_candidates(kind: ZoneKind, text: &str, whitelist: &Whitelist) -> Vec<String> {
+    let mut line = text.trim();
+    if kind == ZoneKind::LeftPanel {
+        let (rest, had_prefix) = strip_prefixes(line);
+        line = rest;
+        if let Some((sender, _message)) = line.split_once(':') {
+            line = strip_trailing_group(sender.trim());
+        } else if had_prefix {
+            line = system_line_name(line);
+        } else if is_location_line(line, whitelist) {
+            return Vec::new();
+        }
+    }
+    if line.is_empty() || whitelist.covers(line) {
+        return Vec::new();
+    }
+    if fold(line).chars().count() <= NameDictionary::MAX_LEN || !line.contains(' ') {
+        return vec![line.to_owned()];
+    }
+    line.split_whitespace()
+        .filter(|w| {
+            let folded = fold(w);
+            folded.chars().count() >= 3 && !whitelist.contains(&folded)
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The name at the start of a system chat line (prefix removed): the words
+/// before the first word of the system phrase. Phrases differ per client
+/// language but start with a verb from a short list; without one, the
+/// first word is taken.
+fn system_line_name(line: &str) -> &str {
+    /// First words of the system phrases of the supported client languages
+    /// ("has abandoned the match", "hat das Match verlassen", "ha abandonado
+    /// la partida", "was", "is", "joined", "left").
+    const PHRASE_STARTS: [&str; 11] = [
+        "has", "have", "was", "is", "joined", "left", "hat", "ist", "wurde", "ha", "se",
+    ];
+    let start = line.trim_start();
+    let mut end = 0;
+    for (i, word) in start.split_whitespace().enumerate() {
+        if i > 0 && PHRASE_STARTS.contains(&fold(word).as_str()) {
+            break;
+        }
+        end = word.as_ptr() as usize - start.as_ptr() as usize + word.len();
+    }
+    &start[..end]
+}
+
+/// Whether a left-panel line is a voice-chat location line: it starts with
+/// a location word ("in B Main - Team"), or consists only of listed words
+/// glued together after one ("inASite-Team", when OCR drops the spaces).
+fn is_location_line(line: &str, whitelist: &Whitelist) -> bool {
+    const LOCATION_WORDS: [&str; 3] = ["in", "en", "im"];
+    if line
+        .split_whitespace()
+        .next()
+        .is_some_and(|w| LOCATION_WORDS.contains(&fold(w).as_str()))
+    {
+        return true;
+    }
+    let folded = fold(line);
+    LOCATION_WORDS.iter().any(|w| folded.starts_with(w)) && whitelist.segments(&folded)
+}
+
+/// Removes leading `(...)` and `[...]` groups (chat channel prefixes);
+/// returns the rest and whether a group was removed.
+fn strip_prefixes(mut line: &str) -> (&str, bool) {
+    let mut removed = false;
+    loop {
+        let close = match line.chars().next() {
+            Some('(') => ')',
+            Some('[') => ']',
+            _ => return (line, removed),
+        };
+        let Some(end) = line.find(close) else {
+            return (line, removed);
+        };
+        line = line[end + 1..].trim_start();
+        removed = true;
+    }
+}
+
+/// Removes a trailing `(...)` group (the role after a broadcast sender).
+fn strip_trailing_group(line: &str) -> &str {
+    if line.ends_with(')')
+        && let Some(start) = line.rfind('(')
+    {
+        return line[..start].trim_end();
+    }
+    line
+}
+
+#[cfg(test)]
+mod tests {
+    use blurrd_core::{HudGeometry, HudLayout, RectI};
+    use blurrd_ocr::Whitelist;
+
+    use super::{DictionaryBuilder, ZoneKind, name_candidates, protected_zones};
+
+    fn names(kind: ZoneKind, text: &str) -> Vec<String> {
+        name_candidates(kind, text, &Whitelist::hud_default())
+    }
+
+    #[test]
+    fn reads_chat_senders_and_skips_hud_text() {
+        use ZoneKind::{FeedAndBanner, LeftPanel};
+        assert_eq!(names(LeftPanel, "(Team) Nova Prime: go B"), ["Nova Prime"]);
+        assert_eq!(names(LeftPanel, "(All) Kestrel (Caster): gg"), ["Kestrel"]);
+        assert_eq!(
+            names(LeftPanel, "(System) Umbra has abandoned the match"),
+            ["Umbra"]
+        );
+        assert_eq!(
+            names(LeftPanel, "(Sistema) Ngon Pham ha abandonado la partida"),
+            ["Ngon Pham"]
+        );
+        assert_eq!(names(LeftPanel, "(System) Zed"), ["Zed"]);
+        assert_eq!(names(LeftPanel, "in B Main - Team"), Vec::<String>::new());
+        assert_eq!(names(LeftPanel, "in Garage Hallway"), Vec::<String>::new());
+        assert_eq!(names(LeftPanel, "inASite-Team"), Vec::<String>::new());
+        assert_eq!(names(LeftPanel, "Inara"), ["Inara"]);
+        assert_eq!(names(LeftPanel, "Harbor Light"), ["Harbor Light"]);
+        assert_eq!(names(LeftPanel, ": message only"), Vec::<String>::new());
+        assert_eq!(names(FeedAndBanner, "TEAM ACE"), Vec::<String>::new());
+        assert_eq!(names(FeedAndBanner, "CLUTCH"), Vec::<String>::new());
+        assert_eq!(names(FeedAndBanner, "xX_Vortex_Xx"), ["xX_Vortex_Xx"]);
+        // A killer and a victim read as one line.
+        assert_eq!(
+            names(FeedAndBanner, "Sentinelseven Ravenclawfour"),
+            ["Sentinelseven", "Ravenclawfour"]
+        );
+    }
+
+    #[test]
+    fn zones_follow_the_hud_geometry() {
+        let reference = protected_zones(&HudGeometry::default(), 1920, 1080);
+        assert_eq!(reference[0].rect, RectI::new(660, 80, 1920, 412).unwrap());
+        assert_eq!(reference[1].rect, RectI::new(0, 550, 780, 1040).unwrap());
+        // 1440p: 4/3 of the reference scale.
+        let qhd = HudGeometry {
+            sx: 4.0 / 3.0,
+            sy: 4.0 / 3.0,
+            anchor_right: 2560.0,
+            anchor_center: 1280.0,
+            ..HudGeometry::default()
+        };
+        let zones = protected_zones(&qhd, 2560, 1440);
+        assert_eq!(zones[0].rect, RectI::new(880, 106, 2560, 550).unwrap());
+        assert_eq!(zones[1].rect, RectI::new(0, 733, 1040, 1387).unwrap());
+        // Pillarboxed 4:3 inside 1920 x 1080: the HUD sits between the bars.
+        let pillar = HudGeometry {
+            sx: 0.75,
+            sy: 1.0,
+            anchor_left: 240.0,
+            anchor_right: 1680.0,
+            anchor_center: 960.0,
+            layout: HudLayout::Pillarbox { bar_px: 240 },
+            ..HudGeometry::default()
+        };
+        let zones = protected_zones(&pillar, 1920, 1080);
+        assert_eq!(zones[0].rect, RectI::new(735, 80, 1680, 412).unwrap());
+        assert_eq!(zones[1].rect, RectI::new(240, 550, 825, 1040).unwrap());
+    }
+
+    #[test]
+    fn detection_sizes_do_not_depend_on_the_resolution() {
+        let builder = DictionaryBuilder::new(&HudGeometry::default(), 1920, 1080);
+        let sizes: Vec<(u32, u32)> = builder
+            .zone_specs()
+            .iter()
+            .map(|z| (z.width, z.height))
+            .collect();
+        assert_eq!(sizes, [(2528, 672), (1568, 992)]);
+        assert!(DictionaryBuilder::wants(12, false));
+        assert!(!DictionaryBuilder::wants(13, false));
+        assert!(DictionaryBuilder::wants(13, true));
+    }
+}
