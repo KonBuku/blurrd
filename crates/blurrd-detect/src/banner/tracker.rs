@@ -6,7 +6,9 @@
 //! [`SETTLE_RUN`] consecutive centred detections is the settle frame. From
 //! there on one fixed box covers the name until the episode ends, even
 //! where the text is lost on a bright background, plus [`FADE`] frames for
-//! the fade-out. Before the settle frame the boxes follow the slide-in.
+//! the fade-out. Before the settle frame the boxes follow the slide-in:
+//! from the left end of the sliding name to the right edge of the plate,
+//! which leads the name, or to the frame edge where no full plate shows.
 //!
 //! An episode whose name never settles (glare or a white sky can hide
 //! the centred letters, port spec failure F4) but showed a name gets the
@@ -25,7 +27,8 @@ use std::collections::VecDeque;
 
 use blurrd_core::{Confidence, RectI};
 
-use super::{BannerFrame, BannerName, CENTRE_X, NAME_BAND, NAME_PAD_X};
+use super::{BannerFrame, BannerName, CENTRE_X, NAME_BAND, NAME_PAD_X, Plate};
+use crate::killfeed::FEED_ROI;
 
 /// Gated frames closer than this belong to one episode.
 const EPISODE_GAP: u32 = 10;
@@ -59,10 +62,16 @@ const SLIDE_BACK_TOLERANCE: i32 = 8;
 const SLIDE_LEAD: u32 = 12;
 /// Slide-in boxes reach this far left of the detections...
 const SLIDE_PAD_LEFT: i32 = 12;
-/// ... and this far right (fast, faint letters)...
+/// ... and at least this far right (fast, faint letters), up to the
+/// plate's right edge.
 const SLIDE_PAD_RIGHT: i32 = 50;
-/// ... but not beyond this column (the stored banner strip's end).
-const SLIDE_X1_MAX: i32 = 1420;
+/// The right frame edge: slide-in boxes end here where no full plate
+/// shows the banner's right end.
+const FRAME_X1: i32 = FEED_ROI.x1;
+/// A plate at least this wide shows both of its ends (the full plate is
+/// 340 to 440 px wide in 94 % of the plate frames of 25 recorded
+/// banners; narrower ones are cut by effects or glare).
+const PLATE_FULL_W: i32 = 340;
 /// Without a centred name, the slide-in is taken to last this many frames
 /// from the first plate frame (it takes 10 frames on recorded banners).
 const SLIDE_FRAMES: u32 = 16;
@@ -94,6 +103,15 @@ pub struct BannerBox {
     /// name, [`Confidence::PreRoll`] for the slide-in and
     /// [`Confidence::PostRoll`] for the fade-out.
     pub conf: Confidence,
+}
+
+/// What a pending frame showed, once the gate has been on long enough.
+#[derive(Debug, Clone, Copy, Default)]
+struct Seen {
+    /// The banner name.
+    name: Option<BannerName>,
+    /// The plate.
+    plate: Option<Plate>,
 }
 
 /// The episode being read.
@@ -146,8 +164,8 @@ pub struct BannerTracker {
     next: Option<u32>,
     /// The first frame whose boxes are not final yet.
     from: u32,
-    /// The names of frames `from..next` (only while an episode is open).
-    pending: VecDeque<Option<BannerName>>,
+    /// What frames `from..next` showed (only while an episode is open).
+    pending: VecDeque<Seen>,
     episode: Option<Episode>,
 }
 
@@ -203,11 +221,12 @@ impl BannerTracker {
         }
         let confirmed = episode.gated >= GATE_MIN_FRAMES;
         let name = seen.name.filter(|_| confirmed);
-        if confirmed && seen.plate.is_some() {
+        let plate = seen.plate.filter(|_| confirmed);
+        if plate.is_some() {
             episode.first_plate.get_or_insert(frame);
             episode.plates += 1;
         }
-        self.pending.push_back(name);
+        self.pending.push_back(Seen { name, plate });
         if let Some(n) = name {
             episode.names += 1;
             episode.widest_half = episode
@@ -288,10 +307,12 @@ impl BannerTracker {
             return;
         };
         let from = self.from;
-        let name_at = |f: u32| {
+        let seen_at = |f: u32| {
             f.checked_sub(from)
-                .and_then(|i| self.pending.get(i as usize).copied().flatten())
+                .and_then(|i| self.pending.get(i as usize).copied())
+                .unwrap_or_default()
         };
+        let name_at = |f: u32| seen_at(f).name;
         // Half the median width of the centred names (rounded down, as the
         // prototype's `int(np.median(w / 2))`), plus the padding.
         let mut widths: Vec<i32> = (settle..settle + SETTLE_SPAN)
@@ -350,10 +371,21 @@ impl BannerTracker {
                     x1: a.x1.max(b.x1),
                     ..a
                 });
-            let (x0, x1) = near.map_or((settled.x0, SLIDE_X1_MAX), |r| {
+            let right = slide_right(
+                seen_at(g).plate,
+                [g.checked_sub(1), Some(g + 1)]
+                    .into_iter()
+                    .flatten()
+                    .map(|h| seen_at(h).plate),
+            );
+            // The name slides in from the right and stops at the settled
+            // position, so its letters never lie left of the settled box: a
+            // part of the name read alone (a filter breaking the letters
+            // apart) moves the box's left end no further right than that.
+            let (x0, x1) = near.map_or((settled.x0, right), |r| {
                 (
-                    r.x0 - SLIDE_PAD_LEFT,
-                    (r.x1 + SLIDE_PAD_RIGHT).min(SLIDE_X1_MAX),
+                    (r.x0 - SLIDE_PAD_LEFT).min(settled.x0),
+                    right.max(r.x1 + SLIDE_PAD_RIGHT).min(FRAME_X1),
                 )
             });
             out.push(BannerBox {
@@ -404,8 +436,9 @@ impl BannerTracker {
         if settled.is_none() && !episode.fallback {
             return;
         }
+        let mut previous: Option<Plate> = None;
         while self.from <= episode.last_gate + FADE
-            && let Some(name) = self.pending.pop_front()
+            && let Some(seen) = self.pending.pop_front()
         {
             let g = self.from;
             let (rect, conf) = match settled {
@@ -417,8 +450,12 @@ impl BannerTracker {
                     Confidence::Tracked,
                 ),
                 Some((_, settled)) => (settled, Confidence::Tracked),
-                None => fallback_box(episode, g, name),
+                None => {
+                    let next = self.pending.front().and_then(|s| s.plate);
+                    fallback_box(episode, g, seen, slide_right(seen.plate, [previous, next]))
+                }
             };
+            previous = seen.plate;
             let conf = if g > episode.last_gate {
                 Confidence::PostRoll
             } else {
@@ -434,12 +471,28 @@ impl BannerTracker {
     }
 }
 
+/// The right end of a slide-in box in a frame with the plate `own` and
+/// neighbouring frames with the plates `neighbours`: the right edge of
+/// the plate, which leads the sliding name (the widest of the full plates
+/// around, as the frames' timing may differ by one), or the frame edge
+/// where the frame shows no full plate.
+fn slide_right(own: Option<Plate>, neighbours: impl IntoIterator<Item = Option<Plate>>) -> i32 {
+    let full_x1 = |p: Option<Plate>| p.filter(|p| p.x1 - p.x0 >= PLATE_FULL_W).map(|p| p.x1);
+    full_x1(own).map_or(FRAME_X1, |x1| {
+        neighbours
+            .into_iter()
+            .filter_map(full_x1)
+            .fold(x1, i32::max)
+            .min(FRAME_X1)
+    })
+}
+
 /// The fallback box of frame `g` in an unsettled episode: centred and as
 /// wide as the widest possible name (or the widest name seen), reaching
-/// the end of the banner strip while the name may still slide in (until
-/// the first centred name, or [`SLIDE_FRAMES`] after the first plate), and
+/// `right` ([`slide_right`]) while the name may still slide in (until the
+/// first centred name, or [`SLIDE_FRAMES`] after the first plate), and
 /// always covering the name found in the frame.
-fn fallback_box(episode: &Episode, g: u32, name: Option<BannerName>) -> (RectI, Confidence) {
+fn fallback_box(episode: &Episode, g: u32, seen: Seen, right: i32) -> (RectI, Confidence) {
     let half = FALLBACK_HALF.max(episode.widest_half);
     let mut rect = RectI {
         x0: CENTRE_X - half,
@@ -452,9 +505,9 @@ fn fallback_box(episode: &Episode, g: u32, name: Option<BannerName>) -> (RectI, 
         .or_else(|| episode.first_plate.map(|p| p + SLIDE_FRAMES));
     let sliding = slide_end.is_none_or(|end| g < end);
     if sliding {
-        rect.x1 = rect.x1.max(SLIDE_X1_MAX);
+        rect.x1 = rect.x1.max(right);
     }
-    if let Some(n) = name {
+    if let Some(n) = seen.name {
         rect.x0 = rect.x0.min(n.span.x0 - NAME_PAD_X);
         rect.x1 = rect.x1.max(n.span.x1 + NAME_PAD_X);
     }
@@ -577,6 +630,67 @@ mod tests {
         frames[11].plate = Some(Plate { x0: 800, x1: 1040 });
         frames.extend([BannerFrame::default(); 20]);
         assert!(run(&frames).iter().all(Vec::is_empty));
+    }
+
+    #[test]
+    fn slide_in_boxes_reach_the_plate_edge_or_the_frame_edge() {
+        let mut frames = vec![
+            BannerFrame {
+                gate: true,
+                ..BannerFrame::default()
+            };
+            23
+        ];
+        frames.extend((0..10).map(|i| named(1180 - 25 * i, 1250 - 25 * i)));
+        // An effect hides the plate of one slide-in frame.
+        frames[27].plate = None;
+        frames.extend((0..100).map(|_| named(930, 990)));
+        let boxes = run(&frames);
+        // The lead before the name has no plate: up to the frame edge.
+        for b in &boxes[21..23] {
+            assert_eq!(b[0].rect.x1, 1920);
+        }
+        for f in 23..33 {
+            let b = boxes[f][0];
+            assert_eq!(b.conf, Confidence::PreRoll, "frame {f}");
+            let name = frames[f].name.unwrap();
+            assert!(b.rect.x0 < name.text.x0, "frame {f}");
+            let edge = match frames[f].plate {
+                None => 1920,
+                Some(_) => frames[f - 1..=f + 1]
+                    .iter()
+                    .filter_map(|n| n.plate.map(|p| p.x1))
+                    .max()
+                    .unwrap(),
+            };
+            assert_eq!(b.rect.x1, edge, "frame {f}");
+        }
+    }
+
+    #[test]
+    fn a_name_read_in_parts_before_it_settles_keeps_its_left_end_covered() {
+        // A sharpening filter breaks the centred name (x 900..1020) apart:
+        // for half a second only its right part is read, so the banner
+        // settles late and those frames are part of the slide-in.
+        let mut frames = vec![
+            BannerFrame {
+                gate: true,
+                ..BannerFrame::default()
+            };
+            23
+        ];
+        frames.extend((0..10).map(|i| named(1180 - 25 * i, 1250 - 25 * i)));
+        frames.extend((0..30).map(|_| named(975, 1018)));
+        frames.extend((0..60).map(|_| named(900, 1020)));
+        let boxes = run(&frames);
+        for (f, b) in boxes.iter().enumerate().take(63).skip(33) {
+            assert_eq!(b[0].conf, Confidence::PreRoll, "frame {f}");
+            assert!(
+                b[0].rect.x0 < 900 && b[0].rect.x1 > 1020,
+                "frame {f}: {b:?}"
+            );
+        }
+        assert_eq!(boxes[100][0].conf, Confidence::Tracked);
     }
 
     #[test]

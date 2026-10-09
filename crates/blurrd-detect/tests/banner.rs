@@ -12,7 +12,9 @@ mod support;
 
 use blurrd_core::{Confidence, RectI};
 use blurrd_detect::banner::FALLBACK_HALF;
-use blurrd_testkit::hud::banner::{BannerSpec, NAME_BASELINE, ULT_READY_BASELINE, UltReadySpec};
+use blurrd_testkit::hud::banner::{
+    BannerSpec, NAME_BASELINE, PLATE, ULT_READY_BASELINE, UltReadySpec,
+};
 use blurrd_testkit::{
     Background, Flash, FontSet, Layout, NameStyle, Palette, Rng, Scene, synth_name,
 };
@@ -100,6 +102,38 @@ fn the_settled_box_is_fixed_and_centred() {
     // Slide-in frames are pre-roll, the fade-out post-roll.
     let confs: Vec<_> = run.boxes.iter().flatten().map(|b| b.conf).collect();
     assert!(confs.contains(&Confidence::PreRoll) && confs.contains(&Confidence::PostRoll));
+}
+
+#[test]
+fn slide_in_frames_are_covered_to_the_plate_edge() {
+    // The plate leads the sliding name: every slide-in box reaches its
+    // right edge (right of the settled plate while it slides). The last
+    // frames of the slide, within the centred tolerance, already get the
+    // settled box with its deceleration padding.
+    for (b, background) in BACKGROUNDS.into_iter().enumerate() {
+        let name = synth_name(&mut Rng::new(70 + b as u64), NameStyle::Latin(12));
+        let (scene, spec) = banner_scene(&name, background);
+        let run = run_banner(&scene, None);
+        let mut sliding = 0;
+        for f in spec.settle() - spec.slide_frames..spec.settle() {
+            let boxes = &run.boxes[f as usize];
+            let context = format!("background {b}, frame {f}");
+            assert_eq!(boxes.len(), 1, "{context}");
+            if boxes[0].conf != Confidence::PreRoll {
+                continue;
+            }
+            sliding += 1;
+            let rect = boxes[0].rect;
+            assert!(rect.x1 >= PLATE.x1, "{context}: {rect:?}");
+            if let Some(plate) = run.seen[f as usize].plate {
+                assert!(rect.x1 >= plate.x1, "{context}: {rect:?} {plate:?}");
+            }
+        }
+        assert!(
+            sliding + 3 >= spec.slide_frames,
+            "background {b}: {sliding}"
+        );
+    }
 }
 
 #[test]
