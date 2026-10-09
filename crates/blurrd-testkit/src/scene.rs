@@ -4,7 +4,7 @@ use blurrd_core::RectI;
 
 use crate::background::Background;
 use crate::font::FontSet;
-use crate::hud::banner::{Banner, BannerSpec};
+use crate::hud::banner::{Banner, BannerSpec, UltReady, UltReadySpec};
 use crate::hud::chat::{Chat, ChatSpec};
 use crate::hud::killfeed::{KillFeed, KillFeedSpec};
 use crate::hud::voice::{Voice, VoiceSpec};
@@ -50,6 +50,7 @@ pub struct Scene {
     frames: u32,
     kill_feed: Option<KillFeed>,
     banner: Option<Banner>,
+    ult_ready: Option<UltReady>,
     voice: Option<Voice>,
     chat: Option<Chat>,
     flashes: Vec<Flash>,
@@ -65,6 +66,7 @@ impl Scene {
             frames,
             kill_feed: None,
             banner: None,
+            ult_ready: None,
             voice: None,
             chat: None,
             flashes: Vec::new(),
@@ -92,6 +94,13 @@ impl Scene {
     #[must_use]
     pub fn with_banner(mut self, fonts: &FontSet, spec: BannerSpec) -> Self {
         self.banner = Some(Banner::new(fonts, &self.layout, spec));
+        self
+    }
+
+    /// Adds an "X ULT READY" notification.
+    #[must_use]
+    pub fn with_ult_ready(mut self, fonts: &FontSet, spec: UltReadySpec) -> Self {
+        self.ult_ready = Some(UltReady::new(fonts, &self.layout, spec));
         self
     }
 
@@ -136,6 +145,9 @@ impl Scene {
             }
             if let Some(banner) = &self.banner {
                 banner.paint(&mut p, index);
+            }
+            if let Some(ult_ready) = &self.ult_ready {
+                ult_ready.paint(&mut p, index);
             }
             if let Some(voice) = &self.voice {
                 voice.paint(&mut p, index);

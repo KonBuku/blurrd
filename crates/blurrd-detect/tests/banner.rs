@@ -1,6 +1,7 @@
 //! The banner detector and settle model on synthetic banners from
 //! blurrd-testkit: every frame that shows a name is covered, from the
-//! slide-in to the fade-out, and frames without a banner get no box.
+//! slide-in to the fade-out, and frames without a banner name (no banner,
+//! or an "X ULT READY" notification) get no box.
 
 #![allow(
     clippy::unwrap_used,
@@ -10,10 +11,10 @@
 mod support;
 
 use blurrd_core::Confidence;
-use blurrd_testkit::hud::banner::BannerSpec;
+use blurrd_testkit::hud::banner::{BannerSpec, NAME_BASELINE, ULT_READY_BASELINE, UltReadySpec};
 use blurrd_testkit::{Background, FontSet, Layout, NameStyle, Palette, Rng, Scene, synth_name};
 
-use support::run_banner;
+use support::{Filter, run_banner};
 
 /// Backgrounds: textured, dark and a bright sky.
 const BACKGROUNDS: [Background; 3] = [
@@ -107,5 +108,127 @@ fn no_banner_no_box() {
         // (the prototype's), but shows no name, so nothing is blurred.
         assert_eq!(run.box_frames, 0);
         assert!(run.seen.iter().all(|s| s.name.is_none()));
+    }
+}
+
+#[test]
+fn ult_ready_notifications_are_not_names() {
+    let fonts = FontSet::latin();
+    for background in BACKGROUNDS {
+        // At its place above the plate, and moved onto the name's
+        // baseline, where only the plate gate tells it from a name.
+        for baseline in [ULT_READY_BASELINE, NAME_BASELINE] {
+            let scene = Scene::new(Layout::reference(), background, Palette::DEFAULT, 40)
+                .with_ult_ready(
+                    &fonts,
+                    UltReadySpec {
+                        baseline,
+                        ..UltReadySpec::new('X', 0, 40)
+                    },
+                );
+            let run = run_banner(&scene, None);
+            assert_eq!(run.box_frames, 0, "baseline {baseline}");
+            assert!(run.seen.iter().all(|s| s.name.is_none()));
+        }
+    }
+}
+
+#[test]
+fn a_notification_inside_the_banner_box_is_not_a_name() {
+    // The notification shows on the name's baseline while the box fades
+    // in, before plate and name arrive.
+    let name = synth_name(&mut Rng::new(7), NameStyle::Latin(8));
+    for background in BACKGROUNDS {
+        let spec = BannerSpec {
+            hold: 60,
+            ..BannerSpec::new("CLUTCH", &name, 5)
+        };
+        let first_name = spec.settle() - spec.slide_frames;
+        let scene = Scene::new(
+            Layout::reference(),
+            background,
+            Palette::DEFAULT,
+            spec.end() + 20,
+        )
+        .with_banner(&FontSet::latin(), spec.clone())
+        .with_ult_ready(
+            &FontSet::latin(),
+            UltReadySpec {
+                baseline: NAME_BASELINE,
+                ..UltReadySpec::new('Q', 0, first_name)
+            },
+        );
+        let run = run_banner(&scene, None);
+        assert!(
+            (0..first_name as usize).all(|f| run.seen[f].name.is_none()),
+            "a name before the plate"
+        );
+        // Only the slide-in lead reaches back before the name.
+        assert!(
+            run.boxes[..(first_name - 13) as usize]
+                .iter()
+                .all(Vec::is_empty)
+        );
+    }
+}
+
+#[test]
+fn every_name_lies_on_a_detected_plate() {
+    for (b, background) in BACKGROUNDS.into_iter().enumerate() {
+        let name = synth_name(&mut Rng::new(20 + b as u64), NameStyle::Latin(12));
+        let (scene, spec) = banner_scene(&name, background);
+        let run = run_banner(&scene, None);
+        let mut plates = 0;
+        for f in spec.settle()..spec.settle() + 40 {
+            let seen = run.seen[f as usize];
+            let (plate, name) = (seen.plate.unwrap(), seen.name.unwrap());
+            assert!(plate.carries(&name.text) && name.plate == plate);
+            // The plate is about 390 px wide and centred.
+            assert!((plate.x0 + plate.x1 - 1920).abs() <= 8, "{plate:?}");
+            assert!((380..=400).contains(&(plate.x1 - plate.x0)), "{plate:?}");
+            plates += 1;
+        }
+        assert_eq!(plates, 40);
+    }
+}
+
+#[test]
+fn colour_filters_keep_the_banner() {
+    // The banner is white and grey: hue and saturation filters leave it
+    // alone, darkening and contrast filters move ticks, plate edges and
+    // name strokes together.
+    let filters = [
+        Filter::Hue(120.0),
+        Filter::Saturation(0.0),
+        Filter::Saturation(1.8),
+        Filter::Vibrance(1.0),
+        Filter::Gamma(0.8),
+        Filter::Gamma(1.5),
+        Filter::Levels {
+            brightness: 0.06,
+            contrast: 0.85,
+        },
+        Filter::Levels {
+            brightness: -0.12,
+            contrast: 0.85,
+        },
+        Filter::Levels {
+            brightness: -0.3,
+            contrast: 0.9,
+        },
+    ];
+    for (f, filter) in filters.into_iter().enumerate() {
+        let name = synth_name(&mut Rng::new(40 + f as u64), NameStyle::Latin(4 + 2 * f));
+        let (scene, spec) = banner_scene(&name, BACKGROUNDS[f % 2]);
+        let run = run_banner(&scene, Some(filter));
+        let context = format!("{filter:?}");
+        run.assert_clean(&context);
+        // The name is found and settles: the settled box is the tracked
+        // one, not a fallback.
+        let settled = &run.boxes[spec.settle() as usize + 20];
+        assert!(
+            settled.len() == 1 && settled[0].conf == Confidence::Tracked,
+            "{context}: {settled:?}"
+        );
     }
 }

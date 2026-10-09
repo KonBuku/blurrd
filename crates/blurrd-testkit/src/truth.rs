@@ -56,6 +56,8 @@ pub enum ContentKind {
     Badge,
     /// The title of a banner ("ACE", "CLUTCH").
     BannerTitle,
+    /// A HUD notification without a player name ("X ULT READY").
+    Notification,
 }
 
 /// A rectangle of non-name content.

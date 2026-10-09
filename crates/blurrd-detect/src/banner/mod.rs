@@ -14,7 +14,9 @@
 //!
 //! [`BannerDetector`] reads one frame: the corner ticks of the box gate the
 //! detector ([`BannerFrame::gate`]), and while they are on screen the
-//! white text on the plate is the name ([`BannerName`]). Which frames get
+//! white text on the plate is the name ([`BannerName`]). Text counts as a
+//! name only on a plate ([`Plate`], the plate gate): the "X ULT READY"
+//! notification and bright scenery in the same place have none. Which frames get
 //! a box, and how large, is decided over the whole banner episode by
 //! [`BannerTracker`]: the settle model of the port spec, which needs the
 //! frames after the name has stopped moving.
@@ -27,11 +29,15 @@
 //! themselves pass either by absolute brightness (bright backgrounds) or by
 //! their contrast to the rows above and below (darkened video).
 
+mod plate;
 mod tracker;
 
 use blurrd_core::{NameKind, RectI, Region};
 
+pub use plate::Plate;
 pub use tracker::{BannerBox, BannerTracker};
+
+use self::plate::{PlateScratch, find_plate};
 
 use crate::components::{Component, ComponentScratch, Connectivity, components};
 use crate::detection::{DetectError, Detection};
@@ -134,6 +140,8 @@ pub struct BannerName {
     pub span: RectI,
     /// Number of stroke pixels.
     pub ink: u32,
+    /// The plate the name is written on.
+    pub plate: Plate,
 }
 
 impl BannerName {
@@ -167,7 +175,12 @@ pub struct BannerFrame {
     /// Whether the corner ticks of a banner box are on screen. A
     /// detector-independent structure signal (plan 7.2).
     pub gate: bool,
-    /// The name on the plate, if the gate is on and a name was found.
+    /// The plate, if the gate is on and a plate was found. It is shown
+    /// with the name, and can be found where motion or effects hide the
+    /// name's letters.
+    pub plate: Option<Plate>,
+    /// The name on the plate, if the gate is on and a name was found on
+    /// the plate.
     pub name: Option<BannerName>,
 }
 
@@ -182,6 +195,7 @@ struct Scratch {
     components: ComponentScratch,
     found: Vec<Component>,
     glyphs: Vec<Glyph>,
+    plate: PlateScratch,
 }
 
 /// A glyph component in reference pixels.
@@ -192,6 +206,18 @@ struct Glyph {
     top: i32,
     bottom: i32,
     area: u32,
+}
+
+impl Glyph {
+    /// The glyph's (or cluster's) bounds.
+    const fn rect(&self) -> RectI {
+        RectI {
+            x0: self.x0,
+            y0: self.top,
+            x1: self.x1,
+            y1: self.bottom,
+        }
+    }
 }
 
 /// Finds the banner name in one frame.
@@ -229,17 +255,21 @@ impl BannerDetector {
             return Ok(BannerFrame::default());
         };
         let shift = TICK_WHITE.saturating_sub(white).min(MAX_WHITE_SHIFT);
+        // Contrasts scale with the white level, like a contrast change.
+        let scaled = |level: u8| {
+            u8::try_from(u16::from(level) * u16::from(TICK_WHITE - shift) / u16::from(TICK_WHITE))
+                .unwrap_or(level)
+        };
         let thresholds = Thresholds {
             min_mn: NAME_MIN_MN - shift,
-            // Scales with the white level, like a contrast change.
-            min_tophat: u8::try_from(
-                u16::from(NAME_MIN_TOPHAT) * u16::from(TICK_WHITE - shift) / u16::from(TICK_WHITE),
-            )
-            .unwrap_or(NAME_MIN_TOPHAT),
+            min_tophat: scaled(NAME_MIN_TOPHAT),
         };
+        let plate = find_plate(crop, scaled(plate::EDGE_MIN), &mut self.scratch.plate);
+        let name = plate.and_then(|plate| find_name(crop, thresholds, plate, &mut self.scratch));
         Ok(BannerFrame {
             gate: true,
-            name: find_name(crop, thresholds, &mut self.scratch),
+            plate,
+            name,
         })
     }
 }
@@ -313,25 +343,25 @@ fn tick(crop: &RgbView<'_>, (x0, x1): (i32, i32)) -> Option<(u32, u32)> {
     }
 }
 
-/// The name on the plate (`detect_banner`): the text-like cluster of
-/// stroke components with the most ink.
-fn find_name(crop: &RgbView<'_>, t: Thresholds, s: &mut Scratch) -> Option<BannerName> {
+/// The name on `plate` (`detect_banner`): the text-like cluster of stroke
+/// components on the plate with the most ink.
+fn find_name(
+    crop: &RgbView<'_>,
+    t: Thresholds,
+    plate: Plate,
+    s: &mut Scratch,
+) -> Option<BannerName> {
     stroke_mask(crop, t, s);
     find_glyphs(s);
-    let name = best_cluster(&mut s.glyphs)?;
+    let name = best_cluster(&mut s.glyphs, plate)?;
     let height = name.bottom - name.top;
+    let text = name.rect();
     if name.x1 - name.x0 < NAME_MIN_W
         || name.area < NAME_MIN_INK
         || !(NAME_H.0..=NAME_H.1).contains(&height)
     {
         return None;
     }
-    let text = RectI {
-        x0: name.x0,
-        y0: name.top,
-        x1: name.x1,
-        y1: name.bottom,
-    };
     let mut span = text;
     // `|centre − 960| ≤ 25` with the centre at `(x0 + x1) / 2`.
     if (text.x0 + text.x1 - 2 * CENTRE_X).abs() <= 2 * CENTRED_TOLERANCE {
@@ -343,6 +373,7 @@ fn find_name(crop: &RgbView<'_>, t: Thresholds, s: &mut Scratch) -> Option<Banne
         text,
         span,
         ink: name.area,
+        plate,
     })
 }
 
@@ -424,10 +455,15 @@ fn find_glyphs(s: &mut Scratch) {
 
 /// Clusters the glyphs (sorted by `x0`, stable like the prototype's sort)
 /// over gaps of at most [`NAME_GAP`] and returns the first cluster with the
-/// most ink.
-fn best_cluster(glyphs: &mut [Glyph]) -> Option<Glyph> {
+/// most ink among those `plate` carries.
+fn best_cluster(glyphs: &mut [Glyph], plate: Plate) -> Option<Glyph> {
     glyphs.sort_by_key(|g| g.x0);
     let mut best: Option<Glyph> = None;
+    let mut consider = |c: Glyph| {
+        if plate.carries(&c.rect()) {
+            best = Some(more_ink(best, c));
+        }
+    };
     let mut current: Option<Glyph> = None;
     for g in glyphs.iter() {
         current = match current {
@@ -439,13 +475,16 @@ fn best_cluster(glyphs: &mut [Glyph]) -> Option<Glyph> {
                 area: c.area + g.area,
             }),
             Some(c) => {
-                best = Some(more_ink(best, c));
+                consider(c);
                 Some(*g)
             }
             None => Some(*g),
         };
     }
-    current.map(|c| more_ink(best, c)).or(best)
+    if let Some(c) = current {
+        consider(c);
+    }
+    best
 }
 
 /// The cluster with more ink; the earlier one on a tie.

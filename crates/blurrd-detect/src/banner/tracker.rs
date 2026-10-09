@@ -20,6 +20,11 @@ use super::{BannerFrame, BannerName, CENTRE_X, NAME_BAND, NAME_PAD_X};
 
 /// Gated frames closer than this belong to one episode.
 const EPISODE_GAP: u32 = 10;
+/// Names count only once the gate has been on for this many frames of the
+/// episode (port spec section 10, item 4): the real name follows the box
+/// by about 23 frames, a short flicker of the gate on bright scenery does
+/// not make an episode.
+const GATE_MIN_FRAMES: u32 = 3;
 /// The settled box stays this many frames after the last gated frame.
 const FADE: u32 = 6;
 /// Consecutive centred detections that mark the settle frame.
@@ -70,10 +75,16 @@ struct Episode {
     start: u32,
     /// Last gated frame so far.
     last_gate: u32,
+    /// Gated frames so far.
+    gated: u32,
     /// Consecutive centred detections ending at the latest frame.
     centred_run: u32,
     /// First frame with a centred detection.
     first_centred: Option<u32>,
+    /// First frame with a plate once the gate has been on long enough.
+    /// Plate and name appear together, so the slide-in starts here at the
+    /// latest, even where effects interrupt the slide-in chain.
+    first_plate: Option<u32>,
     /// The settle frame, once found.
     settle: Option<u32>,
     /// The settled box, once sized.
@@ -125,8 +136,10 @@ impl BannerTracker {
                 self.episode.insert(Episode {
                     start: frame,
                     last_gate: frame,
+                    gated: 0,
                     centred_run: 0,
                     first_centred: None,
+                    first_plate: None,
                     settle: None,
                     settled: None,
                 })
@@ -136,11 +149,17 @@ impl BannerTracker {
                 return;
             }
         };
-        self.pending.push_back(seen.name);
         if seen.gate {
             episode.last_gate = frame;
+            episode.gated += 1;
         }
-        if seen.name.is_some_and(|n| n.is_centred()) {
+        let confirmed = episode.gated >= GATE_MIN_FRAMES;
+        let name = seen.name.filter(|_| confirmed);
+        if confirmed && seen.plate.is_some() {
+            episode.first_plate.get_or_insert(frame);
+        }
+        self.pending.push_back(name);
+        if name.is_some_and(|n| n.is_centred()) {
             episode.centred_run += 1;
             episode.first_centred.get_or_insert(frame);
         } else {
@@ -237,6 +256,9 @@ impl BannerTracker {
         }
         let accepted = |g: u32| chain.iter().find(|(h, _)| *h == g).map(|(_, r)| *r);
         let mut start = chain.last().map_or(settle, |(a, _)| a.saturating_sub(1));
+        if let Some(p) = episode.first_plate {
+            start = start.min(p.saturating_sub(1));
+        }
         if let Some(c) = episode.first_centred {
             start = start.min(c.saturating_sub(SLIDE_LEAD));
         }
