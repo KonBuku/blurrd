@@ -10,9 +10,12 @@
 
 mod support;
 
-use blurrd_core::Confidence;
+use blurrd_core::{Confidence, RectI};
+use blurrd_detect::banner::FALLBACK_HALF;
 use blurrd_testkit::hud::banner::{BannerSpec, NAME_BASELINE, ULT_READY_BASELINE, UltReadySpec};
-use blurrd_testkit::{Background, FontSet, Layout, NameStyle, Palette, Rng, Scene, synth_name};
+use blurrd_testkit::{
+    Background, Flash, FontSet, Layout, NameStyle, Palette, Rng, Scene, synth_name,
+};
 
 use support::{Filter, run_banner};
 
@@ -229,6 +232,63 @@ fn colour_filters_keep_the_banner() {
         assert!(
             settled.len() == 1 && settled[0].conf == Confidence::Tracked,
             "{context}: {settled:?}"
+        );
+    }
+}
+
+#[test]
+fn glare_over_the_settled_name_gets_the_fallback_box() {
+    // Glare washes out the name from just before it centres to the end:
+    // the episode never settles (port spec failure F4), the fallback box
+    // covers it to the end. The last case is the widest possible name,
+    // sixteen "W", which the fallback box must cover as well.
+    let mut cases: Vec<(usize, Background, String)> = BACKGROUNDS
+        .into_iter()
+        .enumerate()
+        .map(|(b, background)| {
+            let name = synth_name(&mut Rng::new(60 + b as u64), NameStyle::Latin(9));
+            (b, background, name)
+        })
+        .collect();
+    cases.push((0, BACKGROUNDS[0], "W".repeat(16)));
+    for (b, background, name) in cases {
+        let spec = BannerSpec {
+            hold: 60,
+            ..BannerSpec::new("ACE", &name, 5)
+        };
+        let glare = spec.settle() - 3;
+        let mut scene = Scene::new(
+            Layout::reference(),
+            background,
+            Palette::DEFAULT,
+            spec.end() + 20,
+        )
+        .with_banner(&FontSet::latin(), spec.clone());
+        for start in glare..=spec.end() {
+            scene = scene.with_flash(Flash {
+                start,
+                frames: 1,
+                amount: 0.95,
+                area: Some(RectI {
+                    x0: 690,
+                    y0: 298,
+                    x1: 1240,
+                    y1: 328,
+                }),
+            });
+        }
+        let run = run_banner(&scene, None);
+        let context = format!("background {b}, {} letters", name.len());
+        run.assert_clean(&context);
+        let held: Vec<_> = (spec.settle() + 10..spec.settle() + 60)
+            .map(|f| run.boxes[f as usize][0])
+            .collect();
+        assert!(
+            held.iter().all(|h| h.conf == Confidence::WeakHold
+                && h.rect.x0 <= 960 - FALLBACK_HALF
+                && h.rect.x1 >= 960 + FALLBACK_HALF),
+            "{context}: {:?}",
+            held[0]
         );
     }
 }
