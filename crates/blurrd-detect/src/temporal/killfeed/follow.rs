@@ -7,6 +7,7 @@ use crate::killfeed::ROW_PITCH;
 use crate::track::ncc::{Match, Searcher, Template};
 
 use super::STRIP;
+use super::ring::{HALF_HEIGHT, HALF_WIDTH};
 
 /// Score that keeps a name tracked (`TH`).
 const TH: f32 = 0.55;
@@ -83,9 +84,24 @@ pub(super) struct Frame<'a> {
     pub(super) index: u32,
     /// The `min(R, G, B)` plane of the feed strip.
     pub(super) plane: &'a GrayImage,
+    /// The strip's colours at half resolution ([`super::ring::HALF_WIDTH`]
+    /// × [`super::ring::HALF_HEIGHT`], packed R, G, B).
+    pub(super) colours: &'a [u8],
     /// The text bounds of the names the detector found in the frame
     /// (reference pixels).
     pub(super) names: &'a [RectI],
+}
+
+impl Frame<'_> {
+    /// The colour at `(hx, hy)` of the half-resolution plane, if inside.
+    pub(super) fn colour(&self, hx: i32, hy: i32) -> Option<[u8; 3]> {
+        if hx < 0 || hy < 0 || hx >= HALF_WIDTH as i32 || hy >= HALF_HEIGHT as i32 {
+            return None;
+        }
+        let i = 3 * (hy as usize * HALF_WIDTH as usize + hx as usize);
+        let c = self.colours.get(i..i + 3)?;
+        Some([c[0], c[1], c[2]])
+    }
 }
 
 /// How a frame's position was found.
@@ -100,6 +116,10 @@ pub(super) enum How {
     Weak,
     /// A gap between two matches: the union of both positions (`'g'`).
     Gap,
+    /// After the last match, while the row's structure is still on
+    /// screen: the union of the last match and the place the fading row
+    /// slid to ([`super::end`]).
+    Hold,
 }
 
 /// Template positions of one frame: the top-left corners span
@@ -124,13 +144,14 @@ impl Pos {
         }
     }
 
-    fn union(a: (i32, i32), b: (i32, i32)) -> Self {
+    /// The union of two positions, found as `how`.
+    pub(super) fn union(a: (i32, i32), b: (i32, i32), how: How) -> Self {
         Self {
             x0: a.0.min(b.0),
             y0: a.1.min(b.1),
             x1: a.0.max(b.0),
             y1: a.1.max(b.1),
-            how: How::Gap,
+            how,
         }
     }
 }
@@ -256,7 +277,7 @@ impl Follower {
                 // Re-acquired after a gap: hold the union of both positions
                 // over the gap.
                 for g in self.between(f) {
-                    emit(g, Pos::union(pos, p));
+                    emit(g, Pos::union(pos, p, How::Gap));
                 }
             }
             emit(f, Pos::at(p, How::Matched));
@@ -363,7 +384,7 @@ impl Follower {
                 Some(m) => {
                     let p = (m.x, m.y);
                     for g in self.between(f) {
-                        emit(g, Pos::union(self.pos, p));
+                        emit(g, Pos::union(self.pos, p, How::Gap));
                     }
                     emit(f, Pos::at(p, How::Slide));
                     (self.pos, self.last, miss) = (p, f, 0);

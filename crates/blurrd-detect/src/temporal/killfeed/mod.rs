@@ -20,6 +20,10 @@
 //!    offset: a fixed size, so it never jitters. The other names of the
 //!    reference row move with it (a row is rigid), which covers a name
 //!    whose own template latched onto an identical name in the next row.
+//! 5. A name ends where its row's structure is gone, not where the template
+//!    was last found (measured against the bar colour and the stroke
+//!    contrast of the reference frame), followed by a post-roll of the
+//!    measured fade length ([`POST_ROLL`]).
 //!
 //! The prototype kept the strips of the whole clip in memory and tracked
 //! mid-life references backward over the entire life. This tracker is
@@ -28,6 +32,7 @@
 //! the ring, and hands out the boxes of a frame [`DELAY`] frames after it
 //! was pushed. Its memory does not depend on the length of the video.
 
+mod end;
 mod follow;
 mod link;
 mod ring;
@@ -39,9 +44,10 @@ use blurrd_core::{Confidence, NameKind, RectI, Region};
 use crate::detection::Detection;
 use crate::image::RgbView;
 use crate::killfeed::FEED_ROI;
-use crate::track::ncc::{Searcher, Template};
+use crate::track::ncc::{Searcher, Template, score_at};
 
-use follow::{Follower, How, Pos};
+use end::Look;
+use follow::{Follower, How, MAX_GAP, Pos};
 use link::{Linker, Reference};
 use ring::Ring;
 
@@ -64,9 +70,24 @@ pub const RING_FRAMES: u32 = 128;
 /// still be followed back to the frame.
 pub const DELAY: u32 = RING_FRAMES - 1;
 
-/// Frames after a name's last tracked frame that keep its box
-/// (`POST`).
-pub const POST_ROLL: u32 = 2;
+/// Frames after the end of a name's row structure that keep its box: the
+/// longest measured fade (plan 7.3). On the 20 tuning clips with clean row
+/// ends (68 names, no other row moving into the place) a fading row slides
+/// up by 3 to 9 px (median 8) and is visible for 2 to 5 frames (median 4)
+/// from its first upward step. The boxes cover every visible frame of all
+/// 68 fades and stay 5 or 6 frames past the last visible one in 61 of them.
+/// Slower fades (the synthetic ones take 18 frames) are held by the
+/// structure end, not by the post-roll.
+pub const POST_ROLL: u32 = 5;
+
+/// While a fading row is held, it may have slid up this far since the
+/// last match (measured: at most 9 px while visible; the window leaves
+/// room for a slower slide) ...
+const FADE_RISE: i32 = 14;
+/// ... or down this far (sub-pixel jitter) ...
+const FADE_DROP: i32 = 2;
+/// ... and this far sideways.
+const FADE_DX: i32 = 2;
 
 /// The template spans the text plus this many pixels on each side ...
 const TEMPLATE_MARGIN_X: i32 = 6;
@@ -174,12 +195,57 @@ struct Part {
     /// A newer reference of the same name took over the forward pass:
     /// this part's last frame is not the end of the name.
     superseded: bool,
+    /// The name's look in the reference frame, to tell when its row is
+    /// gone.
+    look: Look,
+    /// The last frame of the name's row structure, once decided.
+    end: Option<u32>,
 }
 
 impl Part {
-    /// The frame after which the name ended, once the forward pass is over.
+    /// The last frame of the name, once decided: the last frame its row
+    /// structure was on screen.
     fn end(&self) -> Option<u32> {
-        (self.forward.is_done() && !self.superseded).then(|| self.forward.last())
+        self.end.filter(|_| !self.superseded)
+    }
+
+    /// Decides the end of the name once the forward pass is over: the
+    /// frames after the last match are held while the row's structure is
+    /// still on screen, at most [`MAX_GAP`] frames (the template would
+    /// have found a name still there by then).
+    fn close(&mut self, ring: &Ring, searcher: &mut Searcher) {
+        if self.end.is_some() || self.superseded || !self.forward.is_done() {
+            return;
+        }
+        let last = self.forward.last();
+        let mut end = last;
+        if let Some(at) = self.positions.get(&last) {
+            let anchor = (at.x1, at.y1);
+            for g in last + 1..=last + MAX_GAP {
+                let Some(frame) = ring.frame(g) else { break };
+                // A fading row slides up: look for the name a little higher.
+                let (slid, slid_score) = searcher
+                    .find(
+                        frame.plane,
+                        &self.template,
+                        anchor,
+                        (-FADE_DX, FADE_DX),
+                        (-FADE_RISE, FADE_DROP),
+                    )
+                    .map_or((anchor, -1.0), |m| ((m.x, m.y), m.score));
+                let anchor_score =
+                    score_at(frame.plane, &self.template, anchor.0, anchor.1).unwrap_or(-1.0);
+                if !self.look.present(&frame, slid, slid_score)
+                    && !self.look.present(&frame, anchor, anchor_score)
+                {
+                    break;
+                }
+                self.positions
+                    .insert(g, Pos::union(anchor, slid, How::Hold));
+                end = g;
+            }
+        }
+        self.end = Some(end);
     }
 
     /// Whether the part can no longer contribute to frame `f` or later.
@@ -210,7 +276,7 @@ impl Part {
         if let Some(p) = self.positions.get(&f) {
             let confidence = match p.how {
                 How::Matched | How::Slide => Confidence::Tracked,
-                How::Weak => Confidence::WeakHold,
+                How::Weak | How::Hold => Confidence::WeakHold,
                 How::Gap => Confidence::GapFill,
             };
             return Some((*p, confidence));
@@ -320,6 +386,7 @@ impl KillFeedTracker {
                 forward.step(&current, template, &mut self.searcher, |g, p| {
                     positions.insert(g, p);
                 });
+                part.close(&self.ring, &mut self.searcher);
             }
         }
 
@@ -353,6 +420,7 @@ impl KillFeedTracker {
             let newest = next - 1;
             for part in &mut self.parts {
                 part.forward.stop();
+                part.close(&self.ring, &mut self.searcher);
             }
             while self.next_emit <= newest {
                 self.emit(self.next_emit);
@@ -371,6 +439,7 @@ impl KillFeedTracker {
             .iter()
             .map(|p| {
                 p.template.heap_bytes()
+                    + p.look.heap_bytes()
                     + p.boxes.capacity() * size_of::<PartBox>()
                     // A B-tree entry plus its share of node overhead.
                     + p.positions.len() * 2 * size_of::<(u32, Pos)>()
@@ -445,6 +514,7 @@ impl KillFeedTracker {
                 positions.insert(g, p);
             });
         }
+        part.close(&self.ring, &mut self.searcher);
 
         // A part that only held the name weakly or across a gap in the
         // reference frame hands the forward pass over to the new one.
@@ -486,6 +556,7 @@ impl KillFeedTracker {
         if template.std_dev() < MIN_TEMPLATE_STD {
             return None;
         }
+        let frame = self.ring.frame(r.frame)?;
         let origin = (local.x0, local.y0);
         let relative = |rect: RectI| {
             (
@@ -521,14 +592,28 @@ impl KillFeedTracker {
                 how: How::Matched,
             },
         );
+        let text = relative(d.text);
+        let look = Look::new(
+            &frame,
+            origin,
+            RectI {
+                x0: text.0,
+                y0: text.1,
+                x1: text.2,
+                y1: text.3,
+            },
+            top - area.y0,
+        );
         Some(Part {
             kind: d.kind,
             template,
             origin,
             boxes,
             positions,
-            forward: Follower::new(relative(d.text), origin, r.frame, true),
+            forward: Follower::new(text, origin, r.frame, true),
             superseded: false,
+            look,
+            end: None,
         })
     }
 

@@ -249,6 +249,27 @@ fn covers_names_through_wipe_in_and_stack_jumps() {
 }
 
 #[test]
+fn covers_fading_names_until_their_rows_are_gone() {
+    // Long fades (the default 18 frames) of rows that are not replaced:
+    // the template loses a name long before it is invisible, the row's
+    // structure keeps the box.
+    let video = Video::new(
+        17,
+        &[0, 6, 40],
+        |s| KillFeedSpec { life: 60, ..s },
+        &[Background::noise(9), Background::dusk()],
+        Palette::DEFAULT,
+        150,
+    );
+    let run = track(&video);
+    let (checked, leaks) = leaks(&run, 0.0);
+    assert!(checked > 300, "{checked} name-frames");
+    assert!(leaks.is_empty(), "{} leaks: {leaks:#?}", leaks.len());
+    let strays = strays(&run, POST_ROLL);
+    assert!(strays.is_empty(), "{strays:#?}");
+}
+
+#[test]
 fn drops_multikill_badges_of_one_colour_rows() {
     let fonts = FontSet::latin();
     let mut rng = Rng::new(16);
@@ -399,7 +420,8 @@ fn hands_out_frames_after_the_delay_and_bounds_its_memory() {
         peak_late <= filled + filled / 10,
         "{peak_late} B late vs {filled} B"
     );
-    assert!(filled < 48 << 20, "{filled} B");
+    // Plan acceptance: at most 64 MB on any length of video.
+    assert!(filled < 64 << 20, "{filled} B");
 }
 
 #[test]

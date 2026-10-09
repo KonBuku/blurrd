@@ -9,6 +9,11 @@ use crate::killfeed::FEED_ROI;
 use super::STRIP;
 use super::follow::Frame;
 
+/// Width of the half-resolution colour plane of the strip.
+pub(super) const HALF_WIDTH: u32 = STRIP.width() / 2;
+/// Height of the half-resolution colour plane of the strip.
+pub(super) const HALF_HEIGHT: u32 = STRIP.height() / 2;
+
 /// What the tracker keeps of one frame.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Slot {
@@ -17,6 +22,10 @@ pub(super) struct Slot {
     /// `min(R, G, B)` of the feed strip ([`STRIP`]), the plane names are
     /// correlated on.
     pub(super) mn: GrayImage,
+    /// The strip's colours at half resolution (each value the mean of a
+    /// 2 × 2 block, packed R, G, B): enough to tell a bar's colour, at a
+    /// quarter of the memory.
+    pub(super) colours: Vec<u8>,
     /// The kill-feed detections of the frame.
     pub(super) detections: Vec<Detection>,
     /// Their text bounds.
@@ -27,6 +36,7 @@ impl Slot {
     /// Heap bytes held by the slot.
     fn heap_bytes(&self) -> usize {
         self.mn.data().len()
+            + self.colours.capacity()
             + self.detections.capacity() * size_of::<Detection>()
             + self.names.capacity() * size_of::<RectI>()
     }
@@ -62,6 +72,26 @@ impl Ring {
                 *d = px[0].min(px[1]).min(px[2]);
             }
         }
+        let half_row = 3 * HALF_WIDTH as usize;
+        slot.colours.resize(half_row * HALF_HEIGHT as usize, 0);
+        for (hy, dst) in (0..HALF_HEIGHT).zip(slot.colours.chunks_exact_mut(half_row)) {
+            let upper = &crop.row(2 * hy)[x0..x0 + row_bytes];
+            let lower = &crop.row(2 * hy + 1)[x0..x0 + row_bytes];
+            let blocks = upper
+                .as_chunks::<6>()
+                .0
+                .iter()
+                .zip(lower.as_chunks::<6>().0);
+            for (d, (a, b)) in dst.as_chunks_mut::<3>().0.iter_mut().zip(blocks) {
+                for c in 0..3 {
+                    let sum = u16::from(a[c])
+                        + u16::from(a[c + 3])
+                        + u16::from(b[c])
+                        + u16::from(b[c + 3]);
+                    d[c] = ((sum + 2) / 4) as u8;
+                }
+            }
+        }
         slot.detections.clear();
         slot.detections.extend_from_slice(detections);
         slot.names.clear();
@@ -73,6 +103,7 @@ impl Ring {
         self.get(frame).map(|s| Frame {
             index: frame,
             plane: &s.mn,
+            colours: &s.colours,
             names: &s.names,
         })
     }
