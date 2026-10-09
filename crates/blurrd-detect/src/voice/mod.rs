@@ -34,6 +34,7 @@
 //! detector cheap in the frames without voice chat.
 
 mod ink;
+mod tracker;
 
 use blurrd_core::{NameKind, RectI, Region};
 
@@ -41,6 +42,10 @@ use crate::detection::{DetectError, Detection};
 use crate::image::RgbView;
 
 use self::ink::InkPlanes;
+pub use self::tracker::{
+    DELAY, GAP, HOLD, HOLD_PORTRAIT, POST_ROLL, SAME_PORTRAIT, STRONG_SCORE, VoiceBox, VoiceFrame,
+    VoiceFrameBoxes, VoiceTrackError, VoiceTracker,
+};
 
 /// The left-panel crop of plan 5.4 in reference pixels (`HudRoi::LeftPanel`):
 /// the voice-chat entries and the text chat.
