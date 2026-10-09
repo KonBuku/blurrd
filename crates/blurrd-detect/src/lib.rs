@@ -10,6 +10,9 @@
 //!
 //! - [`KillFeedDetector`] ([`killfeed`]): killer and victim names in the
 //!   kill-feed rows of one frame.
+//! - [`BannerDetector`] and [`BannerTracker`] ([`banner`]): the player
+//!   name under an ACE or clutch banner, per frame and over the banner's
+//!   episode (settle model).
 //!
 //! Temporal models ([`temporal`]):
 //!
@@ -38,6 +41,7 @@
     reason = "crop sizes are at most a few thousand pixels, so coordinates never wrap in i32"
 )]
 
+pub mod banner;
 pub mod classes;
 pub mod components;
 mod detection;
@@ -47,6 +51,7 @@ pub mod morph;
 pub mod temporal;
 pub mod track;
 
+pub use banner::{BannerDetector, BannerTracker};
 pub use classes::{Class, ClassParams, PixelClasses, hsv};
 pub use detection::{DetectError, Detection};
 pub use image::{BitMask, GrayImage, ImageError, RgbView};

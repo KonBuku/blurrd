@@ -8,9 +8,10 @@
 )]
 
 use blurrd_blur::{PixelParams, PreparedBox, YuvColour, prepare_boxes};
-use blurrd_core::{BlurBox, BlurParams, Region};
+use blurrd_core::{BlurBox, BlurParams, RectI, Region};
+use blurrd_detect::banner::{BannerBox, BannerFrame};
 use blurrd_detect::killfeed::FEED_ROI;
-use blurrd_detect::{Detection, KillFeedDetector, RgbView};
+use blurrd_detect::{BannerDetector, BannerTracker, Detection, KillFeedDetector, RgbView};
 use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
 use blurrd_testkit::metrics::item_coverage;
 use blurrd_testkit::truth::ContentKind;
@@ -337,4 +338,117 @@ pub(crate) fn check_with(detector: &mut KillFeedDetector, fx: &Fixture) -> Check
         false_positives,
         badges,
     }
+}
+
+/// The boxes the render would blur for reference-pixel rectangles with the
+/// default blur parameters.
+pub(crate) fn prepared_rects(frame: &RgbFrame, rects: &[RectI]) -> Vec<PreparedBox> {
+    let params = PixelParams::new(&BlurParams::default(), 1.0, YuvColour::default()).unwrap();
+    let boxes: Vec<BlurBox> = rects
+        .iter()
+        .map(|r| BlurBox {
+            rect: *r,
+            region: Region::Banner,
+            seed: 1,
+            grid_origin: (r.x0, r.y0),
+            block_scale: 1.0,
+        })
+        .collect();
+    let mut out = vec![];
+    prepare_boxes(&boxes, frame.width(), frame.height(), &params, &mut out);
+    out
+}
+
+/// A banner scene run through the per-frame detector and the tracker,
+/// checked frame by frame against its truth.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BannerRun {
+    /// Frames with a visible banner name.
+    pub(crate) name_frames: u32,
+    /// Frames with a box.
+    pub(crate) box_frames: u32,
+    /// Frames whose name is not fully covered: frame, leaked and glyph
+    /// pixels.
+    pub(crate) leaks: Vec<(u32, u64, u64)>,
+    /// Frames with a box but no name.
+    pub(crate) empty_boxes: Vec<u32>,
+    /// What the detector saw, per frame.
+    pub(crate) seen: Vec<BannerFrame>,
+    /// The boxes, per frame.
+    pub(crate) boxes: Vec<Vec<BannerBox>>,
+}
+
+impl BannerRun {
+    /// Panics with the details if a name frame is not fully covered.
+    pub(crate) fn assert_clean(&self, context: &str) {
+        assert!(
+            self.leaks.is_empty(),
+            "{context}: {} of {} name frames leak: {:?}",
+            self.leaks.len(),
+            self.name_frames,
+            self.leaks
+        );
+    }
+}
+
+/// Runs every frame of `scene` (reference layout) through a banner
+/// detector and tracker, with `filter` applied to the frames.
+pub(crate) fn run_banner(scene: &Scene, filter: Option<Filter>) -> BannerRun {
+    let frames = render_all(scene, |fx| filter.map_or(fx.clone(), |f| f.fixture(&fx)));
+    run_banner_frames(&frames)
+}
+
+/// Renders every frame of `scene` on all cores (rendering a full frame
+/// costs far more than detecting) and maps it with `map`.
+pub(crate) fn render_all(scene: &Scene, map: impl Fn(Fixture) -> Fixture + Sync) -> Vec<Fixture> {
+    let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get) as u32;
+    let n = scene.frames();
+    let mut parts: Vec<Vec<Fixture>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                let map = &map;
+                s.spawn(move || {
+                    (t * n / threads..(t + 1) * n / threads)
+                        .map(|f| map(scene.render(f)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    parts.drain(..).flatten().collect()
+}
+
+/// [`run_banner`] on rendered frames.
+pub(crate) fn run_banner_frames(frames: &[Fixture]) -> BannerRun {
+    let mut detector = BannerDetector::new();
+    let mut tracker = BannerTracker::new();
+    let mut out = vec![];
+    let mut run = BannerRun::default();
+    for (i, fx) in frames.iter().enumerate() {
+        let seen = detector.detect(&feed_view(&fx.frame)).unwrap();
+        tracker.push(i as u32, &seen, &mut out);
+        run.seen.push(seen);
+    }
+    tracker.finish(&mut out);
+    run.boxes = vec![vec![]; frames.len()];
+    for b in out {
+        run.boxes[b.frame as usize].push(b);
+    }
+    for (i, fx) in frames.iter().enumerate() {
+        let rects: Vec<RectI> = run.boxes[i].iter().map(|b| b.rect).collect();
+        let has_name = fx.truth.in_region(Region::Banner).next().is_some();
+        run.name_frames += u32::from(has_name);
+        run.box_frames += u32::from(!rects.is_empty());
+        if !has_name && !rects.is_empty() {
+            run.empty_boxes.push(i as u32);
+        }
+        let boxes = prepared_rects(&fx.frame, &rects);
+        for c in item_coverage(&fx.truth, &boxes) {
+            if c.region == Region::Banner && c.is_leak() {
+                run.leaks.push((i as u32, c.leaked_pixels, c.glyph_pixels));
+            }
+        }
+    }
+    run
 }

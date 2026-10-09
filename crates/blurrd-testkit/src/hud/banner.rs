@@ -1,10 +1,12 @@
 //! ACE / clutch banners in the top centre.
 //!
-//! Geometry in reference pixels from the port spec (section 4): a framed
-//! box with a large title, bright corner ticks at rows 280..288 (x 698..716
-//! and 1204..1222), and under it a grey plate at y 299..328 whose player
-//! name (12 px capitals, baseline 319) slides in from the right, slowing
-//! from about 50 px per frame, and settles centred on x 960.
+//! Geometry in reference pixels, measured on 25 recorded banners (port
+//! spec section 4): a framed box with a large title, bright corner ticks at
+//! rows 280..285 (x 704..717 and 1204..1217), and under it a light grey
+//! plate at y 298..328 whose player name (11 px capitals, baseline 318)
+//! appears about 23 frames after the box, slides in from the right
+//! (first seen about 220 px right of its place, slowing from about 45 px
+//! per frame) and settles centred on x 960 ten frames later.
 
 use blurrd_core::{NameKind, RectI, Region};
 
@@ -15,18 +17,18 @@ use crate::palette::TEXT_WHITE;
 use crate::truth::{ContentKind, ItemId};
 
 /// Capital height of the banner name.
-pub const NAME_CAP: f32 = 12.0;
+pub const NAME_CAP: f32 = 11.0;
 /// Baseline of the banner name.
-pub const NAME_BASELINE: f32 = 319.0;
+pub const NAME_BASELINE: f32 = 318.0;
 /// The plate under the banner box.
 pub const PLATE: RectI = RectI {
     x0: 725,
-    y0: 299,
+    y0: 298,
     x1: 1195,
     y1: 328,
 };
 /// Frames the box takes to appear before the name starts sliding.
-const INTRO: u32 = 4;
+const INTRO: u32 = 23;
 /// Item id of the banner name.
 const ID: u32 = 2000;
 
@@ -50,15 +52,16 @@ pub struct BannerSpec {
 }
 
 impl BannerSpec {
-    /// A banner with the measured animation: a 400 px slide over 16 frames
-    /// (50 px in the first frame), held 2.5 s, fading over 10 frames.
+    /// A banner with the measured animation: a 270 px slide over 10
+    /// frames (eased, 51 px in the first frame), held 2.5 s, fading over 10
+    /// frames.
     pub fn new(title: &str, name: &str, start: u32) -> Self {
         Self {
             title: title.to_owned(),
             name: name.to_owned(),
             start,
-            slide_frames: 16,
-            slide_px: 400.0,
+            slide_frames: 10,
+            slide_px: 270.0,
             hold: 150,
             fade: 10,
         }
@@ -141,18 +144,11 @@ impl Banner {
         ] {
             p.fill(edge, a, [230, 230, 230], 0.7 * alpha);
         }
-        for x0 in [698, 1204] {
+        for x0 in [704, 1204] {
             p.fill(
-                rect_f(x0 as f32, 280.0, (x0 + 18) as f32, 283.0),
+                rect_f(x0 as f32, 280.0, (x0 + 13) as f32, 285.0),
                 a,
-                [252; 3],
-                alpha,
-            );
-            let vx = if x0 < 960 { x0 } else { x0 + 15 };
-            p.fill(
-                rect_f(vx as f32, 280.0, (vx + 3) as f32, 288.0),
-                a,
-                [252; 3],
+                [250; 3],
                 alpha,
             );
         }
@@ -166,7 +162,7 @@ impl Banner {
             alpha,
             None,
         );
-        p.fill(PLATE, a, [92, 92, 98], 0.55 * alpha);
+        p.fill(PLATE, a, [190, 190, 196], 0.6 * alpha);
         if t < INTRO {
             return;
         }
@@ -210,10 +206,10 @@ mod tests {
     #[test]
     fn timeline_is_consistent() {
         let s = BannerSpec::new("ACE", "Name", 100);
-        assert_eq!(s.settle(), 120);
-        assert_eq!(s.end(), 280);
-        // First slide step is 50 px: 400 × (1 − (1 − 1/16)²).
-        let first = 400.0 - 400.0 * (15.0f32 / 16.0).powi(2);
-        assert!((first - 48.4).abs() < 0.1);
+        assert_eq!(s.settle(), 133);
+        assert_eq!(s.end(), 293);
+        // First slide step is 51 px: 270 × (1 − (1 − 1/10)²).
+        let first = 270.0 - 270.0 * (9.0f32 / 10.0).powi(2);
+        assert!((first - 51.3).abs() < 0.1);
     }
 }

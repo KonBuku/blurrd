@@ -331,8 +331,8 @@ fn banners_slide_in_and_settle_for_short_and_long_names() {
                 .first()
                 .map(|i| (*i).clone())
         };
-        assert!(at(12).is_none(), "the box appears before the name");
-        let xs: Vec<i32> = (14..=settle).map(|f| at(f).unwrap().text.x0).collect();
+        assert!(at(32).is_none(), "the box appears before the name");
+        let xs: Vec<i32> = (33..=settle).map(|f| at(f).unwrap().text.x0).collect();
         assert!(xs.windows(2).all(|w| w[1] <= w[0]), "moves left: {xs:?}");
         assert!(xs[0] - xs[1] >= 30, "fast start");
         let settled = at(settle + 20).unwrap();
