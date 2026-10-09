@@ -13,6 +13,8 @@
 //! - [`BannerDetector`] and [`BannerTracker`] ([`banner`]): the player
 //!   name under an ACE or clutch banner, per frame and over the banner's
 //!   episode (settle model).
+//! - [`VoiceDetector`] ([`voice`]): speaker names in the voice-chat entries
+//!   of one frame.
 //!
 //! Temporal models ([`temporal`]):
 //!
@@ -50,6 +52,7 @@ pub mod killfeed;
 pub mod morph;
 pub mod temporal;
 pub mod track;
+pub mod voice;
 
 pub use banner::{BannerDetector, BannerTracker};
 pub use classes::{Class, ClassParams, PixelClasses, hsv};
@@ -57,3 +60,4 @@ pub use detection::{DetectError, Detection};
 pub use image::{BitMask, GrayImage, ImageError, RgbView};
 pub use killfeed::KillFeedDetector;
 pub use temporal::killfeed::KillFeedTracker;
+pub use voice::VoiceDetector;

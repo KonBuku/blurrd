@@ -188,6 +188,15 @@ impl Filter {
         RgbFrame::from_raw(frame.width(), frame.height(), data).unwrap()
     }
 
+    /// A copy of a frame with every pixel filtered.
+    pub(crate) fn whole_frame(self, frame: &RgbFrame) -> RgbFrame {
+        let mut data = frame.data().to_vec();
+        for pixel in data.as_chunks_mut::<3>().0 {
+            *pixel = self.apply(*pixel);
+        }
+        RgbFrame::from_raw(frame.width(), frame.height(), data).unwrap()
+    }
+
     /// The fixture with its frame filtered (the truth does not change).
     pub(crate) fn fixture(self, fx: &Fixture) -> Fixture {
         Fixture {

@@ -28,5 +28,9 @@ harness = false
 name = "killfeed"
 harness = false
 
+[[bench]]
+name = "voice"
+harness = false
+
 [lints]
 workspace = true
