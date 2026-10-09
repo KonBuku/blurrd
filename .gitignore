@@ -35,6 +35,7 @@ bench-baselines/
 third_party/ffmpeg/
 third_party/ffmpeg.partial/
 third_party/ort/
+third_party/ort.partial/
 /tests/fonts/noto/
 
 # Secrets and signing material

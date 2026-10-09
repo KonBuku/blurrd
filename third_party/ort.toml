@@ -1,0 +1,39 @@
+# The ONNX Runtime build blurrd runs OCR with: the official DirectML build
+# of ONNX Runtime and the DirectML redistributable it depends on, both from
+# nuget.org. `cargo xtask fetch-ort` downloads each package, checks its
+# SHA-256 and copies the listed files into third_party/ort/ (gitignored).
+# blurrd-ocr loads onnxruntime.dll at run time (ort `load-dynamic`), so
+# blurrd starts and renders without it. See docs/development.md ("ONNX
+# Runtime and OCR models").
+#
+# Microsoft.ML.OnnxRuntime.DirectML 1.24.4 is the last ONNX Runtime release
+# published with the DirectML execution provider (DirectML is in
+# maintenance mode). Its C API level is 24, so blurrd-ocr enables the
+# `api-24` feature of the ort crate; `api` below must stay equal to it.
+# Its build information reports the source commit 2d924974ef (the commit in
+# the package's nuspec); blurrd-ocr reports that commit.
+
+version = "1.24.4"
+api = 24
+
+[[package]]
+id = "Microsoft.ML.OnnxRuntime.DirectML"
+version = "1.24.4"
+sha256 = "57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681"
+license = "MIT"
+files = [
+  { from = "runtimes/win-x64/native/onnxruntime.dll", to = "onnxruntime.dll" },
+  { from = "LICENSE", to = "licenses/onnxruntime-LICENSE.txt" },
+  { from = "ThirdPartyNotices.txt", to = "licenses/onnxruntime-ThirdPartyNotices.txt" },
+]
+
+[[package]]
+id = "Microsoft.AI.DirectML"
+version = "1.15.4"
+sha256 = "4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9"
+license = "Microsoft DirectML redistributable license (LICENSE.txt)"
+files = [
+  { from = "bin/x64-win/DirectML.dll", to = "DirectML.dll" },
+  { from = "LICENSE.txt", to = "licenses/DirectML-LICENSE.txt" },
+  { from = "ThirdPartyNotices.txt", to = "licenses/DirectML-ThirdPartyNotices.txt" },
+]

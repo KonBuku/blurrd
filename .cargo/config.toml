@@ -11,3 +11,8 @@ TS_RS_LARGE_INT = "number"
 # FFmpeg headers and import libraries for ffmpeg-sys-the-third, installed by
 # `cargo xtask fetch-ffmpeg` from the build pinned in third_party/ffmpeg.toml.
 FFMPEG_DIR = { value = "third_party/ffmpeg", relative = true }
+# ONNX Runtime and the OCR models for tests and development runs, installed
+# by `cargo xtask fetch-ort` and `cargo xtask fetch-models`. blurrd-ocr loads
+# ONNX Runtime from an explicit path at run time (`load-dynamic`).
+ORT_DYLIB_PATH = { value = "third_party/ort/onnxruntime.dll", relative = true }
+BLURRD_MODEL_DIR = { value = "models", relative = true }

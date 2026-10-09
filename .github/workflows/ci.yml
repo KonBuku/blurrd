@@ -125,6 +125,20 @@ jobs:
         # Noto fonts for the multi-script synthetic HUD fixtures, pinned by
         # SHA-256 in tests/fonts/fonts.toml.
         run: cargo xtask fetch-fonts
+      - name: onnx runtime and ocr models cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/ort
+            models
+          key: ocr-${{ hashFiles('third_party/ort.toml', 'models.toml') }}
+      - name: onnx runtime and ocr models
+        # The DirectML build of ONNX Runtime from nuget.org and the bundled
+        # OCR models, pinned by SHA-256 in third_party/ort.toml and
+        # models.toml.
+        run: |
+          cargo xtask fetch-ort
+          cargo xtask fetch-models
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: tests

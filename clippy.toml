@@ -17,4 +17,5 @@ doc-valid-idents = [
   "TensorRT",
   "QuickTime",
   "OpenCV",
+  "NuGet",
 ]

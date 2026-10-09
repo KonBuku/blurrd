@@ -66,10 +66,7 @@ impl Pin {
             ("source_sha256", &pin.source_sha256),
         ] {
             ensure!(
-                value.len() == 64
-                    && value
-                        .bytes()
-                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+                is_sha256_hex(value),
                 "`{field}` must be 64 lowercase hex digits"
             );
         }
@@ -269,6 +266,15 @@ fn curl_to_memory(url: &str, token: &str) -> Result<Vec<u8>> {
     run_curl(cmd, Some(token), url).map(|output| output.stdout)
 }
 
+/// Whether `value` is a SHA-256 written as 64 lowercase hex digits, the
+/// form every pin file uses.
+pub(crate) fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 /// Lowercase hex SHA-256 of a file.
 pub(crate) fn sha256_file(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
@@ -283,12 +289,17 @@ pub(crate) fn sha256_file(path: &Path) -> Result<String> {
         }
         hasher.update(&buffer[..read]);
     }
-    let mut hex = String::with_capacity(64);
-    for byte in hasher.finalize() {
+    Ok(to_hex(&hasher.finalize()))
+}
+
+/// Lowercase hex digits of `bytes`.
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
+    let mut hex = String::with_capacity(2 * bytes.len());
+    for byte in bytes {
         // Writing into a String cannot fail.
         let _ = write!(hex, "{byte:02x}");
     }
-    Ok(hex)
+    hex
 }
 
 /// Unpacks the archive's single top-level folder into `dest`, replacing it.
@@ -338,34 +349,33 @@ fn unpack(archive: &Path, dest: &Path) -> Result<()> {
 }
 
 /// Cargo's target directory (`CARGO_TARGET_DIR` or `<root>/target`).
-fn target_dir(root: &Path) -> PathBuf {
+pub(crate) fn target_dir(root: &Path) -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from)
 }
 
-/// Copies the FFmpeg DLLs next to the binaries of every build profile.
+/// Copies the FFmpeg DLLs, and the ONNX Runtime DLLs when they are
+/// installed, next to the binaries of every build profile.
 ///
 /// Windows looks for import-linked DLLs in the folder of the executable, so
 /// they go into `target/<profile>/` (CLI, app) and `target/<profile>/deps/`
 /// (test binaries) for `debug`, `release` and any other profile folder that
-/// exists. Unchanged files are skipped.
+/// exists. ONNX Runtime is loaded at run time, from an explicit path in
+/// development; staging it keeps the folder layout of the installed app.
+/// Unchanged files are skipped.
 pub(crate) fn stage_dlls(root: &Path) -> Result<()> {
     let bin = root.join("third_party").join("ffmpeg").join("bin");
-    let mut dlls = Vec::new();
-    for entry in fs::read_dir(&bin).with_context(|| {
+    let mut dlls = dlls_in(&bin).with_context(|| {
         format!(
             "reading {} (run `cargo xtask fetch-ffmpeg` first)",
             bin.display()
         )
-    })? {
-        let path = entry?.path();
-        if path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"))
-        {
-            dlls.push(path);
-        }
-    }
+    })?;
     ensure!(!dlls.is_empty(), "no DLLs in {}", bin.display());
+    let ffmpeg_count = dlls.len();
+    let ort = root.join("third_party").join("ort");
+    if ort.is_dir() {
+        dlls.extend(dlls_in(&ort)?);
+    }
 
     let target = target_dir(root);
     let mut profiles = vec![target.join("debug"), target.join("release")];
@@ -396,11 +406,27 @@ pub(crate) fn stage_dlls(root: &Path) -> Result<()> {
         }
     }
     eprintln!(
-        "staged {} FFmpeg DLLs into {} profile folders ({copied} copied)",
-        dlls.len(),
+        "staged {ffmpeg_count} FFmpeg and {} ONNX Runtime DLLs into {} profile \
+         folders ({copied} copied)",
+        dlls.len() - ffmpeg_count,
         profiles.len()
     );
     Ok(())
+}
+
+/// The DLLs directly inside `dir`.
+fn dlls_in(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut dlls = Vec::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"))
+        {
+            dlls.push(path);
+        }
+    }
+    Ok(dlls)
 }
 
 /// Cheap equality check: same size and the copy is not older than the source.

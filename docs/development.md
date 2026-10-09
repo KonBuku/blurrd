@@ -194,11 +194,11 @@ GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
 every pull request and on manual dispatch. All jobs must pass before a
 change is merged.
 
-| Job              | Runner  | Checks                                                                                                                                                    |
-| ---------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`           | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history                                        |
-| `rust (windows)` | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
-| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                |
+| Job              | Runner  | Checks                                                                                                                                                                                                                                               |
+| ---------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`           | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typos, gitleaks over the full history                                                                                                                                   |
+| `rust (windows)` | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
+| `deny`           | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                           |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
 (see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the
@@ -318,6 +318,35 @@ Windows loads the FFmpeg DLLs from the folder of the executable, so
 `cargo xtask stage-dlls` after `cargo clean` or after building a new
 profile; a test binary that exits with `STATUS_DLL_NOT_FOUND`
 (`0xc0000135`) is missing them.
+
+## ONNX Runtime and OCR models
+
+The OCR verification runs the PP-OCRv5 text detection and recognition
+models with [ONNX Runtime](https://onnxruntime.ai). Neither is committed;
+both are pinned by SHA-256 and installed by xtask:
+
+```sh
+cargo xtask fetch-ort                   # ONNX Runtime + DirectML into third_party/ort/
+cargo xtask fetch-models                # bundled models into models/
+cargo xtask fetch-models --candidates   # also the benchmark candidates into models/candidates/
+```
+
+`third_party/ort.toml` pins two NuGet packages from nuget.org:
+`Microsoft.ML.OnnxRuntime.DirectML` (ONNX Runtime with the DirectML
+execution provider, MIT) and `Microsoft.AI.DirectML` (the DirectML
+redistributable). `fetch-ort` verifies each package, copies
+`onnxruntime.dll`, `DirectML.dll` and their license and third-party notice
+files into `third_party/ort/` and stages the DLLs like `stage-dlls`. Version
+1.24.4 is the last ONNX Runtime release published with the DirectML
+execution provider; its C API level (24) is recorded as `api` in the pin
+and must match the `api-NN` feature of the `ort` crate.
+
+`models.toml` pins every model file by URL, size and SHA-256, together with
+the conversion source: the PaddleOCR inference models (Apache-2.0) as
+converted to ONNX with paddle2onnx by the RapidOCR project, at a fixed tag
+of its ModelScope repository. Files marked `bundled` ship with blurrd; the
+others are candidates for the model benchmark. A file whose size or
+checksum differs from the pin is rejected and never replaces a good copy.
 
 ## Changelog and releases
 

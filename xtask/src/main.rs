@@ -3,14 +3,17 @@
 //! Run `cargo xtask <task>` from anywhere inside the repository (the alias is
 //! defined in `.cargo/config.toml`); `cargo xtask help` lists the tasks.
 //! Tasks are added by the milestones that need them: generating TypeScript
-//! bindings and JSON schemas, fetching the pinned FFmpeg build and staging
-//! its DLLs, fetching the fonts of the synthetic test fixtures and checking
-//! the local test recordings so far.
+//! bindings and JSON schemas, fetching the pinned FFmpeg and ONNX Runtime
+//! builds and staging their DLLs, fetching the OCR models and the fonts of
+//! the synthetic test fixtures and checking the local test recordings so
+//! far.
 
 mod codegen;
 mod ffmpeg;
 mod fonts;
 mod media;
+mod models;
+mod ort;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -48,9 +51,25 @@ enum Task {
         #[arg(long, value_name = "ZIP")]
         archive: Option<PathBuf>,
     },
-    /// Copy the FFmpeg DLLs next to the binaries in `target/` (every build
-    /// profile, including the test binaries in `deps/`).
+    /// Copy the FFmpeg DLLs (and the ONNX Runtime DLLs, once fetched) next
+    /// to the binaries in `target/` (every build profile, including the test
+    /// binaries in `deps/`).
     StageDlls,
+    /// Install the ONNX Runtime build pinned in `third_party/ort.toml`
+    /// (DirectML build and the DirectML redistributable from nuget.org)
+    /// into `third_party/ort/`, verifying each package's SHA-256.
+    ///
+    /// Also stages the DLLs when FFmpeg is installed. Does nothing else
+    /// when the pinned files are already installed.
+    FetchOrt,
+    /// Download the OCR models pinned in `models.toml` into `models/`,
+    /// verifying each file's size and SHA-256.
+    FetchModels {
+        /// Also fetch the benchmark candidates (not bundled) into
+        /// `models/candidates/`.
+        #[arg(long)]
+        candidates: bool,
+    },
     /// Download the fonts pinned in `tests/fonts/fonts.toml` (names in
     /// other scripts for the synthetic HUD fixtures) into
     /// `tests/fonts/noto/`, verifying each SHA-256.
@@ -84,6 +103,14 @@ fn main() -> ExitCode {
             ffmpeg::fetch(&root, &source)
         }
         Task::StageDlls => ffmpeg::stage_dlls(&root),
+        Task::FetchOrt => ort::fetch(&root).and_then(|()| {
+            if root.join("third_party").join("ffmpeg").join("bin").is_dir() {
+                ffmpeg::stage_dlls(&root)
+            } else {
+                Ok(())
+            }
+        }),
+        Task::FetchModels { candidates } => models::fetch(&root, candidates),
         Task::FetchFonts => fonts::fetch(&root),
         Task::Media {
             action: MediaAction::Verify { media },

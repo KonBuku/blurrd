@@ -12,7 +12,7 @@ use std::path::Path;
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-use crate::ffmpeg::{curl, sha256_file};
+use crate::ffmpeg::{curl, is_sha256_hex, sha256_file};
 
 /// The pin file `tests/fonts/fonts.toml`.
 #[derive(Debug, Deserialize)]
@@ -45,11 +45,7 @@ impl Pins {
         );
         for pin in &pins.font {
             ensure!(
-                pin.sha256.len() == 64
-                    && pin
-                        .sha256
-                        .bytes()
-                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+                is_sha256_hex(&pin.sha256),
                 "`sha256` of {} must be 64 lowercase hex digits",
                 pin.file
             );

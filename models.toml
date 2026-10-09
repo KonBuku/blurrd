@@ -1,0 +1,201 @@
+# OCR models of blurrd's verification. They are not committed: `cargo
+# xtask fetch-models` downloads every bundled file into models/
+# (gitignored) and checks its size and SHA-256; `--candidates` also fetches
+# the benchmark candidates into models/candidates/. The installer and the
+# CLI archive bundle the files marked `bundled`; blurrd never downloads
+# anything at run time. blurrd-ocr pins the same SHA-256 values and checks
+# them before the first OCR run. See docs/development.md ("ONNX Runtime and
+# OCR models").
+#
+# Choice (benchmark in M16, `cargo nextest run -p blurrd-ocr --release
+# --run-ignored all bench_`): PP-OCRv5 mobile stays bundled. On synthetic
+# HUD names (capitals 11 px) it reads Latin names as well as PP-OCRv6
+# small (97-100 % exact per length), Vietnamese names far better (90 %
+# against 7 %) and finds more names in a kill-feed-sized zone (97.3 %
+# against 86.9 %). Names in scripts the bundled model does not read are
+# reported as unverifiable.
+#
+# Exact reads per script on tight crops (120 names each, DirectML):
+#
+#   recogniser       Cyrl Hangul HangulCommon Japanese Kana Thai Arab Deva
+#   v5 mobile (bndl)   0     0         0         42     92    0    0    0
+#   v6 small           0     0         0         38     89    0    0    0
+#   v5 latin           0     0         0          0      0    0    0    0
+#   v5 korean          0     0       100          0      0    0    0    0
+#   v5 cyrillic       99     0         0          0      0    0    0    0
+#   v5 arabic          0     0         0          0      0    0   82    0
+#   v5 thai            0     0         0          0      0   25    0    0
+#   v5 devanagari      0     0         0          0      0    0    0   17
+#
+# "Hangul" and "Japanese" draw uniformly from every precomposed syllable
+# and from rare kanji; recognisers trained on real text read such
+# out-of-vocabulary characters as a similar frequent one (the Korean
+# model reads U+C50F as U+C313), so "HangulCommon" (frequent name
+# syllables) and "Kana" measure real names. Thai, Arabic and Devanagari
+# are drawn without text shaping, so their rates are lower bounds. Every
+# per-script recogniser reads its own script and Latin only and would
+# need a script router (backlog); until then Korean names, kanji names and
+# every script other than Latin, Vietnamese and kana are unverifiable.
+
+# All `path` values are relative to this URL (the tag of [conversion]).
+base_url = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0"
+
+# Every file below comes from one conversion: the PaddleOCR 3 inference
+# models (PaddlePaddle, Apache-2.0) converted to ONNX with paddle2onnx by
+# the RapidOCR project and published in its ModelScope repository at a
+# fixed tag.
+[conversion]
+by = "RapidAI (RapidOCR project)"
+repository = "https://www.modelscope.cn/models/RapidAI/RapidOCR"
+revision = "v3.10.0"
+tool = "paddle2onnx"
+license = "Apache-2.0"
+upstream = "PaddleOCR 3 PP-OCRv5 and PP-OCRv6 inference models by PaddlePaddle, Apache-2.0"
+
+# --- Bundled -------------------------------------------------------------
+
+[[model]]
+file = "ch_PP-OCRv5_det_mobile.onnx"
+role = "det"
+bundled = true
+path = "onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx"
+size = 4819576
+sha256 = "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae"
+
+[[model]]
+file = "ch_PP-OCRv5_rec_mobile.onnx"
+role = "rec"
+bundled = true
+path = "onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile.onnx"
+size = 16631306
+sha256 = "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5"
+
+[[model]]
+file = "ppocrv5_dict.txt"
+role = "dict"
+bundled = true
+path = "paddle/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile/ppocrv5_dict.txt"
+size = 74012
+sha256 = "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b"
+
+# --- Benchmark candidates (not bundled) ----------------------------------
+
+[[model]]
+file = "PP-OCRv6_det_small.onnx"
+role = "det"
+bundled = false
+path = "onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx"
+size = 9929594
+sha256 = "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f"
+
+[[model]]
+file = "PP-OCRv6_rec_small.onnx"
+role = "rec"
+bundled = false
+path = "onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx"
+size = 21234383
+sha256 = "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884"
+
+[[model]]
+file = "ppocrv6_dict.txt"
+role = "dict"
+bundled = false
+path = "paddle/PP-OCRv6/rec/PP-OCRv6_rec_small/ppocrv6_dict.txt"
+size = 74947
+sha256 = "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d"
+
+[[model]]
+file = "latin_PP-OCRv5_rec_mobile.onnx"
+role = "rec"
+bundled = false
+path = "onnx/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile.onnx"
+size = 7904513
+sha256 = "b20bd37c168a570f583afbc8cd7925603890efbcdc000a59e22c269d160b5f5a"
+
+[[model]]
+file = "ppocrv5_latin_dict.txt"
+role = "dict"
+bundled = false
+path = "paddle/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile/ppocrv5_latin_dict.txt"
+size = 1634
+sha256 = "3c0a8a79b612653c25f765271714f71281e4e955962c153e272b7b8c1d2b13ff"
+
+[[model]]
+file = "korean_PP-OCRv5_rec_mobile.onnx"
+role = "rec"
+bundled = false
+path = "onnx/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile.onnx"
+size = 13488748
+sha256 = "cd6e2ea50f6943ca7271eb8c56a877a5a90720b7047fe9c41a2e541a25773c9b"
+
+[[model]]
+file = "ppocrv5_korean_dict.txt"
+role = "dict"
+bundled = false
+path = "paddle/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile/ppocrv5_korean_dict.txt"
+size = 47451
+sha256 = "a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7"
+
+[[model]]
+file = "cyrillic_PP-OCRv5_rec_mobile.onnx"
+role = "rec"
+bundled = false
+path = "onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx"
+size = 8074092
+sha256 = "90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711"
+
+[[model]]
+file = "ppocrv5_cyrillic_dict.txt"
+role = "dict"
+bundled = false
+path = "paddle/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile/ppocrv5_cyrillic_dict.txt"
+size = 2781
+sha256 = "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba"
+
+[[model]]
+file = "arabic_PP-OCRv5_rec_mobile.onnx"
+role = "rec"
+bundled = false
+path = "onnx/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile.onnx"
+size = 8023828
+sha256 = "c1192e632d0baa9146ae5b756a0e635e3dc63c1733737ebfd1629e87144e9295"
+
+[[model]]
+file = "ppocrv5_arabic_dict.txt"
+role = "dict"
+bundled = false
+path = "paddle/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile/ppocrv5_arabic_dict.txt"
+size = 2369
+sha256 = "7f92f7dbb9b75a4787a83bfb4f6d14a8ab515525130c9d40a9036f61cf6999e9"
+
+[[model]]
+file = "th_PP-OCRv5_rec_mobile.onnx"
+role = "rec"
+bundled = false
+path = "onnx/PP-OCRv5/rec/th_PP-OCRv5_rec_mobile.onnx"
+size = 7915294
+sha256 = "de541dd83161c241ff426f7ecfd602a0ba77d686cf3ab9a6c255ea82fd08006e"
+
+[[model]]
+file = "ppocrv5_th_dict.txt"
+role = "dict"
+bundled = false
+path = "paddle/PP-OCRv5/rec/th_PP-OCRv5_rec_mobile/ppocrv5_th_dict.txt"
+size = 1767
+sha256 = "57f5406f94bb6688fb7077f7be65f08bbd71cecf48c01ea26c522cb5c4836b7a"
+
+[[model]]
+file = "devanagari_PP-OCRv5_rec_mobile.onnx"
+role = "rec"
+bundled = false
+path = "onnx/PP-OCRv5/rec/devanagari_PP-OCRv5_rec_mobile.onnx"
+size = 7940361
+sha256 = "d6f0a906580e3fa6b324a318718f1f31f268b6ea8ef985f91c2012a37f52c91e"
+
+[[model]]
+file = "ppocrv5_devanagari_dict.txt"
+role = "dict"
+bundled = false
+path = "paddle/PP-OCRv5/rec/devanagari_PP-OCRv5_rec_mobile/ppocrv5_devanagari_dict.txt"
+size = 1943
+sha256 = "09c7440bfc5477e5c41052304b6b185aff8c4a5e8b2b4c23c1c706f6fe1ee9fc"
