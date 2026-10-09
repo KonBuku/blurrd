@@ -58,6 +58,14 @@ pub enum ContentKind {
     BannerTitle,
     /// A HUD notification without a player name ("X ULT READY").
     Notification,
+    /// Fixed text of a screen surface: column titles, panel headers,
+    /// agent names, labels such as "SPECTATING".
+    ScreenText,
+    /// A number on a screen surface (kills, credits, damage, ping).
+    Stat,
+    /// A name tag above a player's head in the game world. Out of scope
+    /// (decision D8): it must never be blurred.
+    WorldTag,
 }
 
 /// A rectangle of non-name content.

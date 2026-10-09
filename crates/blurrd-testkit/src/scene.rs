@@ -7,7 +7,12 @@ use crate::font::FontSet;
 use crate::hud::banner::{Banner, BannerSpec, UltReady, UltReadySpec};
 use crate::hud::chat::{Chat, ChatSpec};
 use crate::hud::killfeed::{KillFeed, KillFeedSpec};
+use crate::hud::match_end::{MatchEnd, MatchEndSpec};
+use crate::hud::recap::{Recap, RecapSpec};
+use crate::hud::scoreboard::{Scoreboard, ScoreboardSpec};
+use crate::hud::spectating::{Spectating, SpectatingSpec};
 use crate::hud::voice::{Voice, VoiceSpec};
+use crate::hud::world_tag::{WorldTag, WorldTags};
 use crate::image::RgbFrame;
 use crate::layout::Layout;
 use crate::paint::Painter;
@@ -53,6 +58,11 @@ pub struct Scene {
     ult_ready: Option<UltReady>,
     voice: Option<Voice>,
     chat: Option<Chat>,
+    scoreboards: Vec<Scoreboard>,
+    recaps: Vec<Recap>,
+    spectating: Vec<Spectating>,
+    match_ends: Vec<MatchEnd>,
+    world_tags: Option<WorldTags>,
     flashes: Vec<Flash>,
 }
 
@@ -69,6 +79,11 @@ impl Scene {
             ult_ready: None,
             voice: None,
             chat: None,
+            scoreboards: Vec::new(),
+            recaps: Vec::new(),
+            spectating: Vec::new(),
+            match_ends: Vec::new(),
+            world_tags: None,
             flashes: Vec::new(),
         }
     }
@@ -118,6 +133,45 @@ impl Scene {
         self
     }
 
+    /// Adds a scoreboard (several can be added for separate openings).
+    #[must_use]
+    pub fn with_scoreboard(mut self, fonts: &FontSet, spec: ScoreboardSpec) -> Self {
+        self.scoreboards
+            .push(Scoreboard::new(fonts, &self.layout, spec));
+        self
+    }
+
+    /// Adds a death recap.
+    #[must_use]
+    pub fn with_recap(mut self, fonts: &FontSet, spec: RecapSpec) -> Self {
+        self.recaps.push(Recap::new(fonts, &self.layout, spec));
+        self
+    }
+
+    /// Adds a "Spectating" banner.
+    #[must_use]
+    pub fn with_spectating(mut self, fonts: &FontSet, spec: SpectatingSpec) -> Self {
+        self.spectating
+            .push(Spectating::new(fonts, &self.layout, spec));
+        self
+    }
+
+    /// Adds a match-end, MVP or round-end screen.
+    #[must_use]
+    pub fn with_match_end(mut self, fonts: &FontSet, spec: MatchEndSpec) -> Self {
+        self.match_ends
+            .push(MatchEnd::new(fonts, &self.layout, spec));
+        self
+    }
+
+    /// Adds name tags above players' heads (out of scope; decoys that must
+    /// never be blurred).
+    #[must_use]
+    pub fn with_world_tags(mut self, fonts: &FontSet, tags: Vec<WorldTag>) -> Self {
+        self.world_tags = Some(WorldTags::new(fonts, &self.layout, tags));
+        self
+    }
+
     /// Adds a flash.
     #[must_use]
     pub fn with_flash(mut self, flash: Flash) -> Self {
@@ -140,6 +194,9 @@ impl Scene {
                 layout: &self.layout,
                 truth: &mut truth,
             };
+            if let Some(tags) = &self.world_tags {
+                tags.paint(&mut p, index);
+            }
             if let Some(feed) = &self.kill_feed {
                 feed.paint(&mut p, &self.palette, index);
             }
@@ -154,6 +211,18 @@ impl Scene {
             }
             if let Some(chat) = &self.chat {
                 chat.paint(&mut p, &self.palette, index);
+            }
+            for screen in &self.spectating {
+                screen.paint(&mut p, index);
+            }
+            for screen in &self.recaps {
+                screen.paint(&mut p, &self.palette, index);
+            }
+            for screen in &self.scoreboards {
+                screen.paint(&mut p, &self.palette, index);
+            }
+            for screen in &self.match_ends {
+                screen.paint(&mut p, &self.palette, index);
             }
         }
         for flash in &self.flashes {
