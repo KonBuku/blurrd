@@ -105,3 +105,20 @@ export function mediaSummary(
     formatBytes(media.size),
   ].join(" · ");
 }
+
+/**
+ * The meta line of the preview header: size, frame rate, duration, codecs
+ * ("1920×1080 · 60 fps · 2:31 · HEVC · AAC").
+ */
+export function previewSummary(
+  media: Pick<MediaInfo, "width" | "height" | "fps" | "duration_s" | "video_codec" | "audio">,
+): string {
+  const audio = media.audio[0];
+  return [
+    `${media.width}×${media.height}`,
+    `${formatFps(media.fps)} fps`,
+    formatDuration(media.duration_s),
+    codecName(media.video_codec),
+    ...(audio ? [codecName(audio.codec)] : []),
+  ].join(" · ");
+}

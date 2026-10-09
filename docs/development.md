@@ -337,6 +337,69 @@ probe takes `capabilitiesDelayMs` (800 ms; session storage
 the saved queue in session storage (`sessionFile()`), so a reload behaves
 like a restart.
 
+### Preview
+
+Selecting a recording in the queue opens its project (`open_project`) and
+shows it in the preview frame (`src/features/preview`). The `<video>`
+element plays the source; a WebGL 2 canvas on top of it
+(`gl/blur-renderer.ts`) takes every presented frame
+(`requestVideoFrameCallback`, and `seeked` while paused), looks up its
+boxes in `src/lib/interval-index.ts` (the per-frame boxes of the export,
+built from `get_tracks`: track boxes with the bound Suppress/Adjust edits,
+then the Add edits; Manual boxes ignore the region switches) and blurs
+them with the steps of `CpuBlur`: block means with the per-block noise,
+bilinear upsample and a separable gaussian with a replicated border, hard
+blocks or a solid fill, mixed in through the rounded-rectangle mask, boxes
+composited in order. `src/lib/blur-geometry.ts` ports `PixelParams`,
+`prepare_boxes`, the block grid, the taps, the kernel and the noise with
+32-bit float rounding; its unit tests compare against values printed by
+the Rust crate. Because the browser hands out RGB frames, luma is blurred
+at full resolution and chroma (B−Y, R−Y) on its own half-resolution grid,
+mixed with the max-pooled chroma mask like the 4:2:0 export. Before, After
+and Split (a draggable, keyboard-operable divider) are drawn by the same
+canvas. The canvas, the video element and the box overlay share one box
+on the stage (`src/lib/stage.ts`): Fit or 25–400 %, Ctrl+wheel zooms
+around the pointer, the wheel and a drag pan when the frame is larger
+than the stage. Without WebGL 2 the video shows unblurred and the header
+says so.
+
+When WebView2 cannot decode the source (HEVC without the HEVC Video
+Extensions, AV1 without a decoder), the stage plays the H.264 proxy from
+the analysis instead (`source.ts`: a codec check before loading and a
+fallback on a load or decode error); the canvas still renders at source
+size, so boxes and frame numbers stay in source pixels. Without a proxy
+the stage explains how to get one. "Exact" (header) asks the backend for
+its own blur of the HUD regions around a paused frame
+(`blurrd://exact/<project>/<frame>.json` and the JPEG patches,
+`src/ipc/media.ts`) and draws those patches over the WebGL result.
+
+Preview blur parity: `e2e/blur-parity.spec.ts` blurs reference frames
+with the WebGL renderer and compares them with the frames `CpuBlur`
+produced. Write the reference frames first (synthetic frames; `--i420`
+adds a raw `yuv420p` frame of your own footage for a local check):
+
+```sh
+cargo run -p blurrd-blur --example reference_frames   # writes target/blur-reference
+pnpm --filter @blurrd/desktop e2e blur-parity
+```
+
+Tolerance, 8-bit RGB per channel over the padded boxes: mean ≤ 0.5,
+99th percentile ≤ 2, maximum ≤ 16 (the maximum occurs only where the YUV
+result lies outside the RGB gamut and the browser's RGB input was already
+clipped); pixels outside the boxes are identical. The test skips without
+reference frames unless `BLURRD_REQUIRE_BLUR_REFERENCE` is set (CI).
+
+The mock backend plays synthetic fixture videos for every opened file
+(`src/ipc/mock/fixture-media.ts`): name plates that appear and slide like
+kill-feed rows, a banner and a chat line, an alignment target and the
+frame's own index as a row of black and white squares, so tests can read
+which frame is on the canvas. `scripts/make-fixture-media.mjs` encodes
+them with FFmpeg (libvpx-vp9 and libx265) into `e2e/fixtures/media`
+(ignored by git) before the end-to-end tests run; run `pnpm fixtures`
+inside `apps/desktop` before `pnpm dev:mock`. Paths containing "hevc"
+open the HEVC fixture with a VP9 proxy, paths containing "fresh" are not
+analysed yet. Without FFmpeg the preview tests skip locally and fail in CI.
+
 ### Design tokens and typography
 
 `src/styles/globals.css` defines every colour, text size and easing of the
@@ -388,14 +451,14 @@ GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
 every pull request and on manual dispatch. All jobs must pass before a
 change is merged; the installer job runs only after a merge.
 
-| Job                     | Runner  | Checks                                                                                                                                                                                                                                               |
-| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`                  | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typography check, typos, gitleaks over the full history                                                                                                                 |
-| `frontend`              | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, Playwright end-to-end tests in Chromium against the mock backend (report uploaded on failure)                                                                                                 |
-| `screenshots (windows)` | Windows | Playwright screenshot comparison of the component gallery, the window shell and the floating layers in both themes (report uploaded on failure)                                                                                                      |
-| `rust (windows)`        | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests |
-| `deny`                  | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                           |
-| `bundle (windows)`      | Windows | pushes to `main` and manual runs only, after `frontend`, `screenshots (windows)` and `rust (windows)`: `pnpm build` (release app + NSIS installer), uploaded as the `blurrd-windows-<sha>` artifact for 14 days                                      |
+| Job                     | Runner  | Checks                                                                                                                                                                                                                                                                 |
+| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`                  | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typography check, typos, gitleaks over the full history                                                                                                                                   |
+| `frontend`              | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, blur reference frames (`cargo run -p blurrd-blur --example reference_frames`), Playwright end-to-end tests in Chromium against the mock backend with FFmpeg-encoded fixture videos (report uploaded on failure) |
+| `screenshots (windows)` | Windows | Playwright screenshot comparison of the component gallery, the window shell and the floating layers in both themes (report uploaded on failure)                                                                                                                        |
+| `rust (windows)`        | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests                   |
+| `deny`                  | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                                             |
+| `bundle (windows)`      | Windows | pushes to `main` and manual runs only, after `frontend`, `screenshots (windows)` and `rust (windows)`: `pnpm build` (release app + NSIS installer), uploaded as the `blurrd-windows-<sha>` artifact for 14 days                                                        |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
 (see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the

@@ -18,3 +18,5 @@ matchend = "matchend"
 ist = "ist"
 # VALORANT agent name in the OCR whitelist (crates/blurrd-ocr).
 yoru = "yoru"
+# The HTMLMediaElement event fired after a seek (apps/desktop preview).
+seeked = "seeked"

@@ -10,6 +10,8 @@ const ci = Boolean(process.env.CI);
  */
 export default defineConfig({
   testDir: "e2e",
+  // Encodes the synthetic fixture videos of the preview tests.
+  globalSetup: "./e2e/global-setup.ts",
   forbidOnly: ci,
   retries: ci ? 1 : 0,
   reporter: ci ? [["github"], ["html", { open: "never" }]] : "list",

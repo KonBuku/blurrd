@@ -10,6 +10,7 @@ import {
   looksLikeFile,
   mediaSummary,
   pathKey,
+  previewSummary,
 } from "./media";
 
 describe("paths", () => {
@@ -70,5 +71,18 @@ describe("media facts", () => {
         size: 412 * 1024 * 1024,
       }),
     ).toBe("1080p60 · 2:31 · HEVC · 412 MB");
+  });
+
+  it("builds the preview meta line", () => {
+    const audio = [
+      { index: 1, codec: "aac", channels: 2, sample_rate: 48000, bitrate: null, language: null },
+    ];
+    const media = { width: 1920, height: 1080, fps: [60, 1] as [number, number], duration_s: 151 };
+    expect(previewSummary({ ...media, video_codec: "hevc", audio })).toBe(
+      "1920×1080 · 60 fps · 2:31 · HEVC · AAC",
+    );
+    expect(previewSummary({ ...media, video_codec: "h264", audio: [] })).toBe(
+      "1920×1080 · 60 fps · 2:31 · H.264",
+    );
   });
 });

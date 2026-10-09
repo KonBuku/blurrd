@@ -87,7 +87,7 @@ jobs:
   frontend:
     name: frontend
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,8 +109,22 @@ jobs:
         # Chromium is the engine of WebView2; the end-to-end tests run the
         # frontend against the mock backend, so no Tauri shell is needed.
         run: pnpm --filter @blurrd/desktop exec playwright install --with-deps chromium
+      - name: ffmpeg
+        # Encodes the synthetic fixture videos of the preview tests
+        # (apps/desktop/scripts/make-fixture-media.mjs).
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ffmpeg
+      - name: rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: blur reference frames
+        # Frames blurred by CpuBlur; the WebGL preview must match them
+        # within the documented tolerance (e2e/blur-parity.spec.ts).
+        run: cargo run --locked -p blurrd-blur --example reference_frames
       - name: end-to-end tests
         run: pnpm --filter @blurrd/desktop e2e
+        env:
+          # Fail instead of skipping when the reference frames are missing.
+          BLURRD_REQUIRE_BLUR_REFERENCE: "1"
       - name: playwright report
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

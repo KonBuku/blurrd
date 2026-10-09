@@ -21,6 +21,7 @@ let root: ReactNode = <App />;
 if (import.meta.env.MODE === "mock") {
   const { installMockBackend } = await import("./ipc/mock");
   window.blurrdMock = installMockBackend();
+  window.blurrdBlurProbe = (await import("./features/preview/gl/blur-probe")).blurProbe;
   if (new URLSearchParams(window.location.search).has("gallery")) {
     const { Gallery } = await import("./gallery/Gallery");
     // The gallery is a long document that scrolls, unlike the app window.

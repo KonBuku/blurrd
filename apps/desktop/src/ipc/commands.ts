@@ -2,13 +2,24 @@
  * Typed wrappers of the engine commands (plan 9.1). Argument and result
  * types come from the generated bindings where they exist; types the
  * engine does not generate yet are declared here and documented in plan
- * 18.17. Every command rejects with an `AppError` (see `ipc/errors.ts`).
+ * section 18 (M23 and M24 decisions). Every command rejects with an
+ * `AppError` (see `ipc/errors.ts`).
  */
 import { invoke } from "@tauri-apps/api/core";
 
 import type { AppError } from "@/bindings/AppError";
+import type { BlurParams } from "@/bindings/BlurParams";
 import type { Capabilities } from "@/bindings/Capabilities";
+import type { DensityLanes } from "@/bindings/DensityLanes";
 import type { MediaInfo } from "@/bindings/MediaInfo";
+import type { Override } from "@/bindings/Override";
+import type { OverrideBinding } from "@/bindings/OverrideBinding";
+import type { ProjectVerify } from "@/bindings/ProjectVerify";
+import type { Rational } from "@/bindings/Rational";
+import type { Region } from "@/bindings/Region";
+import type { RegionSet } from "@/bindings/RegionSet";
+import type { Track } from "@/bindings/Track";
+import type { VerifyReport } from "@/bindings/VerifyReport";
 import type { RestingStatus } from "@/lib/queue-status";
 
 /** Result of probing one file: its media facts or why it cannot be used. */
@@ -61,4 +72,80 @@ export function getSession(): Promise<SessionEntry[]> {
 /** Replaces the saved queue. */
 export function saveSession(entries: readonly SessionEntry[]): Promise<void> {
   return invoke<void>("save_session", { entries });
+}
+
+/**
+ * An opened project as the preview needs it (`open_project`, plan 9.1).
+ * Declared here until the engine generates it (plan section 18, M24).
+ */
+export interface ProjectSummary {
+  /** Project id: the source fingerprint, used in `blurrd://` URLs. */
+  readonly id: string;
+  readonly media: MediaInfo;
+  /** URL of the source video (asset protocol or the loopback server). */
+  readonly media_url: string;
+  /** URL of the H.264 proxy made during analysis, if there is one. */
+  readonly proxy_url: string | null;
+  /** HUD scale of the video (`HudGeometry::sy`), for the blur sizes. */
+  readonly sy: number;
+  readonly blur: BlurParams;
+  /** Regions the blur applies to (Manual boxes always apply). */
+  readonly enabled: RegionSet;
+  /** Whether an analysis has produced tracks. */
+  readonly analyzed: boolean;
+  readonly verify: ProjectVerify;
+  /** Timeline thumbnails: one every `every` frames, `count` in total. */
+  readonly thumbs: { readonly every: number; readonly count: number } | null;
+}
+
+/** A span whose region detection was unhealthy (`RegionHealth` warning). */
+export interface HealthSpan {
+  readonly region: Region;
+  /** First and last frame (inclusive). */
+  readonly f0: number;
+  readonly f1: number;
+}
+
+/** Tracks, user edits and their binding state (`get_tracks`). */
+export interface TrackSet {
+  readonly revision: number;
+  readonly tracks: readonly Track[];
+  readonly overrides: readonly Override[];
+  readonly bindings: readonly OverrideBinding[];
+  /** Spans where a region fell back to its safe slot boxes. */
+  readonly health: readonly HealthSpan[];
+}
+
+/**
+ * Presentation timestamps of every decoded frame, in `time_base` units
+ * (`pts.bin`, plan 6.2); index = presentation frame index.
+ */
+export interface PtsTable {
+  readonly time_base: Rational;
+  readonly pts: readonly number[];
+}
+
+/** Opens (or creates) the project of an analysed or probed file. */
+export function openProject(path: string): Promise<ProjectSummary> {
+  return invoke<ProjectSummary>("open_project", { path });
+}
+
+/** The tracks and edits of a project. */
+export function getTracks(projectId: string): Promise<TrackSet> {
+  return invoke<TrackSet>("get_tracks", { projectId });
+}
+
+/** The presentation timestamps of a project's video. */
+export function getPts(projectId: string): Promise<PtsTable> {
+  return invoke<PtsTable>("get_pts", { projectId });
+}
+
+/** Per-region box coverage in `buckets` equal parts of the timeline. */
+export function getTimelineDensity(projectId: string, buckets: number): Promise<DensityLanes> {
+  return invoke<DensityLanes>("get_timeline_density", { projectId, buckets });
+}
+
+/** The last verification report, or `null` before the first one. */
+export function getVerifyReport(projectId: string): Promise<VerifyReport | null> {
+  return invoke<VerifyReport | null>("get_verify_report", { projectId });
 }

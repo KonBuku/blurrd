@@ -5,7 +5,7 @@
  * builds never include it: `main.tsx` imports it only in the `mock` mode.
  */
 import { emit } from "@tauri-apps/api/event";
-import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import { clearMocks, mockConvertFileSrc, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 import type { AppError } from "@/bindings/AppError";
 import type { Capabilities } from "@/bindings/Capabilities";
@@ -15,6 +15,16 @@ import { MOCK_CAPABILITIES } from "./capabilities";
 
 import { createEventBus } from "./events";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
+import {
+  frameCount,
+  mockDensity,
+  mockProject,
+  mockPts,
+  mockTracks,
+  mockVerifyReport,
+  projectId,
+} from "./project";
+import { installSchemeFetch, type SchemeRequest } from "./scheme";
 
 /** One IPC call received by the mock backend. */
 export interface MockCall {
@@ -57,6 +67,8 @@ export interface MockBackend {
   capabilitiesDelayMs: number;
   /** The saved queue as last written, or `null` before the first save. */
   readonly sessionFile: () => SessionEntry[] | null;
+  /** Every `blurrd://` request (Exact patches, thumbnails) in order. */
+  readonly schemeRequests: SchemeRequest[];
 }
 
 /** Name of the settings file, as opened by the real shell. */
@@ -131,6 +143,7 @@ export function installMockBackend(): MockBackend {
       const text = sessionStorage.getItem(SESSION_KEY);
       return text === null ? null : (JSON.parse(text) as SessionEntry[]);
     },
+    schemeRequests: [],
   };
   const installedAt = performance.now();
   const store = (cmd: string, args: StoreArgs) => {
@@ -153,6 +166,17 @@ export function installMockBackend(): MockBackend {
   const resized = () => emit("tauri://resize", backend.maximized ? MAXIMIZED_SIZE : RESTORED_SIZE);
 
   const events = createEventBus();
+
+  // Opened projects by id, for the commands that take a project id.
+  const projects = new Map<string, string>();
+  const pathOf = (args: unknown) => {
+    const id = (args as { projectId?: string }).projectId ?? "";
+    const path = projects.get(id);
+    if (path === undefined) throw error("InvalidProject", `mock backend: unknown project ${id}`);
+    return path;
+  };
+  mockConvertFileSrc("windows");
+  installSchemeFetch(backend.schemeRequests, (id) => frameCount(projects.get(id) ?? ""));
 
   mockIPC(async (cmd, args) => {
     if (events.handles(cmd)) return events.invoke(cmd, args as Parameters<typeof events.invoke>[1]);
@@ -180,6 +204,19 @@ export function installMockBackend(): MockBackend {
           : backend.capabilities;
       case "get_session":
         return backend.sessionFile() ?? [];
+      case "open_project": {
+        const { path } = args as { path: string };
+        projects.set(projectId(path), path);
+        return mockProject(path);
+      }
+      case "get_tracks":
+        return mockTracks(pathOf(args));
+      case "get_pts":
+        return mockPts(pathOf(args));
+      case "get_timeline_density":
+        return mockDensity(pathOf(args), (args as { buckets: number }).buckets);
+      case "get_verify_report":
+        return mockVerifyReport(pathOf(args));
       case "save_session":
         sessionStorage.setItem(SESSION_KEY, JSON.stringify((args as { entries: unknown }).entries));
         return null;
@@ -193,6 +230,11 @@ export function installMockBackend(): MockBackend {
     }
   });
   return backend;
+}
+
+/** An `AppError` without details. */
+function error(kind: AppError["kind"], message: string): AppError {
+  return { kind, message, detail: null };
 }
 
 /** Resolves after `ms` milliseconds (at once for 0). */

@@ -1,0 +1,49 @@
+import { create } from "zustand";
+
+import type { PreviewMode } from "@/features/preview/gl/blur-renderer";
+import type { Point, Zoom } from "@/lib/stage";
+
+/** How the preview shows the frame and where the user looks. */
+export interface PreviewState {
+  /** Before (source), After (blurred) or Split. */
+  readonly mode: PreviewMode;
+  /** Position of the split divider as a fraction of the frame width. */
+  readonly split: number;
+  /** Whether the box overlay is shown. */
+  readonly showBoxes: boolean;
+  /**
+   * Whether paused frames show the export's own blur of the HUD regions
+   * (backend patches) instead of the WebGL approximation.
+   */
+  readonly exact: boolean;
+  readonly zoom: Zoom;
+  /** Source point at the stage centre; `null` = the frame centre. */
+  readonly center: Point | null;
+  readonly setMode: (mode: PreviewMode) => void;
+  readonly setSplit: (split: number) => void;
+  readonly toggleBoxes: () => void;
+  readonly toggleExact: () => void;
+  /** Sets the zoom, and the point at the stage centre when given. */
+  readonly setZoom: (zoom: Zoom, center?: Point | null) => void;
+  readonly setCenter: (center: Point) => void;
+}
+
+/** View state of the preview stage (not persisted: every session starts at Fit). */
+export const usePreviewStore = create<PreviewState>()((set) => ({
+  mode: "after",
+  split: 0.5,
+  showBoxes: true,
+  exact: false,
+  zoom: "fit",
+  center: null,
+  setMode: (mode) => set({ mode }),
+  setSplit: (split) => set({ split: Math.min(Math.max(split, 0), 1) }),
+  toggleBoxes: () => set((state) => ({ showBoxes: !state.showBoxes })),
+  toggleExact: () => set((state) => ({ exact: !state.exact })),
+  setZoom: (zoom, center) =>
+    set((state) => ({
+      zoom,
+      center: zoom === "fit" ? null : center === undefined ? state.center : center,
+    })),
+  setCenter: (center) => set({ center }),
+}));

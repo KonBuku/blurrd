@@ -36,15 +36,24 @@ export function FrameHeader({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-/** The title of a frame header. */
-export function FrameTitle({ className, children, ...props }: ComponentProps<"h2">) {
+/**
+ * The title of a frame header: a level-two heading, or level one for the
+ * page's main subject (the previewed recording).
+ */
+export function FrameTitle({
+  className,
+  children,
+  level = 2,
+  ...props
+}: ComponentProps<"h2"> & { readonly level?: 1 | 2 }) {
+  const Heading = level === 1 ? "h1" : "h2";
   return (
-    <h2
+    <Heading
       data-slot="frame-title"
       className={cn("min-w-0 truncate text-ui-base font-medium", className)}
       {...props}
     >
       {children}
-    </h2>
+    </Heading>
   );
 }
