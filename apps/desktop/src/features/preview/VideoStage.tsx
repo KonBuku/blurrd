@@ -16,6 +16,7 @@ import { fallbackSource, initialSource, problemText, type PreviewSource } from "
 import { SplitDivider } from "./SplitDivider";
 import type { LoadedProject } from "./useProject";
 import { usePan } from "./usePan";
+import { usePreviewShortcuts } from "./usePreviewShortcuts";
 
 export interface VideoStageProps {
   readonly data: LoadedProject;
@@ -96,6 +97,7 @@ export function VideoStage({ data, children, onStatus }: VideoStageProps) {
   }, [controller]);
 
   usePan(stageElement, box, stage, media);
+  usePreviewShortcuts(data, controller, box.scale);
   // Nearest-neighbour from 200 % on, so single pixels stay square.
   const style = {
     left: box.left,

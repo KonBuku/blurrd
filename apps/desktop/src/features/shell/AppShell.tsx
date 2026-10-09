@@ -131,7 +131,7 @@ function useGlobalShortcuts() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      const match = matchShortcut(event);
+      const match = matchShortcut(event, "window");
       const ui = useUiStore.getState();
       switch (match?.id) {
         case "addFiles":
@@ -158,7 +158,8 @@ function useGlobalShortcuts() {
           if (ui.view !== "settings") return;
           ui.closeSettings();
           break;
-        case undefined:
+        default:
+          // No shortcut, or one of the preview (usePreviewShortcuts).
           return;
       }
       event.preventDefault();

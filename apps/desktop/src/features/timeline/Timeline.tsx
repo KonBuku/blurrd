@@ -2,6 +2,7 @@ import { Triangle, TriangleAlert } from "lucide-react";
 import {
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -15,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { usePlaybackStore, useControllerStore } from "@/features/preview/playback";
 import type { LoadedProject } from "@/features/preview/useProject";
 import { useElementSize } from "@/hooks/useElementSize";
-import { formatTimecode } from "@/lib/frames";
+import { formatTimecode, type FrameClock } from "@/lib/frames";
 import { formatCount } from "@/lib/media";
 import { REGIONS } from "@/lib/regions";
 import { cn } from "@/lib/utils";
@@ -65,13 +66,13 @@ export interface TimelineProps {
  * markers, the optional thumbnail strip and the playhead. Click or drag
  * scrubs frame-accurately; Ctrl+wheel zooms around the pointer, the wheel
  * pans; while playing, the view follows the playhead. The track is a
- * slider: arrows step frames, Page Up/Down one second, Home/End the ends.
+ * slider: arrows step frames, Shift+arrows and Page Up/Down one second,
+ * Home/End the ends.
  */
 export function Timeline({ data, report }: TimelineProps) {
   const { project, clock, tracks } = data;
   const count = clock.count;
   const fps = project.media.fps[1] > 0 ? project.media.fps[0] / project.media.fps[1] : 60;
-  const frame = usePlaybackStore((state) => state.target ?? state.frame);
   const controller = useControllerStore((state) => state.controller);
   const select = usePreviewStore((state) => state.select);
   const thumbsOn = useSettingsStore((state) => state.appearance.timeline_thumbs);
@@ -84,11 +85,16 @@ export function Timeline({ data, report }: TimelineProps) {
   const lanes = density.data?.lanes ?? [];
   const thumbs = thumbsOn ? project.thumbs : null;
   // The view follows the playhead whenever it leaves the visible range.
-  const view = revealFrame(base, frame, count);
+  // Only the view's start is taken from the store, so that the timeline
+  // re-renders when the view moves, not on every frame.
+  const start = usePlaybackStore(
+    (state) => revealFrame(base, state.target ?? state.frame, count).start,
+  );
+  const length = base.end - base.start;
+  const view = useMemo(() => ({ start, end: start + length }), [start, length]);
   const lanesHeight = lanes.length * (LANE + GAP);
   const verifyTop = RULER + lanesHeight;
   const height = verifyTop + VERIFY + GAP + (thumbs ? THUMBS : 0);
-  const playheadX = frameToX(frame, view, width);
   const leaks = (report?.leaks ?? []).map((leak, index) => ({ leak, index }));
 
   const seekAt = (clientX: number) => {
@@ -111,12 +117,15 @@ export function Timeline({ data, report }: TimelineProps) {
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const { frame, target } = usePlaybackStore.getState();
+    const current = target ?? frame;
     const second = Math.max(1, Math.round(fps));
+    const step = event.shiftKey ? second : 1;
     const moves: Record<string, number> = {
-      ArrowLeft: frame - 1,
-      ArrowRight: frame + 1,
-      PageUp: frame - second,
-      PageDown: frame + second,
+      ArrowLeft: current - step,
+      ArrowRight: current + step,
+      PageUp: current - second,
+      PageDown: current + second,
       Home: 0,
       End: count - 1,
     };
@@ -148,7 +157,6 @@ export function Timeline({ data, report }: TimelineProps) {
     return () => trackElement.removeEventListener("wheel", wheel);
   }, [trackElement]);
 
-  const timecode = formatTimecode(clock.startOf(frame));
   return (
     <div className="flex shrink-0 border-t border-border select-none" data-testid="timeline">
       <div className="flex w-24 shrink-0 flex-col border-r border-border pl-3 text-ui-xs text-foreground-subtle">
@@ -200,18 +208,9 @@ export function Timeline({ data, report }: TimelineProps) {
         className="relative min-w-0 flex-1"
         style={{ height }}
       >
-        <div
-          // A range input cannot span the lanes, markers and playhead.
-          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
-          role="slider"
-          tabIndex={0}
-          aria-label="Timeline"
-          aria-valuemin={0}
-          aria-valuemax={Math.max(count - 1, 0)}
-          aria-valuenow={frame}
-          aria-valuetext={`${timecode}, frame ${formatCount(frame)}`}
-          aria-describedby={`${project.id}-verify`}
-          className="absolute inset-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        <ScrubSlider
+          clock={clock}
+          describedBy={`${project.id}-verify`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerLeave={() => setHover(null)}
@@ -259,15 +258,7 @@ export function Timeline({ data, report }: TimelineProps) {
               />
             </div>
           )}
-          <div
-            className="absolute top-0 bottom-0 w-px bg-ring"
-            style={{ left: playheadX }}
-            data-testid="playhead"
-          >
-            <span className="absolute -top-px left-1 rounded-sm bg-foreground px-1 font-mono text-ui-2xs text-background tabular-nums">
-              {timecode}
-            </span>
-          </div>
+          <Playhead clock={clock} view={view} width={width} />
         </div>
         {leaks.map(({ leak, index }) => {
           const x = frameToX(leak.frame_range[0], view, width);
@@ -318,6 +309,62 @@ export function Timeline({ data, report }: TimelineProps) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+interface ScrubSliderProps {
+  readonly clock: FrameClock;
+  /** Id of the element that describes the Verify lane. */
+  readonly describedBy: string;
+  readonly onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
+  readonly onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
+  readonly onPointerLeave: () => void;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+}
+
+/**
+ * The focusable slider over the whole track that takes pointer and key
+ * input; its value (the shown frame) is the only thing it renders.
+ */
+function ScrubSlider({ clock, describedBy, ...handlers }: ScrubSliderProps) {
+  const frame = usePlaybackStore((state) => state.target ?? state.frame);
+  return (
+    <div
+      // A range input cannot span the lanes, markers and playhead.
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
+      role="slider"
+      tabIndex={0}
+      aria-label="Timeline"
+      aria-valuemin={0}
+      aria-valuemax={Math.max(clock.count - 1, 0)}
+      aria-valuenow={frame}
+      aria-valuetext={`${formatTimecode(clock.startOf(frame))}, frame ${formatCount(frame)}`}
+      aria-describedby={describedBy}
+      className="absolute inset-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      {...handlers}
+    />
+  );
+}
+
+interface PlayheadProps {
+  readonly clock: FrameClock;
+  readonly view: TimelineView;
+  readonly width: number;
+}
+
+/** The playhead with its time flag; the only part that moves every frame. */
+function Playhead({ clock, view, width }: PlayheadProps) {
+  const frame = usePlaybackStore((state) => state.target ?? state.frame);
+  return (
+    <div
+      className="absolute top-0 bottom-0 w-px bg-ring"
+      style={{ left: frameToX(frame, view, width) }}
+      data-testid="playhead"
+    >
+      <span className="absolute -top-px left-1 rounded-sm bg-foreground px-1 font-mono text-ui-2xs text-background tabular-nums">
+        {formatTimecode(clock.startOf(frame))}
+      </span>
     </div>
   );
 }

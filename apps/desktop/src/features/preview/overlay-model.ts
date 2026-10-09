@@ -99,3 +99,25 @@ export function overlayItems(
   });
   return [...boxes, ...unbound, ...leaks];
 }
+
+/**
+ * The frame N / Shift+N jumps to: the nearest start of a detection, a
+ * user box or a leak that is not fixed after `frame` (`direction` 1) or
+ * before it (-1); `null` when there is none.
+ */
+export function nextMark(
+  frame: number,
+  direction: 1 | -1,
+  index: IntervalIndex,
+  report: VerifyReport | null,
+): number | null {
+  const leaks = (report?.leaks ?? [])
+    .filter((leak) => leak.status !== "Fixed")
+    .map((leak) => leak.frame_range[0])
+    .filter((start) => (direction === 1 ? start > frame : start < frame));
+  const candidates = [index.nextStart(frame, direction), ...leaks].filter(
+    (start): start is number => start !== null,
+  );
+  if (candidates.length === 0) return null;
+  return direction === 1 ? Math.min(...candidates) : Math.max(...candidates);
+}

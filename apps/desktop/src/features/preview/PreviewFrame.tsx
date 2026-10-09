@@ -20,6 +20,7 @@ import { Timeline } from "@/features/timeline/Timeline";
 
 import { BoxOverlay } from "./BoxOverlay";
 import { PreviewToolbar } from "./PreviewToolbar";
+import { Transport } from "./Transport";
 import { useProject } from "./useProject";
 import { VideoStage, type StageStatus } from "./VideoStage";
 
@@ -158,6 +159,7 @@ function ProjectPreview({ path, toggle }: ProjectPreviewProps) {
               showBoxes && <BoxOverlay data={state.data} report={report.data ?? null} box={box} />
             }
           </VideoStage>
+          <Transport data={state.data} />
           <Timeline data={state.data} report={report.data ?? null} />
         </>
       )}

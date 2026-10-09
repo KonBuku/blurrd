@@ -1,6 +1,8 @@
 /**
- * App-wide keyboard shortcuts (design 8.8). Each shortcut has a stable id,
- * the keys shown in tooltips and menus, and a matcher for key events.
+ * Keyboard shortcuts (design 8.8). Each shortcut has a stable id, the
+ * keys shown in tooltips and menus, one or more key bindings and a scope:
+ * window shortcuts work everywhere, preview shortcuts only while a
+ * recording is shown and the focused control does not use the key itself.
  */
 
 /** Ids of the shortcuts the app handles. */
@@ -11,88 +13,202 @@ export type ShortcutId =
   | "toggleQueue"
   | "toggleInspector"
   | "openSettings"
-  | "closeOverlay";
+  | "closeOverlay"
+  | "playPause"
+  | "shuttleBack"
+  | "shuttleForward"
+  | "previousFrame"
+  | "nextFrame"
+  | "backSecond"
+  | "forwardSecond"
+  | "goToStart"
+  | "goToEnd"
+  | "showBefore"
+  | "showAfter"
+  | "showSplit"
+  | "toggleBoxes"
+  | "nextMark"
+  | "previousMark"
+  | "zoomIn"
+  | "zoomOut"
+  | "zoomFit";
 
-/** One keyboard shortcut. */
-export interface Shortcut {
-  readonly id: ShortcutId;
-  /** What the shortcut does, as shown to the user. */
-  readonly label: string;
+/** Where a shortcut applies. */
+export type ShortcutScope = "window" | "preview";
+
+/** One key combination. */
+export interface KeyBinding {
   /** Keys as shown to the user, for example `["Ctrl", "B"]`. */
   readonly keys: readonly string[];
   /** The main key: a lowercase letter or a `KeyboardEvent.key` value. */
   readonly key: string;
   readonly ctrl: boolean;
   readonly alt: boolean;
-  readonly shift: boolean;
+  /** Whether Shift is held; `null` accepts both (keys that need Shift on some layouts). */
+  readonly shift: boolean | null;
 }
+
+/** One keyboard shortcut: its first binding plus optional alternatives. */
+export interface Shortcut extends KeyBinding {
+  readonly id: ShortcutId;
+  /** What the shortcut does, as shown to the user. */
+  readonly label: string;
+  readonly scope: ShortcutScope;
+  /** Other bindings that do the same (Space / K). */
+  readonly alternatives: readonly KeyBinding[];
+  /** Whether holding the keys repeats the action (frame steps, zoom). */
+  readonly repeat: boolean;
+}
+
+/** A binding without Ctrl or Alt. */
+function plain(key: string, label: string, shift = false): KeyBinding {
+  return { keys: shift ? ["Shift", label] : [label], key, ctrl: false, alt: false, shift };
+}
+
+/** A binding with Ctrl. */
+function ctrl(key: string, keys: readonly string[], options: Partial<KeyBinding> = {}): KeyBinding {
+  return { keys, key, ctrl: true, alt: false, shift: false, ...options };
+}
+
+interface ShortcutOptions {
+  readonly scope?: ShortcutScope;
+  readonly alternatives?: readonly KeyBinding[];
+  readonly repeat?: boolean;
+}
+
+/** Builds a shortcut; window scope without repeat unless given. */
+function shortcut(
+  id: ShortcutId,
+  label: string,
+  binding: KeyBinding,
+  options: ShortcutOptions = {},
+): Shortcut {
+  return {
+    id,
+    label,
+    ...binding,
+    scope: options.scope ?? "window",
+    alternatives: options.alternatives ?? [],
+    repeat: options.repeat ?? false,
+  };
+}
+
+const PREVIEW: ShortcutOptions = { scope: "preview" };
+const PREVIEW_REPEAT: ShortcutOptions = { scope: "preview", repeat: true };
 
 /** The shortcuts by id, in the order they are listed. */
 export const SHORTCUTS: Readonly<Record<ShortcutId, Shortcut>> = {
-  addFiles: {
-    id: "addFiles",
-    label: "Add recordings",
-    keys: ["Ctrl", "O"],
-    key: "o",
-    ctrl: true,
-    alt: false,
-    shift: false,
-  },
-  addFolder: {
-    id: "addFolder",
-    label: "Add a folder of recordings",
-    keys: ["Ctrl", "Shift", "O"],
-    key: "o",
-    ctrl: true,
-    alt: false,
-    shift: true,
-  },
-  removeFromQueue: {
-    id: "removeFromQueue",
-    label: "Remove the selected recordings (in the queue)",
-    keys: ["Delete"],
-    key: "Delete",
-    ctrl: false,
-    alt: false,
-    shift: false,
-  },
-  toggleQueue: {
-    id: "toggleQueue",
-    label: "Show or hide the queue",
-    keys: ["Ctrl", "B"],
-    key: "b",
-    ctrl: true,
-    alt: false,
-    shift: false,
-  },
-  toggleInspector: {
-    id: "toggleInspector",
-    label: "Show or hide the inspector",
-    keys: ["Ctrl", "Alt", "B"],
-    key: "b",
-    ctrl: true,
-    alt: true,
-    shift: false,
-  },
-  openSettings: {
-    id: "openSettings",
-    label: "Open settings",
-    keys: ["Ctrl", ","],
-    key: ",",
-    ctrl: true,
-    alt: false,
-    shift: false,
-  },
-  closeOverlay: {
-    id: "closeOverlay",
-    label: "Close settings, menus and dialogs",
-    keys: ["Esc"],
-    key: "Escape",
-    ctrl: false,
-    alt: false,
-    shift: false,
-  },
+  addFiles: shortcut("addFiles", "Add recordings", ctrl("o", ["Ctrl", "O"])),
+  addFolder: shortcut(
+    "addFolder",
+    "Add a folder of recordings",
+    ctrl("o", ["Ctrl", "Shift", "O"], { shift: true }),
+  ),
+  removeFromQueue: shortcut(
+    "removeFromQueue",
+    "Remove the selected recordings (in the queue)",
+    plain("Delete", "Delete"),
+  ),
+  toggleQueue: shortcut("toggleQueue", "Show or hide the queue", ctrl("b", ["Ctrl", "B"])),
+  toggleInspector: shortcut(
+    "toggleInspector",
+    "Show or hide the inspector",
+    ctrl("b", ["Ctrl", "Alt", "B"], { alt: true }),
+  ),
+  openSettings: shortcut("openSettings", "Open settings", ctrl(",", ["Ctrl", ","])),
+  closeOverlay: shortcut(
+    "closeOverlay",
+    "Close settings, menus and dialogs",
+    plain("Escape", "Esc"),
+  ),
+  playPause: shortcut("playPause", "Play or pause", plain(" ", "Space"), {
+    ...PREVIEW,
+    alternatives: [plain("k", "K")],
+  }),
+  shuttleBack: shortcut(
+    "shuttleBack",
+    "Play backwards (press again for faster)",
+    plain("j", "J"),
+    PREVIEW,
+  ),
+  shuttleForward: shortcut(
+    "shuttleForward",
+    "Play forwards (press again for faster)",
+    plain("l", "L"),
+    PREVIEW,
+  ),
+  previousFrame: shortcut(
+    "previousFrame",
+    "Previous frame",
+    plain("ArrowLeft", "←"),
+    PREVIEW_REPEAT,
+  ),
+  nextFrame: shortcut("nextFrame", "Next frame", plain("ArrowRight", "→"), PREVIEW_REPEAT),
+  backSecond: shortcut(
+    "backSecond",
+    "Back one second",
+    plain("ArrowLeft", "←", true),
+    PREVIEW_REPEAT,
+  ),
+  forwardSecond: shortcut(
+    "forwardSecond",
+    "Forward one second",
+    plain("ArrowRight", "→", true),
+    PREVIEW_REPEAT,
+  ),
+  goToStart: shortcut("goToStart", "Go to the first frame", plain("Home", "Home"), PREVIEW),
+  goToEnd: shortcut("goToEnd", "Go to the last frame", plain("End", "End"), PREVIEW),
+  showBefore: shortcut(
+    "showBefore",
+    "Show the recording before blurring",
+    plain("b", "B"),
+    PREVIEW,
+  ),
+  showAfter: shortcut("showAfter", "Show the blurred result", plain("a", "A"), PREVIEW),
+  showSplit: shortcut("showSplit", "Show before and after side by side", plain("s", "S"), PREVIEW),
+  toggleBoxes: shortcut("toggleBoxes", "Show or hide the box overlay", plain("o", "O"), PREVIEW),
+  nextMark: shortcut("nextMark", "Next detection or leak", plain("n", "N"), PREVIEW_REPEAT),
+  previousMark: shortcut(
+    "previousMark",
+    "Previous detection or leak",
+    plain("n", "N", true),
+    PREVIEW_REPEAT,
+  ),
+  zoomIn: shortcut("zoomIn", "Zoom the preview in", ctrl("=", ["Ctrl", "="]), {
+    ...PREVIEW_REPEAT,
+    alternatives: [ctrl("+", ["Ctrl", "+"], { shift: null })],
+  }),
+  zoomOut: shortcut("zoomOut", "Zoom the preview out", ctrl("-", ["Ctrl", "-"]), PREVIEW_REPEAT),
+  zoomFit: shortcut("zoomFit", "Fit the preview to the stage", ctrl("0", ["Ctrl", "0"]), PREVIEW),
 };
+
+/** The bindings of a shortcut, the first one first. */
+function bindings(item: Shortcut): readonly KeyBinding[] {
+  return [item, ...item.alternatives];
+}
+
+/** Keys of a shortcut as shown to the user: `Ctrl+O`, `Space / K`. */
+export function shortcutText(item: Shortcut): string {
+  return bindings(item)
+    .map((binding) => binding.keys.join("+"))
+    .join(" / ");
+}
+
+/** Key names of `aria-keyshortcuts` where they differ from the shown ones. */
+const ARIA_NAMES: Readonly<Record<string, string>> = {
+  Ctrl: "Control",
+  Esc: "Escape",
+  "←": "ArrowLeft",
+  "→": "ArrowRight",
+  "+": "Plus",
+};
+
+/** The `aria-keyshortcuts` value of a shortcut (`Control+O`, `Space K`). */
+export function ariaKeys(item: Shortcut): string {
+  return bindings(item)
+    .map((binding) => binding.keys.map((key) => ARIA_NAMES[key] ?? key).join("+"))
+    .join(" ");
+}
 
 /**
  * The main key of an event: the typed letter, or the letter of the
@@ -105,15 +221,85 @@ function mainKey(event: KeyboardEvent): string {
   return letter ? letter.toLowerCase() : event.key;
 }
 
-/** Finds the shortcut that `event` triggers, if any. */
-export function matchShortcut(event: KeyboardEvent): Shortcut | undefined {
-  if (event.repeat) return undefined;
+function matches(binding: KeyBinding, key: string, event: KeyboardEvent): boolean {
+  return (
+    binding.key === key &&
+    binding.ctrl === (event.ctrlKey || event.metaKey) &&
+    binding.alt === event.altKey &&
+    (binding.shift === null || binding.shift === event.shiftKey)
+  );
+}
+
+/** Finds the shortcut of `scope` that `event` triggers, if any. */
+export function matchShortcut(event: KeyboardEvent, scope: ShortcutScope): Shortcut | undefined {
   const key = mainKey(event);
   return Object.values(SHORTCUTS).find(
     (candidate) =>
-      candidate.key === key &&
-      candidate.ctrl === (event.ctrlKey || event.metaKey) &&
-      candidate.alt === event.altKey &&
-      candidate.shift === event.shiftKey,
+      candidate.scope === scope &&
+      (!event.repeat || candidate.repeat) &&
+      bindings(candidate).some((binding) => matches(binding, key, event)),
   );
+}
+
+/** Roles whose elements use the arrow, Home/End and Page keys themselves. */
+const NAVIGATING_ROLES = [
+  "listbox",
+  "radiogroup",
+  "slider",
+  "tablist",
+  "menu",
+  "menubar",
+  "grid",
+  "tree",
+  "spinbutton",
+  "scrollbar",
+]
+  .map((role) => `[role="${role}"]`)
+  .join(",");
+
+/** Elements that act on Space. */
+const PRESSABLE = [
+  "button",
+  "a[href]",
+  "summary",
+  ...[
+    "button",
+    "checkbox",
+    "switch",
+    "radio",
+    "menuitem",
+    "menuitemradio",
+    "menuitemcheckbox",
+    "option",
+    "tab",
+  ].map((role) => `[role="${role}"]`),
+].join(",");
+
+const NAVIGATION_KEYS: ReadonlySet<string> = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+
+/**
+ * Whether the element an event comes from uses its key itself, so that a
+ * preview shortcut must leave it alone: dialogs and menus take every key,
+ * text fields every key without Ctrl, composite widgets (lists, sliders,
+ * radio groups) their navigation keys, buttons and options Space.
+ */
+export function targetOwnsKey(event: KeyboardEvent): boolean {
+  const { target } = event;
+  if (!(target instanceof Element)) return false;
+  if (target.closest('[role="dialog"],[role="alertdialog"],[role="menu"]')) return true;
+  const editable =
+    target.closest("input,textarea,select") !== null ||
+    (target instanceof HTMLElement && target.isContentEditable);
+  if (editable && !(event.ctrlKey || event.metaKey)) return true;
+  if (NAVIGATION_KEYS.has(event.key) && target.closest(NAVIGATING_ROLES)) return true;
+  return event.key === " " && target.closest(PRESSABLE) !== null;
 }

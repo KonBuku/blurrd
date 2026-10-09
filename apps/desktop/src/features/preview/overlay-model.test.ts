@@ -4,7 +4,7 @@ import type { Region } from "@/bindings/Region";
 import { mockTracks, mockVerifyReport } from "@/ipc/mock/project";
 import { IntervalIndex } from "@/lib/interval-index";
 
-import { overlayItems } from "./overlay-model";
+import { nextMark, overlayItems } from "./overlay-model";
 
 const PATH = String.raw`D:\Recordings\match_ascent_01.mp4`;
 const ALL = new Set<Region>(["KillFeed", "Banner", "VoiceChat", "TextChat"]);
@@ -56,5 +56,26 @@ describe("overlayItems", () => {
   it("skips disabled regions", () => {
     const items = overlayItems(100, index, new Set<Region>(), tracks, null);
     expect(items.every((item) => item.region === "Manual" || item.kind !== "box")).toBe(true);
+  });
+});
+
+describe("nextMark", () => {
+  const tracks = mockTracks(PATH);
+  const index = new IntervalIndex(240, tracks.tracks, tracks.overrides);
+  const report = mockVerifyReport(PATH);
+
+  it("walks detection, edit and leak starts in both directions", () => {
+    const forward: number[] = [];
+    for (let f: number | null = 0; f !== null; f = nextMark(f, 1, index, report)) forward.push(f);
+    const backward: number[] = [];
+    for (let f: number | null = 239; f !== null; f = nextMark(f, -1, index, report))
+      backward.push(f);
+    // Both walks visit the same stops (the Manual box starts on frame 0).
+    expect(forward).toEqual(backward.slice(1).toReversed());
+    // The open leak (30) and the out-of-scope name (40) are stops, the fixed leak (120) is not.
+    expect(forward).toContain(30);
+    expect(forward).toContain(40);
+    expect(forward).not.toContain(120);
+    expect(nextMark(239, 1, index, report)).toBeNull();
   });
 });

@@ -121,7 +121,12 @@ export function SettingsView() {
             ))}
           </ul>
         </nav>
-        <div className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        {/* Focusable, so that a page without controls (Shortcuts) still scrolls by keyboard. */}
+        <div
+          // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          tabIndex={0}
+          className="min-w-0 flex-1 overflow-y-auto outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
           <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-10 lg:px-8">
             <Page />
           </div>

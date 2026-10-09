@@ -400,6 +400,33 @@ wheel pans, and the view follows the playhead. The track is a
 jump to the ends. Hovering shows the nearest thumbnail, the timecode, the
 frame number and the boxes per region.
 
+The transport under the stage (`Transport.tsx`, `playback.ts`) steps
+frames, jumps to the ends, plays and pauses, shows the timecode and the
+duration or (after a click) the 0-based decoded frame index, sets the
+speed (0.25–2×) and mutes the preview audio. Every move goes through the
+playback controller: seeks aim at the middle of a frame's display
+interval from `pts.bin`, and the shown frame number is always taken from
+the frame the browser presented, never from the requested time. J and L
+shuttle backwards and forwards, faster with every press (1, 2, 4×; the
+video element cannot play backwards, so reverse steps on a timer).
+
+Preview shortcuts (`src/lib/shortcuts.ts`, `usePreviewShortcuts.ts`,
+listed in Settings › Shortcuts): Space / K play or pause, J / L shuttle,
+← / → one frame, Shift+← / → one second, Home / End, B / A / S for
+Before / After / Split, O for the box overlay, N / Shift+N for the next
+or previous detection, user box or unfixed leak, Ctrl+= / Ctrl+- /
+Ctrl+0 to zoom. They are ignored while a dialog or menu is open, in text
+fields, and for keys the focused control uses itself (arrows in the
+queue list or a slider, Space on a button).
+
+Per-frame work during playback is kept small: only the playhead, the
+slider value, the position text and the canvas subscribe to the frame;
+the overlay re-renders only when its items change. `e2e/transport.spec.ts`
+checks 20 seeded random seeks through the timeline, the keys, the slider
+and the transport (shown number = frame on the canvas = index decoded in
+the video = frame of the backend's Exact patch) and plays the fixture:
+at least 57 presented frames per second, no long tasks.
+
 Preview blur parity: `e2e/blur-parity.spec.ts` blurs reference frames
 with the WebGL renderer and compares them with the frames `CpuBlur`
 produced. Write the reference frames first (synthetic frames; `--i420`
