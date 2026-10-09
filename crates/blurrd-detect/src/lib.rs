@@ -11,6 +11,11 @@
 //! - [`KillFeedDetector`] ([`killfeed`]): killer and victim names in the
 //!   kill-feed rows of one frame.
 //!
+//! Temporal models ([`temporal`]):
+//!
+//! - [`KillFeedTracker`] ([`temporal::killfeed`]): follows the kill-feed
+//!   names through row animations, flashes and fades.
+//!
 //! The building blocks every detector shares:
 //!
 //! - [`RgbView`], [`GrayImage`] and [`BitMask`]: the images detectors read
@@ -22,6 +27,7 @@
 //!   kernels and OpenCV border semantics.
 //! - [`components`](mod@components): connected components, runs and
 //!   summed-area tables.
+//! - [`track`]: template matching with normalised cross-correlation.
 //!
 //! Every constant is given in reference pixels of a 1920 × 1080 frame, as
 //! in the port spec; crops of other sizes are mapped to that space first.
@@ -38,8 +44,11 @@ mod detection;
 mod image;
 pub mod killfeed;
 pub mod morph;
+pub mod temporal;
+pub mod track;
 
 pub use classes::{Class, ClassParams, PixelClasses, hsv};
 pub use detection::{DetectError, Detection};
 pub use image::{BitMask, GrayImage, ImageError, RgbView};
 pub use killfeed::KillFeedDetector;
+pub use temporal::killfeed::KillFeedTracker;

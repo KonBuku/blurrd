@@ -58,6 +58,9 @@ pub const FEED_ROI: RectI = RectI {
 /// Height of a kill-feed row.
 pub const ROW_H: i32 = 33;
 
+/// Distance between the tops of two stacked rows.
+pub const ROW_PITCH: i32 = 39;
+
 /// Columns inside every row's bar, used to find the rows (`SCORE_X`).
 const SCORE_X: (i32, i32) = (1660, 1837);
 /// Victim names end right of this column (right alignment).

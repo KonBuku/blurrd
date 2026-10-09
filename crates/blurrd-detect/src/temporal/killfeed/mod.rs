@@ -1,0 +1,597 @@
+//! The kill-feed temporal model (port spec section 7.1).
+//!
+//! The per-frame detector ([`crate::KillFeedDetector`]) misses names while
+//! a row animates: the first frames of a row slide in from the left behind
+//! a cover bar, a flash or a bright background washes a row out for a few
+//! frames, and the oldest row fades away. [`KillFeedTracker`] follows every
+//! name through these frames by template matching:
+//!
+//! 1. Detections of each kind are linked frame by frame into detection
+//!    tracks (one name in one row slot).
+//! 2. A track that showed the same text extent four times gives a
+//!    template reference: the name and a few pixels around it on the
+//!    `min(R, G, B)` plane, which is robust to flashes, fades and bright
+//!    backgrounds because the correlation is normalised. More
+//!    references follow during the track's life.
+//! 3. Each reference is followed backward in time (to the row's slide-in)
+//!    and forward (through stack jumps, flashes, gaps and the fade-out)
+//!    with [`crate::track::ncc`].
+//! 4. The blur box of every frame is the name's box moved by the tracked
+//!    offset: a fixed size, so it never jitters. The other names of the
+//!    reference row move with it (a row is rigid), which covers a name
+//!    whose own template latched onto an identical name in the next row.
+//!
+//! The prototype kept the strips of the whole clip in memory and tracked
+//! mid-life references backward over the entire life. This tracker is
+//! streaming: it keeps a ring of the last [`RING_FRAMES`] frames, follows
+//! references forward as frames arrive, follows them backward only inside
+//! the ring, and hands out the boxes of a frame [`DELAY`] frames after it
+//! was pushed. Its memory does not depend on the length of the video.
+
+mod follow;
+mod link;
+mod ring;
+
+use std::collections::BTreeMap;
+
+use blurrd_core::{Confidence, NameKind, RectI, Region};
+
+use crate::detection::Detection;
+use crate::image::RgbView;
+use crate::killfeed::FEED_ROI;
+use crate::track::ncc::{Searcher, Template};
+
+use follow::{Follower, How, Pos};
+use link::{Linker, Reference};
+use ring::Ring;
+
+/// The part of the feed crop the tracker keeps per frame, in reference
+/// pixels: from the left end of the searched rows (`FEED_X0` of the
+/// prototype) to the right edge, over the crop's full height.
+pub const STRIP: RectI = RectI {
+    x0: 1250,
+    y0: FEED_ROI.y0,
+    x1: FEED_ROI.x1,
+    y1: FEED_ROI.y1,
+};
+
+/// Frames the tracker keeps.
+pub const RING_FRAMES: u32 = 128;
+
+/// The boxes of a frame are handed out once this many later frames have
+/// been pushed: a name lost for up to 45 frames (`MAX_GAP`) can still
+/// be re-acquired and the gap filled, and a reference taken later can
+/// still be followed back to the frame.
+pub const DELAY: u32 = RING_FRAMES - 1;
+
+/// Frames after a name's last tracked frame that keep its box
+/// (`POST`).
+pub const POST_ROLL: u32 = 2;
+
+/// The template spans the text plus this many pixels on each side ...
+const TEMPLATE_MARGIN_X: i32 = 6;
+/// ... and these rows of the row band (from the row top, half-open).
+const TEMPLATE_BAND: (i32, i32) = (4, 29);
+/// A template flatter than this (standard deviation of `min(R, G, B)`)
+/// has nothing to follow.
+const MIN_TEMPLATE_STD: f64 = 3.0;
+
+/// A part whose box overlaps a new reference's box this much in the
+/// reference frame follows the same name.
+const SAME_NAME_IOU: f32 = 0.7;
+
+/// The widest roman numeral of a multikill badge ("III").
+const BADGE_MAX_WIDTH: i32 = 24;
+/// In a one-colour row the badge sits left of the killer portrait: at
+/// least this far left of the next name (the names of a one-colour row
+/// are only a round icon apart).
+const BADGE_MIN_GAP: i32 = 60;
+
+/// One frame for [`KillFeedTracker::push`].
+#[derive(Debug, Clone, Copy)]
+pub struct KillFeedFrame<'a> {
+    /// Frame index; frames must be pushed in order without gaps.
+    pub frame: u32,
+    /// The [`FEED_ROI`] of the frame in reference scale (the crop the
+    /// detector read).
+    pub crop: RgbView<'a>,
+    /// The kill-feed detections of the frame.
+    pub detections: &'a [Detection],
+}
+
+/// One blur box of the kill feed in one frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FeedBox {
+    /// The box in reference pixels.
+    pub rect: RectI,
+    /// Killer or victim (both names of a one-colour row are victims).
+    pub kind: NameKind,
+    /// How the box was found.
+    pub confidence: Confidence,
+    /// The tracked name the box belongs to (unique per tracker).
+    pub part: u32,
+    /// How far the name has moved since its reference frame: the anchor
+    /// of the block grid, so the blur pattern moves with the name.
+    pub offset: (i16, i16),
+}
+
+/// The kill-feed boxes of one frame.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FrameBoxes {
+    /// Frame index.
+    pub frame: u32,
+    /// The boxes.
+    pub boxes: Vec<FeedBox>,
+}
+
+/// Why a frame was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TrackError {
+    /// The crop does not have the size of [`FEED_ROI`].
+    #[error("crop is {actual_width} x {actual_height} px, the tracker expects {width} x {height}")]
+    CropSize {
+        /// Expected width.
+        width: u32,
+        /// Expected height.
+        height: u32,
+        /// Width of the given crop.
+        actual_width: u32,
+        /// Height of the given crop.
+        actual_height: u32,
+    },
+    /// Frames were pushed out of order or with a gap.
+    #[error("frame {actual} pushed, the tracker expects frame {expected}")]
+    FrameOrder {
+        /// The frame the tracker expected.
+        expected: u32,
+        /// The frame that was pushed.
+        actual: u32,
+    },
+}
+
+/// A box of a part, relative to the part's template position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PartBox {
+    id: u32,
+    kind: NameKind,
+    /// `x0, y0, x1, y1` of the box minus the template's top-left corner.
+    offset: (i32, i32, i32, i32),
+}
+
+/// One followed reference with the names of its row.
+#[derive(Debug, Clone)]
+struct Part {
+    kind: NameKind,
+    template: Template,
+    /// Template position in the reference frame (strip coordinates).
+    origin: (i32, i32),
+    /// The reference name first, then the other names of its row.
+    boxes: Vec<PartBox>,
+    /// Template positions per frame.
+    positions: BTreeMap<u32, Pos>,
+    forward: Follower,
+    /// A newer reference of the same name took over the forward pass:
+    /// this part's last frame is not the end of the name.
+    superseded: bool,
+}
+
+impl Part {
+    /// The frame after which the name ended, once the forward pass is over.
+    fn end(&self) -> Option<u32> {
+        (self.forward.is_done() && !self.superseded).then(|| self.forward.last())
+    }
+
+    /// Whether the part can no longer contribute to frame `f` or later.
+    fn finished_before(&self, f: u32) -> bool {
+        self.forward.is_done()
+            && match self.end() {
+                Some(end) => f > end + POST_ROLL,
+                None => f > self.forward.last(),
+            }
+    }
+
+    /// The part's own box in frame `f`; with `matched`, only if the
+    /// template matched there.
+    fn own_box(&self, f: u32, matched: bool) -> Option<RectI> {
+        let p = self.positions.get(&f)?;
+        let o = self.boxes.first()?.offset;
+        (!matched || matches!(p.how, How::Matched | How::Slide)).then_some(RectI {
+            x0: STRIP.x0 + p.x0 + o.0,
+            y0: STRIP.y0 + p.y0 + o.1,
+            x1: STRIP.x0 + p.x1 + o.2,
+            y1: STRIP.y0 + p.y1 + o.3,
+        })
+    }
+
+    /// The template position the part gives frame `f`, with its
+    /// confidence.
+    fn position(&self, f: u32) -> Option<(Pos, Confidence)> {
+        if let Some(p) = self.positions.get(&f) {
+            let confidence = match p.how {
+                How::Matched | How::Slide => Confidence::Tracked,
+                How::Weak => Confidence::WeakHold,
+                How::Gap => Confidence::GapFill,
+            };
+            return Some((*p, confidence));
+        }
+        let end = self.end()?;
+        if f > end && f - end <= POST_ROLL {
+            let p = self.positions.get(&end)?;
+            return Some((*p, Confidence::PostRoll));
+        }
+        None
+    }
+}
+
+/// Follows kill-feed names through the frames of a video.
+///
+/// Push every frame in order with [`KillFeedTracker::push`]; the boxes of
+/// frame `f` become available through [`KillFeedTracker::drain_ready`]
+/// after frame `f + DELAY` was pushed, the rest after
+/// [`KillFeedTracker::finish`].
+#[derive(Debug, Clone)]
+pub struct KillFeedTracker {
+    ring: Ring,
+    linkers: [Linker; 2],
+    parts: Vec<Part>,
+    searcher: Searcher,
+    detections: Vec<Detection>,
+    references: Vec<Reference>,
+    ready: Vec<FrameBoxes>,
+    next_part: u32,
+    /// The frame the next push must carry (`None` before the first).
+    next_frame: Option<u32>,
+    /// The next frame to hand out.
+    next_emit: u32,
+}
+
+impl Default for KillFeedTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KillFeedTracker {
+    /// An empty tracker.
+    pub fn new() -> Self {
+        Self {
+            ring: Ring::new(RING_FRAMES as usize),
+            linkers: [Linker::new(NameKind::Killer), Linker::new(NameKind::Victim)],
+            parts: Vec::new(),
+            searcher: Searcher::new(),
+            detections: Vec::new(),
+            references: Vec::new(),
+            ready: Vec::new(),
+            next_part: 0,
+            next_frame: None,
+            next_emit: 0,
+        }
+    }
+
+    /// Adds the next frame.
+    ///
+    /// # Errors
+    ///
+    /// [`TrackError::CropSize`] if the crop is not the size of
+    /// [`FEED_ROI`], [`TrackError::FrameOrder`] if the frame does not
+    /// follow the previous one.
+    pub fn push(&mut self, input: &KillFeedFrame<'_>) -> Result<(), TrackError> {
+        let (width, height) = (FEED_ROI.width(), FEED_ROI.height());
+        if (input.crop.width(), input.crop.height()) != (width, height) {
+            return Err(TrackError::CropSize {
+                width,
+                height,
+                actual_width: input.crop.width(),
+                actual_height: input.crop.height(),
+            });
+        }
+        let frame = input.frame;
+        match self.next_frame {
+            Some(expected) if expected != frame => {
+                return Err(TrackError::FrameOrder {
+                    expected,
+                    actual: frame,
+                });
+            }
+            Some(_) => {}
+            None => self.next_emit = frame,
+        }
+        self.next_frame = Some(frame + 1);
+
+        self.detections.clear();
+        self.detections.extend(
+            input
+                .detections
+                .iter()
+                .filter(|d| d.region == Region::KillFeed && !is_badge(d, input.detections)),
+        );
+        self.ring.store(frame, &input.crop, &self.detections);
+
+        // Follow every live name into the new frame.
+        if let Some(current) = self.ring.frame(frame) {
+            for part in &mut self.parts {
+                let Part {
+                    template,
+                    positions,
+                    forward,
+                    ..
+                } = part;
+                forward.step(&current, template, &mut self.searcher, |g, p| {
+                    positions.insert(g, p);
+                });
+            }
+        }
+
+        self.references.clear();
+        for linker in &mut self.linkers {
+            linker.push(frame, &self.detections, &mut self.references);
+        }
+        for i in 0..self.references.len() {
+            let r = self.references[i];
+            self.add_part(r, frame);
+        }
+
+        while self.next_emit + DELAY <= frame {
+            self.emit(self.next_emit);
+            self.next_emit += 1;
+        }
+        Ok(())
+    }
+
+    /// Moves the boxes of every frame that is final into `out`, in frame
+    /// order.
+    pub fn drain_ready(&mut self, out: &mut Vec<FrameBoxes>) {
+        out.append(&mut self.ready);
+    }
+
+    /// Ends the video: decides the remaining frames and moves their boxes
+    /// into `out` (with any not yet drained). The tracker is empty
+    /// afterwards and can start a new video.
+    pub fn finish(&mut self, out: &mut Vec<FrameBoxes>) {
+        if let Some(next) = self.next_frame {
+            let newest = next - 1;
+            for part in &mut self.parts {
+                part.forward.stop();
+            }
+            while self.next_emit <= newest {
+                self.emit(self.next_emit);
+                self.next_emit += 1;
+            }
+        }
+        out.append(&mut self.ready);
+        *self = Self::new();
+    }
+
+    /// Heap bytes the tracker holds: the frame ring, the templates and the
+    /// positions of the names it follows, and boxes not yet drained.
+    pub fn heap_bytes(&self) -> usize {
+        let parts: usize = self
+            .parts
+            .iter()
+            .map(|p| {
+                p.template.heap_bytes()
+                    + p.boxes.capacity() * size_of::<PartBox>()
+                    // A B-tree entry plus its share of node overhead.
+                    + p.positions.len() * 2 * size_of::<(u32, Pos)>()
+            })
+            .sum();
+        self.ring.heap_bytes()
+            + self.linkers.iter().map(Linker::heap_bytes).sum::<usize>()
+            + self.parts.capacity() * size_of::<Part>()
+            + parts
+            + self.detections.capacity() * size_of::<Detection>()
+            + self.references.capacity() * size_of::<Reference>()
+            + self
+                .ready
+                .iter()
+                .map(|f| size_of::<FrameBoxes>() + f.boxes.capacity() * size_of::<FeedBox>())
+                .sum::<usize>()
+    }
+
+    /// Starts following reference `r`: backward inside the ring, then
+    /// forward up to frame `newest`.
+    fn add_part(&mut self, r: Reference, newest: u32) {
+        let d = r.detection;
+        // A part that matched the same name in the reference frame already
+        // follows it (the same detection track, or the track that continues
+        // the name after a stack jump): the new reference adds nothing.
+        // A template that latched onto an identical name in another row
+        // does not overlap the detection, so its name gets a new part.
+        if self.parts.iter().any(|p| {
+            p.kind == d.kind
+                && p.own_box(r.frame, true)
+                    .is_some_and(|b| b.iou(&d.rect) >= SAME_NAME_IOU)
+        }) {
+            return;
+        }
+        let Some(mut part) = self.cut_part(r) else {
+            return;
+        };
+        let text = part.forward.text();
+        let mut insert = |g: u32, p: Pos| {
+            part.positions.insert(g, p);
+        };
+        // Backward in time, down to the oldest frame not handed out yet.
+        let lo = self.next_emit;
+        let mut back = Follower::new(text, part.origin, r.frame, false);
+        let mut f = r.frame;
+        while f > lo && !back.is_done() {
+            f -= 1;
+            let Some(fr) = self.ring.frame(f) else { break };
+            back.step(&fr, &part.template, &mut self.searcher, &mut insert);
+        }
+        let ring = &self.ring;
+        back.slide_in(
+            lo,
+            &part.template,
+            &mut self.searcher,
+            |g| ring.frame(g),
+            &mut insert,
+        );
+        // Forward up to the newest frame.
+        for g in r.frame + 1..=newest {
+            if part.forward.is_done() {
+                break;
+            }
+            let Some(fr) = self.ring.frame(g) else { break };
+            let Part {
+                template,
+                positions,
+                forward,
+                ..
+            } = &mut part;
+            forward.step(&fr, template, &mut self.searcher, |g, p| {
+                positions.insert(g, p);
+            });
+        }
+
+        // A part that only held the name weakly or across a gap in the
+        // reference frame hands the forward pass over to the new one.
+        for older in &mut self.parts {
+            if older.kind == d.kind
+                && !older.forward.is_done()
+                && older
+                    .own_box(r.frame, false)
+                    .is_some_and(|b| b.iou(&d.rect) >= SAME_NAME_IOU)
+            {
+                older.forward.stop();
+                older.superseded = true;
+            }
+        }
+        self.parts.push(part);
+    }
+
+    /// A new part for reference `r`: the template cut around the name in
+    /// the reference frame, the boxes of the names of its row, and the
+    /// reference position. `None` if the frame left the ring or the
+    /// template is too flat to follow.
+    fn cut_part(&mut self, r: Reference) -> Option<Part> {
+        let slot = self.ring.get(r.frame)?;
+        let d = r.detection;
+        let top = d.row_top?;
+        let area = RectI {
+            x0: (d.text.x0 - TEMPLATE_MARGIN_X).max(STRIP.x0),
+            y0: (top + TEMPLATE_BAND.0).max(STRIP.y0),
+            x1: (d.text.x1 + TEMPLATE_MARGIN_X).min(STRIP.x1),
+            y1: (top + TEMPLATE_BAND.1).min(STRIP.y1),
+        };
+        let local = RectI {
+            x0: area.x0 - STRIP.x0,
+            y0: area.y0 - STRIP.y0,
+            x1: area.x1 - STRIP.x0,
+            y1: area.y1 - STRIP.y0,
+        };
+        let template = Template::from_plane(&slot.mn, local)?;
+        if template.std_dev() < MIN_TEMPLATE_STD {
+            return None;
+        }
+        let origin = (local.x0, local.y0);
+        let relative = |rect: RectI| {
+            (
+                rect.x0 - area.x0,
+                rect.y0 - area.y0,
+                rect.x1 - area.x0,
+                rect.y1 - area.y0,
+            )
+        };
+        let mut boxes = vec![PartBox {
+            id: self.next_part,
+            kind: d.kind,
+            offset: relative(d.rect),
+        }];
+        for c in &slot.detections {
+            if c.row_top == d.row_top && c.text != d.text {
+                boxes.push(PartBox {
+                    id: self.next_part + boxes.len() as u32,
+                    kind: c.kind,
+                    offset: relative(c.rect),
+                });
+            }
+        }
+        self.next_part += boxes.len() as u32;
+        let mut positions = BTreeMap::new();
+        positions.insert(
+            r.frame,
+            Pos {
+                x0: origin.0,
+                y0: origin.1,
+                x1: origin.0,
+                y1: origin.1,
+                how: How::Matched,
+            },
+        );
+        Some(Part {
+            kind: d.kind,
+            template,
+            origin,
+            boxes,
+            positions,
+            forward: Follower::new(relative(d.text), origin, r.frame, true),
+            superseded: false,
+        })
+    }
+
+    /// Hands out frame `f` and forgets what only earlier frames needed.
+    fn emit(&mut self, f: u32) {
+        let mut boxes = Vec::new();
+        for part in &self.parts {
+            let Some((pos, confidence)) = part.position(f) else {
+                continue;
+            };
+            let offset = (
+                (pos.x0 - part.origin.0) as i16,
+                (pos.y0 - part.origin.1) as i16,
+            );
+            for b in &part.boxes {
+                boxes.push(FeedBox {
+                    rect: RectI {
+                        x0: STRIP.x0 + pos.x0 + b.offset.0,
+                        y0: STRIP.y0 + pos.y0 + b.offset.1,
+                        x1: STRIP.x0 + pos.x1 + b.offset.2,
+                        y1: STRIP.y0 + pos.y1 + b.offset.3,
+                    },
+                    kind: b.kind,
+                    confidence,
+                    part: b.id,
+                    offset,
+                });
+            }
+        }
+        self.ready.push(FrameBoxes { frame: f, boxes });
+        let keep = f.saturating_sub(POST_ROLL);
+        self.parts.retain_mut(|p| {
+            if p.finished_before(f + 1) {
+                return false;
+            }
+            // The post-roll reads the last position; keep it.
+            let end = p.end();
+            p.positions.retain(|&g, _| g >= keep || Some(g) == end);
+            true
+        });
+    }
+}
+
+/// Whether `d` is the roman numeral of a multikill badge. In a one-colour
+/// row (no killer detection) the badge passes as a name: a short one,
+/// left of the killer portrait, with both names of the row to its right.
+/// A short killer name of a row read from luminance (also all victims)
+/// has only the victim to its right.
+fn is_badge(d: &Detection, all: &[Detection]) -> bool {
+    if d.kind != NameKind::Victim || d.text.x1 - d.text.x0 > BADGE_MAX_WIDTH {
+        return false;
+    }
+    let row = || {
+        all.iter()
+            .filter(|o| o.row_top == d.row_top && o.region == d.region)
+    };
+    if row().any(|o| o.kind == NameKind::Killer || o.text.x0 < d.text.x0) {
+        return false;
+    }
+    let right = || row().filter(|o| o.text.x0 > d.text.x0);
+    right().count() >= 2
+        && right()
+            .map(|o| o.text.x0 - d.text.x1)
+            .min()
+            .is_some_and(|gap| gap >= BADGE_MIN_GAP)
+}
