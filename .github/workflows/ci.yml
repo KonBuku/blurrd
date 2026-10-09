@@ -144,8 +144,10 @@ jobs:
       - name: tests
         run: cargo nextest run --workspace --locked
         env:
-          # Fail instead of skipping when the fixture fonts are missing.
+          # Fail instead of skipping when the fixture fonts or ONNX Runtime
+          # and the OCR models are missing.
           BLURRD_REQUIRE_FONTS: "1"
+          BLURRD_REQUIRE_OCR: "1"
       - name: doctests
         run: cargo test --workspace --doc --locked
         env:

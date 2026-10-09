@@ -18,4 +18,5 @@ doc-valid-idents = [
   "QuickTime",
   "OpenCV",
   "NuGet",
+  "PaddleOCR",
 ]

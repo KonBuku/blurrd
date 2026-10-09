@@ -112,6 +112,41 @@ pub fn adapters() -> Vec<Adapter> {
     Vec::new()
 }
 
+/// The current position of the adapter with `luid` in DXGI's
+/// `EnumAdapters1` order, or `None` if no adapter has that LUID.
+///
+/// DirectML (OCR) addresses adapters by this position. It changes with
+/// drivers, docking and power settings, so it is looked up right before a
+/// DirectML session is created and never stored.
+#[cfg(windows)]
+pub fn dxgi_adapter_index(luid_to_find: Luid) -> Option<u32> {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+
+    // SAFETY: creating a DXGI factory has no preconditions; the returned
+    // COM interface is reference counted by the `windows` crate.
+    let factory = unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }.ok()?;
+    for index in 0.. {
+        // SAFETY: enumerating with an index; DXGI returns an error after the
+        // last adapter.
+        let adapter = unsafe { factory.EnumAdapters1(index) }.ok()?;
+        // SAFETY: `adapter` is a valid interface; `GetDesc1` fills a plain
+        // struct.
+        let Ok(desc) = (unsafe { adapter.GetDesc1() }) else {
+            continue;
+        };
+        if luid(desc.AdapterLuid.LowPart, desc.AdapterLuid.HighPart) == luid_to_find {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// No DXGI outside Windows.
+#[cfg(not(windows))]
+pub fn dxgi_adapter_index(_luid: Luid) -> Option<u32> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::{driver_version, luid};
@@ -130,6 +165,9 @@ mod tests {
         for adapter in super::adapters() {
             assert_ne!(adapter.info.name, "");
             assert_ne!(adapter.info.luid.0, 0);
+            // Every listed adapter has a position in DXGI's plain order.
+            assert!(super::dxgi_adapter_index(adapter.info.luid).is_some());
         }
+        assert_eq!(super::dxgi_adapter_index(blurrd_core::Luid(0)), None);
     }
 }

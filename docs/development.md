@@ -348,6 +348,22 @@ of its ModelScope repository. Files marked `bundled` ship with blurrd; the
 others are candidates for the model benchmark. A file whose size or
 checksum differs from the pin is rejected and never replaces a good copy.
 
+### OCR tests
+
+`blurrd-ocr` loads ONNX Runtime from `ORT_DYLIB_PATH` and the models from
+`BLURRD_MODEL_DIR` (both set in `.cargo/config.toml`). Its tests skip when
+either is missing; set `BLURRD_REQUIRE_OCR=1` (as CI does) to fail
+instead. CI runs on the CPU execution provider. Tests that need a
+DirectX 12 GPU are ignored by default; run them locally with:
+
+```sh
+cargo nextest run -p blurrd-ocr --run-ignored all
+```
+
+The ONNX Runtime build selects its CPU kernels at run time: the CPU tests
+pass under Intel SDE emulating a Pentium 4 (SSE3, no SSE4 or AVX), so
+OCR needs no more than any CPU that runs Windows 11.
+
 ## Changelog and releases
 
 `CHANGELOG.md` and the release notes are generated from the commit history by

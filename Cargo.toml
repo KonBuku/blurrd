@@ -21,6 +21,7 @@ ab_glyph = "=0.2.32"
 anyhow = "=1.0.104"
 blurrd-blur = { path = "crates/blurrd-blur" }
 blurrd-core = { path = "crates/blurrd-core" }
+blurrd-ocr = { path = "crates/blurrd-ocr" }
 blurrd-testkit = { path = "crates/blurrd-testkit" }
 blurrd-video = { path = "crates/blurrd-video" }
 clap = { version = "=4.6.7", features = ["derive"] }
@@ -33,6 +34,16 @@ ffmpeg-the-third = { version = "=6.0.0", default-features = false, features = [
   "codec",
   "format",
   "software-resampling",
+] }
+# ONNX Runtime bindings for the OCR (blurrd-ocr). ONNX Runtime is loaded at
+# run time (`load-dynamic`) so blurrd starts without it; `api-24` matches the
+# DirectML build pinned in third_party/ort.toml (C API level 24).
+ort = { version = "=2.0.0-rc.13", default-features = false, features = [
+  "std",
+  "load-dynamic",
+  "directml",
+  "tracing",
+  "api-24",
 ] }
 schemars = { version = "=1.2.2", features = ["uuid1"] }
 serde = { version = "=1.0.229", features = ["derive"] }

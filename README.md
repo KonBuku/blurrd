@@ -23,6 +23,15 @@ resolution, frame rate, timestamps and audio as the source.
 The first supported game is VALORANT (recordings at 1080p and similar
 16:9 resolutions).
 
+## System requirements
+
+- Windows 11 x64 (Windows 10 22H2 is expected to work but is not tested).
+- Any x86-64 CPU that runs Windows 11: the bundled OCR runtime picks its
+  CPU instructions at run time and was verified on an emulated CPU
+  without SSE4 or AVX.
+- A GPU is optional for OCR: it runs on DirectX 12 GPUs through DirectML
+  and falls back to the CPU.
+
 ## Contributing
 
 Contributions are welcome; please read the [contributing guide](CONTRIBUTING.md)
