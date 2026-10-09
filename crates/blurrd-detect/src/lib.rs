@@ -54,6 +54,7 @@ mod image;
 pub mod killfeed;
 pub mod morph;
 pub mod scene_cut;
+pub mod screens;
 pub mod temporal;
 pub mod track;
 pub mod voice;
