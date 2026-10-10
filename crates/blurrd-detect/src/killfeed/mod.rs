@@ -69,7 +69,7 @@ const RIGHT_ALIGN: i32 = 1822;
 const VICTIM_TEXT_X1: i32 = 1834;
 /// The victim portrait starts at about this column; names end left of it
 /// (`VIC_X1`).
-const VICTIM_X1: i32 = 1838;
+pub(crate) const VICTIM_X1: i32 = 1838;
 /// Left end of the searched part of a row (`FEED_X0`).
 const FEED_X0: i32 = 1250;
 /// The victim's bar colour is measured from this column to

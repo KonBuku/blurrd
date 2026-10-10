@@ -13,10 +13,10 @@ mod support;
 use std::collections::{BTreeMap, BTreeSet};
 
 use blurrd_blur::{PixelParams, PreparedBox, YuvColour, prepare_boxes};
-use blurrd_core::{BlurBox, BlurParams, Region};
+use blurrd_core::{BlurBox, BlurParams, Confidence, NameKind, RectI, Region};
 use blurrd_detect::KillFeedDetector;
 use blurrd_detect::temporal::killfeed::{
-    DELAY, FrameBoxes, KillFeedFrame, KillFeedTracker, POST_ROLL, RING_FRAMES, TrackError,
+    DELAY, FrameBoxes, KillFeedFrame, KillFeedTracker, POST_ROLL, PRE_ROLL, RING_FRAMES, TrackError,
 };
 use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team};
 use blurrd_testkit::metrics::item_coverage;
@@ -195,13 +195,18 @@ fn leaks(run: &Run, min_opacity: f32) -> (usize, Vec<String>) {
 }
 
 /// Boxes that overlap no kill-feed name of their frame or of the
-/// `window` frames before it, and boxes on a multikill badge.
+/// `window` frames before it (pre-roll boxes: of the [`PRE_ROLL`] frames
+/// after it), and boxes on a multikill badge.
 fn strays(run: &Run, window: u32) -> Vec<String> {
     let mut out = Vec::new();
     for (entry, truth) in run.boxes.iter().zip(&run.truths) {
         let f = entry.frame as usize;
-        let recent = &run.truths[f.saturating_sub(window as usize)..=f];
         for b in &entry.boxes {
+            let recent = if b.confidence == Confidence::PreRoll {
+                &run.truths[f..(f + 1 + PRE_ROLL as usize).min(run.truths.len())]
+            } else {
+                &run.truths[f.saturating_sub(window as usize)..=f]
+            };
             let on_name = recent.iter().any(|t| {
                 t.in_region(Region::KillFeed)
                     .any(|i| i.text.intersection(&b.rect).is_some())
@@ -212,8 +217,8 @@ fn strays(run: &Run, window: u32) -> Vec<String> {
                 .any(|c| c.kind == ContentKind::Badge && c.rect.intersection(&b.rect).is_some());
             if !on_name || on_badge {
                 out.push(format!(
-                    "{}: {:?} {} badge {on_badge}",
-                    entry.frame, b.kind, b.rect
+                    "{}: {:?} {} {:?} badge {on_badge}",
+                    entry.frame, b.kind, b.rect, b.confidence
                 ));
             }
         }
@@ -267,6 +272,175 @@ fn covers_fading_names_until_their_rows_are_gone() {
     assert!(leaks.is_empty(), "{} leaks: {leaks:#?}", leaks.len());
     let strays = strays(&run, POST_ROLL);
     assert!(strays.is_empty(), "{strays:#?}");
+}
+
+#[test]
+fn keeps_companions_in_their_row_when_a_name_repeats() {
+    // The same victim in two rows, the newer a one-colour row: when the
+    // older row leaves, the victim's template of the older row continues
+    // on the identical name of the newer row, and must not bring the
+    // older row's killer along onto the newer row's killer portrait.
+    let fonts = FontSet::latin();
+    let mut rng = Rng::new(18);
+    let kill = |killer: &str, victim: &str, one_colour: bool, birth: u32, rng: &mut Rng| Kill {
+        killer: killer.to_owned(),
+        victim: victim.to_owned(),
+        killer_team: Team::Enemy,
+        victim_team: if one_colour { Team::Enemy } else { Team::Ally },
+        badge: None,
+        ..random_kill(rng, birth)
+    };
+    let kills = vec![
+        kill("Brightwater", "Corvane", false, 0, &mut rng),
+        kill("Tallowmere77", "Corvane", true, 20, &mut rng),
+    ];
+    let video = Video {
+        scenes: [Background::noise(3), Background::dusk()]
+            .into_iter()
+            .map(|bg| {
+                Scene::new(Layout::reference(), bg, Palette::DEFAULT, 150).with_kill_feed(
+                    &fonts,
+                    KillFeedSpec {
+                        life: 70,
+                        ..KillFeedSpec::new(kills.clone())
+                    },
+                )
+            })
+            .collect(),
+        filter: None,
+    };
+    let run = track(&video);
+    let (checked, leaks) = leaks(&run, 1.0);
+    assert!(checked > 150, "{checked} name-frames");
+    assert!(leaks.is_empty(), "{} leaks: {leaks:#?}", leaks.len());
+    let strays = strays(&run, POST_ROLL);
+    assert!(strays.is_empty(), "{strays:#?}");
+    let on_portraits: Vec<String> = run
+        .boxes
+        .iter()
+        .zip(&run.truths)
+        .flat_map(|(entry, truth)| {
+            entry
+                .boxes
+                .iter()
+                .filter(|b| truth.portraits().any(|p| p.intersection(&b.rect).is_some()))
+                .map(|b| format!("{}: {:?} {}", entry.frame, b.kind, b.rect))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(on_portraits.is_empty(), "{on_portraits:#?}");
+}
+
+#[test]
+fn grows_companions_read_short_while_the_row_wipes_in() {
+    // In the first frames of a row the detector reads the killer without
+    // its last glyphs (here they are painted over with the bar), and the
+    // victim's reference frame is one of them. The killer's own reading
+    // starts at the same column and is longer: the victim part's
+    // companion box must grow to it, also in those first frames.
+    let fonts = FontSet::latin();
+    let mut rng = Rng::new(19);
+    let kill = Kill {
+        killer: "Tallowmere77".to_owned(),
+        victim: "Corvane".to_owned(),
+        killer_team: Team::Enemy,
+        victim_team: Team::Ally,
+        badge: None,
+        ..random_kill(&mut rng, 0)
+    };
+    let scene = Scene::new(
+        Layout::reference(),
+        Background::dusk(),
+        Palette::DEFAULT,
+        90,
+    )
+    .with_kill_feed(
+        &fonts,
+        KillFeedSpec {
+            life: 60,
+            ..KillFeedSpec::new(vec![kill])
+        },
+    );
+    let mut detector = KillFeedDetector::new();
+    let mut tracker = KillFeedTracker::new();
+    let (mut detections, mut out, mut truths) = (Vec::new(), Vec::new(), Vec::new());
+    let mut short = 0;
+    for f in 0..scene.frames() {
+        let mut fx = scene.render(f);
+        detector
+            .detect(&feed_view(&fx.frame), &mut detections)
+            .unwrap();
+        let killer = fx
+            .truth
+            .in_region(Region::KillFeed)
+            .find(|i| i.kind == NameKind::Killer)
+            .map(|i| i.text);
+        let read = |dets: &[blurrd_detect::Detection], text: RectI| {
+            dets.iter()
+                .find(|d| d.kind == NameKind::Killer && d.text.intersection(&text).is_some())
+                .map(|d| d.text)
+        };
+        if let Some(text) = killer.filter(|&t| short < 2 && read(&detections, t).is_some()) {
+            let cut = i32::midpoint(text.x0, text.x1);
+            for y in text.y0 - 1..=text.y1 + 1 {
+                if let Some(bar) = fx.frame.pixel(text.x1 + 4, y) {
+                    for x in cut..=text.x1 + 1 {
+                        fx.frame.set(x, y, bar);
+                    }
+                }
+            }
+            detector
+                .detect(&feed_view(&fx.frame), &mut detections)
+                .unwrap();
+            let shortened = read(&detections, text).unwrap();
+            assert!(
+                shortened.x1 <= cut,
+                "{f}: read {shortened} after the cut at {cut}"
+            );
+            short += 1;
+        }
+        tracker
+            .push(&KillFeedFrame {
+                frame: f,
+                crop: feed_view(&fx.frame),
+                detections: &detections,
+            })
+            .unwrap();
+        tracker.drain_ready(&mut out);
+        truths.push(fx.truth);
+    }
+    tracker.finish(&mut out);
+    assert_eq!(short, 2, "the killer was read short twice");
+    // The truth keeps the whole name: no box on it may end inside it (a
+    // slot box of the sliding row hides such a box here; on real video
+    // the frame can be a confident one), and nothing leaks.
+    let mut short_boxes = Vec::new();
+    let mut leaks = Vec::new();
+    for (entry, truth) in out.iter().zip(&truths) {
+        for item in truth.in_region(Region::KillFeed) {
+            short_boxes.extend(
+                entry
+                    .boxes
+                    .iter()
+                    .filter(|b| b.rect.intersection(&item.text).is_some())
+                    .filter(|b| b.rect.x1 < item.text.x1)
+                    .map(|b| {
+                        format!(
+                            "{}: {} on {:?} {}",
+                            entry.frame, b.rect, item.kind, item.text
+                        )
+                    }),
+            );
+        }
+        for c in item_coverage(truth, &prepared(entry)) {
+            let item = truth.items.iter().find(|i| i.id == c.id).unwrap();
+            if item.opacity >= 1.0 && c.is_leak() {
+                leaks.push(format!("{}: {:?} {}", entry.frame, item.kind, item.text));
+            }
+        }
+    }
+    assert!(short_boxes.is_empty(), "{short_boxes:#?}");
+    assert!(leaks.is_empty(), "{leaks:#?}");
 }
 
 #[test]

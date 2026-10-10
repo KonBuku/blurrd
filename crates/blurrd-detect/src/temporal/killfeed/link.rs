@@ -37,6 +37,10 @@ const EXTENT_TOLERANCE: i32 = 3;
 /// A reference is taken only from a detection at most this far from the
 /// reference width of its group.
 const WIDTH_TOLERANCE: i32 = 1;
+/// A text extent that reaches further left than a tracked extent of the
+/// same track by more than this, with the same right end, and alternates
+/// with it is not a name of its own (see [`Group::flicker`]).
+const FLICKER_DX: i32 = 2 * EXTENT_TOLERANCE;
 
 /// A frame to take a template from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +49,20 @@ pub(super) struct Reference {
     pub(super) frame: u32,
     /// The detection the template is cut around.
     pub(super) detection: Detection,
+    /// A wider reading of the same name that this reference corrects.
+    pub(super) replaces: Option<Replaced>,
+}
+
+/// A text extent of a track that turned out to be a misreading: the same
+/// name read with extra pixels on its left (a cover bar edge while the row
+/// wipes in), no longer read once the narrower extent took over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Replaced {
+    /// Left and right end of the wider text.
+    pub(super) x0: i32,
+    pub(super) x1: i32,
+    /// The first frame after the last detection of the wider text.
+    pub(super) since: u32,
 }
 
 /// Detections of one text extent inside a detection track.
@@ -53,6 +71,12 @@ struct Group {
     x0: i32,
     x1: i32,
     count: u32,
+    /// Frames of the first and the latest detection.
+    first: u32,
+    last: u32,
+    /// The group alternates with a narrower tracked group of the same
+    /// track: it never gives a reference.
+    flicker: bool,
     /// Detections until the first reference is chosen.
     early: Vec<(u32, Detection)>,
     /// Text width of the first reference.
@@ -67,9 +91,34 @@ impl Group {
             && (self.x1 - text.x1).abs() <= EXTENT_TOLERANCE
     }
 
+    /// Whether this group is the same name as `tracked` read with extra
+    /// pixels on its left: both end at the same column, this one starts
+    /// clearly further left, and the detector kept reading the tracked
+    /// extent, as often or more, after this one first appeared. A bright
+    /// spot or the edge of the killer portrait next to the first glyph
+    /// widens a detection for a few frames; a template cut there carries
+    /// the portrait and its box would blur into it.
+    fn flicker(&self, tracked: &Self) -> bool {
+        tracked.width.is_some()
+            && (tracked.x1 - self.x1).abs() <= EXTENT_TOLERANCE
+            && tracked.x0 - self.x0 > FLICKER_DX
+            && tracked.last > self.first
+            && tracked.count >= self.count
+    }
+
+    /// Whether this group corrects `wide`: the same name read wider on the
+    /// left that the detector stopped reading before this group appeared.
+    fn corrects(&self, wide: &Self) -> bool {
+        wide.width.is_some()
+            && (wide.x1 - self.x1).abs() <= EXTENT_TOLERANCE
+            && self.x0 - wide.x0 > FLICKER_DX
+            && wide.last < self.first
+    }
+
     /// Adds a detection; returns a reference if it is one.
     fn add(&mut self, frame: u32, d: Detection) -> Option<Reference> {
         self.count += 1;
+        self.last = frame;
         let width = d.text.x1 - d.text.x0;
         let Some(ref_width) = self.width else {
             self.early.push((frame, d));
@@ -100,6 +149,7 @@ impl Group {
             return Some(Reference {
                 frame: f,
                 detection: chosen,
+                replaces: None,
             });
         };
         if (width - ref_width).abs() > WIDTH_TOLERANCE {
@@ -110,6 +160,7 @@ impl Group {
             return Some(Reference {
                 frame,
                 detection: d,
+                replaces: None,
             });
         }
         None
@@ -237,11 +288,104 @@ fn add_to_groups(groups: &mut Vec<Group>, frame: u32, d: Detection) -> Option<Re
             x0: d.text.x0,
             x1: d.text.x1,
             count: 0,
+            first: frame,
+            last: frame,
+            flicker: false,
             early: Vec::new(),
             width: None,
             good: 0,
         });
         groups.len() - 1
     };
-    groups[index].add(frame, d)
+    let first = groups[index].width.is_none();
+    let mut reference = groups[index].add(frame, d)?;
+    let group = &groups[index];
+    let flicker = group.flicker
+        || groups
+            .iter()
+            .enumerate()
+            .any(|(i, tracked)| i != index && group.flicker(tracked));
+    if first {
+        reference.replaces = groups
+            .iter()
+            .enumerate()
+            .filter(|&(i, wide)| i != index && group.corrects(wide))
+            .map(|(_, wide)| Replaced {
+                x0: wide.x0,
+                x1: wide.x1,
+                since: wide.last + 1,
+            })
+            .next();
+    }
+    groups[index].flicker = flicker;
+    (!flicker).then_some(reference)
+}
+
+#[cfg(test)]
+mod tests {
+    use blurrd_core::{NameKind, RectI, Region};
+
+    use super::{Linker, Reference};
+    use crate::detection::Detection;
+
+    /// A victim name with text from `x0` to 1830 in the row at top 96.
+    fn victim(x0: i32) -> Detection {
+        let text = RectI {
+            x0,
+            y0: 107,
+            x1: 1830,
+            y1: 121,
+        };
+        Detection {
+            region: Region::KillFeed,
+            kind: NameKind::Victim,
+            text,
+            rect: RectI {
+                x0: x0 - 5,
+                y0: 101,
+                x1: 1835,
+                y1: 128,
+            },
+            row_top: Some(96),
+        }
+    }
+
+    /// Links the readings `x0s` (one per frame from frame 0) and returns
+    /// the references taken.
+    fn link(x0s: &[i32]) -> Vec<Reference> {
+        let mut linker = Linker::new(NameKind::Victim);
+        let mut out = Vec::new();
+        for (f, &x0) in (0..).zip(x0s) {
+            linker.push(f, &[victim(x0)], &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn a_wider_reading_that_alternates_gives_no_reference() {
+        // The name is read from 1700; a bright spot widens it to 1688 in
+        // some frames, as often as four times.
+        let refs = link(&[1700, 1700, 1700, 1700, 1688, 1700, 1688, 1700, 1688, 1688]);
+        assert_eq!(refs.len(), 1, "{refs:?}");
+        assert_eq!(refs[0].detection.text.x0, 1700);
+    }
+
+    #[test]
+    fn a_narrower_reading_corrects_a_wider_one_that_ended() {
+        // The row wipes in read from 1688 (the cover bar's edge), then the
+        // detector reads the name from 1700 only.
+        let refs = link(&[1688, 1688, 1688, 1688, 1688, 1700, 1700, 1700, 1700]);
+        assert_eq!(refs.len(), 2, "{refs:?}");
+        assert_eq!(refs[0].replaces, None);
+        let fix = refs[1].replaces.expect("the wide reading is replaced");
+        assert_eq!((fix.x0, fix.x1, fix.since), (1688, 1830, 5));
+    }
+
+    #[test]
+    fn a_wider_reading_that_lasts_is_a_name_of_its_own() {
+        // The narrower extent stops being read: the wider one is kept.
+        let refs = link(&[1700, 1700, 1700, 1700, 1688, 1688, 1688, 1688, 1688]);
+        assert_eq!(refs.len(), 2, "{refs:?}");
+        assert!(refs.iter().all(|r| r.replaces.is_none()));
+    }
 }

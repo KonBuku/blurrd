@@ -24,6 +24,10 @@
 //!    was last found (measured against the bar colour and the stroke
 //!    contrast of the reference frame), followed by a post-roll of the
 //!    measured fade length ([`POST_ROLL`]).
+//! 6. The boxes of a frame are composed from all followed names: motion
+//!    unions, a pre-roll at a row's birth, slot boxes for uncertain
+//!    frames, checked companions, portrait clearance and a merge of
+//!    duplicates (see the `compose` module).
 //!
 //! The prototype kept the strips of the whole clip in memory and tracked
 //! mid-life references backward over the entire life. This tracker is
@@ -32,6 +36,7 @@
 //! the ring, and hands out the boxes of a frame [`DELAY`] frames after it
 //! was pushed. Its memory does not depend on the length of the video.
 
+mod compose;
 mod end;
 mod follow;
 mod link;
@@ -46,9 +51,10 @@ use crate::image::RgbView;
 use crate::killfeed::FEED_ROI;
 use crate::track::ncc::{Searcher, Template, score_at};
 
+use compose::{Companion, PreRoll};
 use end::Look;
-use follow::{Follower, How, MAX_GAP, Pos};
-use link::{Linker, Reference};
+use follow::{Follower, How, MAX_GAP, Pos, SAME_EXTENT};
+use link::{Linker, Reference, Replaced};
 use ring::Ring;
 
 /// The part of the feed crop the tracker keeps per frame, in reference
@@ -80,6 +86,10 @@ pub const DELAY: u32 = RING_FRAMES - 1;
 /// structure end, not by the post-roll.
 pub const POST_ROLL: u32 = 5;
 
+/// Frames before a name's first frame that can get the pre-roll box at a
+/// row's birth (`PRE`; see the `compose` module).
+pub const PRE_ROLL: u32 = 3;
+
 /// While a fading row is held, it may have slid up this far since the
 /// last match (measured: at most 9 px while visible; the window leaves
 /// room for a slower slide) ...
@@ -100,6 +110,12 @@ const MIN_TEMPLATE_STD: f64 = 3.0;
 /// A part whose box overlaps a new reference's box this much in the
 /// reference frame follows the same name.
 const SAME_NAME_IOU: f32 = 0.7;
+/// A part's box grows by at most this much to a longer reading of its name
+/// (about two glyphs), unless both readings start at the same column.
+const MAX_GROW: i32 = 16;
+/// A part following a misread (wider) extent of a name is in the name's
+/// row if its box overlaps the name's box this much.
+const RETIRE_IOU: f32 = 0.5;
 
 /// The widest roman numeral of a multikill badge ("III").
 const BADGE_MAX_WIDTH: i32 = 24;
@@ -171,19 +187,29 @@ pub enum TrackError {
     },
 }
 
-/// A box of a part, relative to the part's template position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A name of a part's row, relative to the part's template position
+/// (`x0, y0, x1, y1` minus the template's top-left corner).
+#[derive(Debug, Clone)]
 struct PartBox {
     id: u32,
     kind: NameKind,
-    /// `x0, y0, x1, y1` of the box minus the template's top-left corner.
+    /// The blur box.
     offset: (i32, i32, i32, i32),
+    /// The text bounds.
+    text: (i32, i32, i32, i32),
+    /// The slot box (Tight mode escalates uncertain frames to it).
+    slot: (i32, i32, i32, i32),
+    /// The template of a companion name (`None` for the followed name and
+    /// for a companion too flat to cut one).
+    companion: Option<Companion>,
 }
 
 /// One followed reference with the names of its row.
 #[derive(Debug, Clone)]
 struct Part {
     kind: NameKind,
+    /// The text bounds of the followed name in the reference frame.
+    text: RectI,
     template: Template,
     /// Template position in the reference frame (strip coordinates).
     origin: (i32, i32),
@@ -200,6 +226,17 @@ struct Part {
     look: Look,
     /// The last frame of the name's row structure, once decided.
     end: Option<u32>,
+    /// The row top relative to the template's top-left corner.
+    row_top: i32,
+    /// The left edge of the box of the row's first name, relative to the
+    /// template's top-left corner.
+    row_x0: i32,
+    /// The pre-roll before the name's first frame, at a row's birth.
+    pre_roll: Option<PreRoll>,
+    /// Clear frames in a row that showed a companion away from its place
+    /// (the followed template latched onto an identical name in another
+    /// row).
+    misplaced: u32,
 }
 
 impl Part {
@@ -441,6 +478,12 @@ impl KillFeedTracker {
                 p.template.heap_bytes()
                     + p.look.heap_bytes()
                     + p.boxes.capacity() * size_of::<PartBox>()
+                    + p
+                        .boxes
+                        .iter()
+                        .filter_map(|b| b.companion.as_ref())
+                        .map(|c| c.template.heap_bytes())
+                        .sum::<usize>()
                     // A B-tree entry plus its share of node overhead.
                     + p.positions.len() * 2 * size_of::<(u32, Pos)>()
             })
@@ -462,16 +505,47 @@ impl KillFeedTracker {
     /// forward up to frame `newest`.
     fn add_part(&mut self, r: Reference, newest: u32) {
         let d = r.detection;
+        if let Some(wide) = r.replaces {
+            self.retire(&d, wide);
+        }
         // A part that matched the same name in the reference frame already
         // follows it (the same detection track, or the track that continues
         // the name after a stack jump): the new reference adds nothing.
         // A template that latched onto an identical name in another row
         // does not overlap the detection, so its name gets a new part.
-        if self.parts.iter().any(|p| {
+        let known = self.parts.iter().any(|p| {
             p.kind == d.kind
                 && p.own_box(r.frame, true)
                     .is_some_and(|b| b.iou(&d.rect) >= SAME_NAME_IOU)
-        }) {
+        });
+        // A part's name (followed or companion) may have been read without
+        // its last glyph in the part's reference frame (a dark or
+        // washed-out frame): its box grows to the longer reading on the
+        // right, where no portrait is at risk. A reading taken while the
+        // row still wipes in can lack several glyphs: a name in the same
+        // row that starts at the same column is the same name and grows
+        // without the limit.
+        for p in &mut self.parts {
+            let Some(&pos) = p.positions.get(&r.frame) else {
+                continue;
+            };
+            for b in &mut p.boxes {
+                let rect = compose::place(pos, b.offset);
+                let grow = d.rect.x1 - rect.x1;
+                let text = compose::place(pos, b.text);
+                let same_start = (text.x0 - d.text.x0).abs() <= SAME_EXTENT
+                    && (text.y1 - d.text.y1).abs() <= SAME_EXTENT;
+                if b.kind == d.kind
+                    && grow > 0
+                    && (same_start || grow <= MAX_GROW && rect.iou(&d.rect) >= SAME_NAME_IOU)
+                {
+                    b.offset.2 += grow;
+                    b.text.2 += grow;
+                    b.slot.2 = b.slot.2.max(b.offset.2);
+                }
+            }
+        }
+        if known {
             return;
         }
         let Some(mut part) = self.cut_part(r) else {
@@ -498,6 +572,7 @@ impl KillFeedTracker {
             |g| ring.frame(g),
             &mut insert,
         );
+        part.pre_roll = compose::pre_roll(&part, &self.ring, lo);
         // Forward up to the newest frame.
         for g in r.frame + 1..=newest {
             if part.forward.is_done() {
@@ -532,6 +607,31 @@ impl KillFeedTracker {
         self.parts.push(part);
     }
 
+    /// Retires the parts that follow `wide`, a misreading of the name of
+    /// detection `d`: they give no positions from the frame the misreading
+    /// ended, where the parts of the correct reading cover the name.
+    fn retire(&mut self, d: &Detection, wide: Replaced) {
+        for p in &mut self.parts {
+            let same_row = p
+                .positions
+                .range(wide.since.saturating_sub(1)..)
+                .next()
+                .is_some_and(|(_, at)| {
+                    let o = p.boxes.first().map_or((0, 0, 0, 0), |b| b.offset);
+                    compose::place(*at, o).iou(&d.rect) >= RETIRE_IOU
+                });
+            if p.kind == d.kind
+                && (p.text.x0 - wide.x0).abs() <= SAME_EXTENT
+                && (p.text.x1 - wide.x1).abs() <= SAME_EXTENT
+                && same_row
+            {
+                p.forward.stop();
+                p.superseded = true;
+                p.positions.retain(|&g, _| g < wide.since);
+            }
+        }
+    }
+
     /// A new part for reference `r`: the template cut around the name in
     /// the reference frame, the boxes of the names of its row, and the
     /// reference position. `None` if the frame left the ring or the
@@ -540,24 +640,19 @@ impl KillFeedTracker {
         let slot = self.ring.get(r.frame)?;
         let d = r.detection;
         let top = d.row_top?;
-        let area = RectI {
-            x0: (d.text.x0 - TEMPLATE_MARGIN_X).max(STRIP.x0),
-            y0: (top + TEMPLATE_BAND.0).max(STRIP.y0),
-            x1: (d.text.x1 + TEMPLATE_MARGIN_X).min(STRIP.x1),
-            y1: (top + TEMPLATE_BAND.1).min(STRIP.y1),
-        };
-        let local = RectI {
-            x0: area.x0 - STRIP.x0,
-            y0: area.y0 - STRIP.y0,
-            x1: area.x1 - STRIP.x0,
-            y1: area.y1 - STRIP.y0,
-        };
+        let local = template_area(d.text, top);
         let template = Template::from_plane(&slot.mn, local)?;
         if template.std_dev() < MIN_TEMPLATE_STD {
             return None;
         }
         let frame = self.ring.frame(r.frame)?;
         let origin = (local.x0, local.y0);
+        let area = RectI {
+            x0: local.x0 + STRIP.x0,
+            y0: local.y0 + STRIP.y0,
+            x1: local.x1 + STRIP.x0,
+            y1: local.y1 + STRIP.y0,
+        };
         let relative = |rect: RectI| {
             (
                 rect.x0 - area.x0,
@@ -566,21 +661,43 @@ impl KillFeedTracker {
                 rect.y1 - area.y0,
             )
         };
-        let mut boxes = vec![PartBox {
-            id: self.next_part,
-            kind: d.kind,
-            offset: relative(d.rect),
-        }];
-        for c in &slot.detections {
-            if c.row_top == d.row_top && c.text != d.text {
-                boxes.push(PartBox {
-                    id: self.next_part + boxes.len() as u32,
-                    kind: c.kind,
-                    offset: relative(c.rect),
-                });
-            }
+        // The followed name first, then the other names of its row.
+        let row: Vec<&Detection> = std::iter::once(&r.detection)
+            .chain(
+                slot.detections
+                    .iter()
+                    .filter(|c| c.row_top == d.row_top && c.text != d.text),
+            )
+            .collect();
+        let slots = compose::slots(
+            &row.iter()
+                .map(|c| (c.kind, relative(c.rect)))
+                .collect::<Vec<_>>(),
+        );
+        let mut boxes = Vec::with_capacity(row.len());
+        for (i, (c, slot_box)) in row.iter().zip(slots).enumerate() {
+            let companion = (i > 0)
+                .then(|| {
+                    let at = template_area(c.text, top);
+                    Template::from_plane(&slot.mn, at)
+                        .filter(|t| t.std_dev() >= MIN_TEMPLATE_STD)
+                        .map(|template| Companion {
+                            template,
+                            corner: (at.x0 - local.x0, at.y0 - local.y0),
+                        })
+                })
+                .flatten();
+            boxes.push(PartBox {
+                id: self.next_part + i as u32,
+                kind: c.kind,
+                offset: relative(c.rect),
+                text: relative(c.text),
+                slot: slot_box,
+                companion,
+            });
         }
         self.next_part += boxes.len() as u32;
+        let row_x0 = boxes.iter().map(|b| b.offset.0).min().unwrap_or(0);
         let mut positions = BTreeMap::new();
         positions.insert(
             r.frame,
@@ -606,6 +723,7 @@ impl KillFeedTracker {
         );
         Some(Part {
             kind: d.kind,
+            text: d.text,
             template,
             origin,
             boxes,
@@ -614,35 +732,24 @@ impl KillFeedTracker {
             superseded: false,
             look,
             end: None,
+            row_top: top - area.y0,
+            row_x0,
+            pre_roll: None,
+            misplaced: 0,
         })
     }
 
     /// Hands out frame `f` and forgets what only earlier frames needed.
     fn emit(&mut self, f: u32) {
         let mut boxes = Vec::new();
-        for part in &self.parts {
-            let Some((pos, confidence)) = part.position(f) else {
-                continue;
-            };
-            let offset = (
-                (pos.x0 - part.origin.0) as i16,
-                (pos.y0 - part.origin.1) as i16,
-            );
-            for b in &part.boxes {
-                boxes.push(FeedBox {
-                    rect: RectI {
-                        x0: STRIP.x0 + pos.x0 + b.offset.0,
-                        y0: STRIP.y0 + pos.y0 + b.offset.1,
-                        x1: STRIP.x0 + pos.x1 + b.offset.2,
-                        y1: STRIP.y0 + pos.y1 + b.offset.3,
-                    },
-                    kind: b.kind,
-                    confidence,
-                    part: b.id,
-                    offset,
-                });
-            }
-        }
+        let detections = self.ring.get(f).map_or(&[][..], |s| &s.detections);
+        compose::compose(
+            f,
+            &mut self.parts,
+            self.ring.frame(f).as_ref(),
+            detections,
+            &mut boxes,
+        );
         self.ready.push(FrameBoxes { frame: f, boxes });
         let keep = f.saturating_sub(POST_ROLL);
         self.parts.retain_mut(|p| {
@@ -654,6 +761,18 @@ impl KillFeedTracker {
             p.positions.retain(|&g, _| g >= keep || Some(g) == end);
             true
         });
+    }
+}
+
+/// The template area of a name with text bounds `text` in the row at
+/// `top` (strip coordinates): the text plus a margin on each side, over
+/// the row's text band.
+fn template_area(text: RectI, top: i32) -> RectI {
+    RectI {
+        x0: (text.x0 - TEMPLATE_MARGIN_X).max(STRIP.x0) - STRIP.x0,
+        y0: (top + TEMPLATE_BAND.0).max(STRIP.y0) - STRIP.y0,
+        x1: (text.x1 + TEMPLATE_MARGIN_X).min(STRIP.x1) - STRIP.x0,
+        y1: (top + TEMPLATE_BAND.1).min(STRIP.y1) - STRIP.y0,
     }
 }
 

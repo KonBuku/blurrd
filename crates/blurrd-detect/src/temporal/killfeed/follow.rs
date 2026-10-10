@@ -38,7 +38,7 @@ const JUMP_MISSES: u32 = 3;
 const FLICKER_PX: i32 = 1;
 /// Text whose ends lie within this many pixels of a name's text has the
 /// name's extent; a detection beyond it is another name.
-const SAME_EXTENT: i32 = 5;
+pub(super) const SAME_EXTENT: i32 = 5;
 /// "Nearly as well" for sub-pixel flicker.
 const FLICKER_MARGIN: f32 = 0.03;
 /// The slide-in search continues at most this many matches ...
