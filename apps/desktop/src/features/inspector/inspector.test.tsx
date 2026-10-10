@@ -102,7 +102,7 @@ describe("inspector", () => {
     backend.capabilitiesDelayMs = 0;
     useQueueStore.setState(useQueueStore.getInitialState());
     useJobSettingsStore.setState(useJobSettingsStore.getInitialState());
-    useJobsStore.setState({ running: {} });
+    useJobsStore.setState(useJobsStore.getInitialState());
     useUiStore.setState({ inspectorTab: "blur" });
   });
 

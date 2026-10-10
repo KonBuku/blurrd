@@ -34,6 +34,16 @@ export interface RenderRequest {
   readonly enabled: readonly DetectedRegion[];
 }
 
+/**
+ * One file of a `start_run` request: everything the analysis and the
+ * render of that file need, because settings are per file.
+ */
+export interface RunFile extends AnalysisRequest {
+  readonly settings: ExportSettings;
+  readonly blur: BlurParams;
+  readonly enabled: readonly DetectedRegion[];
+}
+
 /** Called with every event of a job, in order. */
 export type JobListener = (event: JobEvent) => void;
 
@@ -47,7 +57,39 @@ export function startRender(request: RenderRequest, onEvent: JobListener): Promi
   return invoke<JobId>("start_render", { ...request, onEvent: new Channel(onEvent) });
 }
 
-/** Cancels a running job; it then reports `Canceled`. */
+/**
+ * Verifies the frame ranges that edits changed since the last
+ * verification; runs before an export of an edited project (plan 7).
+ */
+export function startReverify(projectId: string, onEvent: JobListener): Promise<JobId> {
+  return invoke<JobId>("start_reverify", { projectId, onEvent: new Channel(onEvent) });
+}
+
+/**
+ * Queues the export of several files in the backend's run queue ("Export
+ * N files"). The backend analyses a file in the same pass unless its
+ * analysis is current, and runs the files one after another; their
+ * events share the channel and carry the job ids, which the command
+ * answers in the order of `files`.
+ */
+export function startRun(files: readonly RunFile[], onEvent: JobListener): Promise<JobId[]> {
+  return invoke<JobId[]>("start_run", { files, onEvent: new Channel(onEvent) });
+}
+
+/**
+ * Cancels a job, running or still waiting in the run queue; it then
+ * reports `Canceled`.
+ */
 export function cancelJob(job: JobId): Promise<void> {
   return invoke<void>("cancel_job", { job });
+}
+
+/** Pauses every job at the next frame; queued jobs wait. */
+export function pauseQueue(): Promise<void> {
+  return invoke<void>("pause_queue");
+}
+
+/** Resumes the jobs paused by `pauseQueue`. */
+export function resumeQueue(): Promise<void> {
+  return invoke<void>("resume_queue");
 }

@@ -27,6 +27,7 @@ const CASES: readonly [QueueStatus, string, string][] = [
     "Exporting · 63% · 388 fps · 0:21 left",
     "neutral",
   ],
+  [{ kind: "waiting", prior: { kind: "queued" } }, "Waiting to export", "muted"],
   [{ kind: "verifying", pass: 2, passes: 3 }, "Verifying · pass 2/3", "neutral"],
   [{ kind: "done", verified: true }, "Done · verified clean", "success"],
   [{ kind: "done", verified: false }, "Done · not verified", "neutral"],
@@ -52,13 +53,16 @@ describe("queue status", () => {
     expect(statusProgress({ kind: "analyzing", progress: 0.5, fps: null })).toBe(0.5);
     expect(statusProgress({ kind: "verifying", pass: 2, passes: 4 })).toBe(0.25);
     expect(statusProgress({ kind: "ready", boxes: 3 })).toBeUndefined();
+    expect(statusProgress({ kind: "waiting", prior: { kind: "queued" } })).toBeUndefined();
     expect(statusProgress({ kind: "unverified" })).toBeUndefined();
   });
 
   it("separates running, finished and waiting files", () => {
     const running = CASES.filter(([status]) => isRunning(status)).map(([status]) => status.kind);
     const finished = CASES.filter(([status]) => isFinished(status)).map(([status]) => status.kind);
-    expect(new Set(running)).toEqual(new Set(["probing", "analyzing", "exporting", "verifying"]));
+    expect(new Set(running)).toEqual(
+      new Set(["probing", "analyzing", "exporting", "waiting", "verifying"]),
+    );
     expect(new Set(finished)).toEqual(
       new Set(["done", "warnings", "unverified", "failed", "canceled"]),
     );
@@ -82,6 +86,10 @@ describe("queue status", () => {
       boxes: null,
     });
     expect(restingStatus({ kind: "unverified" })).toEqual({ kind: "unverified" });
+    expect(restingStatus({ kind: "waiting", prior: { kind: "done", verified: true } })).toEqual({
+      kind: "done",
+      verified: true,
+    });
   });
 
   it("reads saved statuses defensively", () => {

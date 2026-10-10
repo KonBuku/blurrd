@@ -1,4 +1,5 @@
 import { Ellipsis, FolderPlus, Plus, Search } from "lucide-react";
+import { memo } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { GpuStatusCard } from "@/features/gpu/GpuStatusCard";
 import { browseFiles, browseFolder } from "@/features/import/import";
+import { BatchProgress } from "@/features/jobs/BatchProgress";
 import { formatCount } from "@/lib/media";
 import { isFinished } from "@/lib/queue-status";
 import { SHORTCUTS } from "@/lib/shortcuts";
@@ -105,14 +107,19 @@ export function QueueSidebar({ open, width, resizing }: QueueSidebarProps) {
         ) : (
           <QueueList items={shown} />
         )}
+        <BatchProgress className="mr-1 shrink-0" />
         <GpuStatusCard variant="compact" className="shrink-0" />
       </div>
     </aside>
   );
 }
 
-/** The add button and the queue menu in the sidebar header. */
-function QueueActions() {
+/**
+ * The add button and the queue menu in the sidebar header. Memoized: the
+ * sidebar renders again for every queue update (job progress included),
+ * these controls only when their own state changes.
+ */
+const QueueActions = memo(function QueueActions() {
   const hasItems = useQueueStore((state) => state.items.length > 0);
   const hasFinished = useQueueStore((state) => state.items.some((item) => isFinished(item.status)));
   const queue = useQueueStore.getState;
@@ -178,4 +185,4 @@ function QueueActions() {
       </DropdownMenu>
     </>
   );
-}
+});

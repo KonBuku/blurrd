@@ -13,6 +13,7 @@ export type ShortcutId =
   | "toggleQueue"
   | "toggleInspector"
   | "openSettings"
+  | "exportFiles"
   | "closeOverlay"
   | "playPause"
   | "shuttleBack"
@@ -135,6 +136,11 @@ export const SHORTCUTS: Readonly<Record<ShortcutId, Shortcut>> = {
     ctrl("b", ["Ctrl", "Alt", "B"], { alt: true }),
   ),
   openSettings: shortcut("openSettings", "Open settings", ctrl(",", ["Ctrl", ","])),
+  exportFiles: shortcut(
+    "exportFiles",
+    "Export the selected recordings (or analyze the shown one first)",
+    ctrl("e", ["Ctrl", "E"]),
+  ),
   closeOverlay: shortcut(
     "closeOverlay",
     "Close settings, menus and dialogs",

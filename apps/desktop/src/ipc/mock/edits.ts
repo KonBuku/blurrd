@@ -208,6 +208,16 @@ export class MockProjects {
   }
 
   /**
+   * A finished `start_reverify`: the ranges edits changed are verified,
+   * so none is left and the report is renewed for the current revision.
+   */
+  reverify(path: string): void {
+    const state = this.state(path);
+    state.unverified = [];
+    state.report = mockVerifyReport(path, state.set.revision);
+  }
+
+  /**
    * `accept_report`: the open leaks of report `reportId` become accepted
    * and the last output loses its `_UNVERIFIED` suffix; answers the new
    * path.

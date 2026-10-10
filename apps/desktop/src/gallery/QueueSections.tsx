@@ -13,6 +13,7 @@ const STATUSES: readonly QueueStatus[] = [
   { kind: "analyzing", progress: 0.46, fps: 820 },
   { kind: "ready", boxes: 1284 },
   { kind: "exporting", progress: 0.63, fps: 388, etaMs: 21_000 },
+  { kind: "waiting", prior: { kind: "ready", boxes: 312 } },
   { kind: "verifying", pass: 2, passes: 3 },
   { kind: "done", verified: true },
   { kind: "done", verified: false },

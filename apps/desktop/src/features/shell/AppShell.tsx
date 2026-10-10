@@ -3,7 +3,10 @@ import { useEffect, useState } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { DropOverlay } from "@/features/import/DropOverlay";
 import { browseFiles, browseFolder } from "@/features/import/import";
+import { ExportShortcut } from "@/features/inspector/ExportFooter";
 import { INSPECTOR_ID, InspectorTabs } from "@/features/inspector/Inspector";
+import { FailureDetailsDialog } from "@/features/jobs/FailureDetailsDialog";
+import { useTaskbarProgress } from "@/features/jobs/useTaskbarProgress";
 import { INSPECTOR_TOGGLE_ID, PreviewFrame } from "@/features/preview/PreviewFrame";
 import { QUEUE_SIDEBAR_ID, QueueSidebar } from "@/features/queue/QueueSidebar";
 import { SettingsView } from "@/features/settings/SettingsView";
@@ -41,6 +44,7 @@ export function AppShell() {
   }, [inspectorAsSheet, setInspectorSheetOpen]);
 
   useGlobalShortcuts();
+  useTaskbarProgress();
 
   const sidebarOpenWidth = clamp(ui.sidebarWidth, SIDEBAR.min, layout.sidebarMax);
 
@@ -119,6 +123,8 @@ export function AppShell() {
         </Sheet>
       )}
       <DropOverlay />
+      <FailureDetailsDialog />
+      <ExportShortcut />
     </div>
   );
 }
@@ -142,6 +148,9 @@ function useGlobalShortcuts() {
           break;
         case "removeFromQueue":
           // Handled by the queue list, where the selection has focus.
+          return;
+        case "exportFiles":
+          // Handled by `ExportShortcut`, which knows the footer's action.
           return;
         case "toggleQueue":
           ui.toggleSidebar();

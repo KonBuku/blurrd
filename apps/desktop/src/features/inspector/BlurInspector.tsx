@@ -20,7 +20,7 @@ export function BlurInspector() {
   const { lead, settings, update } = useInspectorTarget();
   const { project, tracks } = useLeadProject(lead);
   const queryClient = useQueryClient();
-  const running = useJobsStore((state) => (lead ? state.running[lead.id] : undefined));
+  const running = useJobsStore((state) => (lead ? lead.id in state.running : false));
 
   return (
     <div className="flex flex-col gap-4">
@@ -43,8 +43,8 @@ export function BlurInspector() {
             <Button
               variant="secondary"
               className="self-start"
-              disabled={running !== undefined}
-              aria-busy={running !== undefined}
+              disabled={running}
+              aria-busy={running}
               onClick={() => void analyzeItem(lead, project.id, settings, queryClient)}
             >
               <RefreshCw strokeWidth={1.5} />

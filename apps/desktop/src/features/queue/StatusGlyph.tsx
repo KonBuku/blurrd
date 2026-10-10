@@ -26,6 +26,7 @@ const GLYPHS: Readonly<Record<QueueStatusKind, LucideIcon>> = {
   analyzing: Loader,
   ready: CircleDot,
   exporting: Loader,
+  waiting: Clock,
   verifying: ScanSearch,
   done: CircleCheck,
   warnings: TriangleAlert,

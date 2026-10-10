@@ -38,8 +38,9 @@ struct SecondInstance {
 /// the running window instead and hands its file arguments to the
 /// frontend), log, window state (size, position and maximised state are
 /// restored on start and saved on exit), store (holds the settings file,
-/// which the setup hook opens) and dialog (the open dialog for adding
-/// recordings).
+/// which the setup hook opens), dialog (open and save dialogs),
+/// notification (a system notification when a job ends while the window
+/// is in the background) and opener (shows an exported file in Explorer).
 ///
 /// # Errors
 ///
@@ -57,6 +58,8 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             tauri_plugin_log::log::info!("blurrd {} started", env!("CARGO_PKG_VERSION"));
             open_settings(app.handle());

@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Copy, Trash2 } from "lucide-react";
+import { CircleAlert, Copy, FolderOpen, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { toast } from "sonner";
 
@@ -11,6 +11,8 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { DropdownMenuShortcut } from "@/components/ui/dropdown-menu";
+import { showFailureDetails } from "@/features/jobs/FailureDetailsDialog";
+import { showInFolder } from "@/features/jobs/batch-end";
 import { logWarning } from "@/lib/log";
 import { formatCount } from "@/lib/media";
 import { SHORTCUTS } from "@/lib/shortcuts";
@@ -138,6 +140,10 @@ export function QueueList({ items }: QueueListProps) {
   const onRemove = useCallback((id: string) => useQueueStore.getState().remove([id]), []);
 
   const count = selected.size;
+  // Actions on one file: the right-clicked row (it is selected alone).
+  const single = count === 1 ? items.find((item) => selected.has(item.id)) : undefined;
+  const output = single?.output ?? null;
+  const failure = single?.status.kind === "failed" ? single.status : null;
 
   return (
     <ContextMenu>
@@ -186,6 +192,26 @@ export function QueueList({ items }: QueueListProps) {
           <Copy aria-hidden />
           {count > 1 ? `Copy ${formatCount(count)} paths` : "Copy path"}
         </ContextMenuItem>
+        {output !== null && (
+          <ContextMenuItem onSelect={() => void showInFolder(output)}>
+            <FolderOpen aria-hidden />
+            Show export in folder
+          </ContextMenuItem>
+        )}
+        {single && failure && (
+          <ContextMenuItem
+            onSelect={() =>
+              showFailureDetails({
+                title: `${single.name} failed`,
+                message: failure.reason,
+                detail: failure.detail,
+              })
+            }
+          >
+            <CircleAlert aria-hidden />
+            Show error details…
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem
           variant="destructive"

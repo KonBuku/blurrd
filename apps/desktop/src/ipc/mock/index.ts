@@ -11,7 +11,7 @@ import type { AppError } from "@/bindings/AppError";
 import type { Capabilities } from "@/bindings/Capabilities";
 import type { Override } from "@/bindings/Override";
 import type { SessionEntry } from "@/ipc/commands";
-import type { AnalysisRequest, RenderRequest } from "@/ipc/jobs";
+import type { AnalysisRequest, RenderRequest, RunFile } from "@/ipc/jobs";
 import type { ExportSettings } from "@/bindings/ExportSettings";
 import { pathKey } from "@/lib/media";
 import type { PresetData } from "@/lib/presets";
@@ -22,6 +22,7 @@ import { MOCK_CAPABILITIES } from "./capabilities";
 import { MockProjects } from "./edits";
 import { createEventBus } from "./events";
 import { MockJobs, type MockChannel } from "./jobs";
+import { installNotificationShim } from "./notification";
 import { mockOutput } from "./output";
 import { MockPresets } from "./presets";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
@@ -87,6 +88,26 @@ export interface MockBackend {
   readonly outputs: Set<string>;
   /** Presets and the preset files of the fake file system. */
   readonly presets: MockPresets;
+  /**
+   * How long `start_run` waits before it answers the job ids, in
+   * milliseconds; the jobs already run, so their first events arrive
+   * before the ids (a race the frontend must handle).
+   */
+  runAnswerDelayMs: number;
+  /** Whether the mocked main window has the focus (`is_focused`). */
+  focused: boolean;
+  /** Every taskbar progress state the window was given, in order. */
+  readonly taskbar: TaskbarCall[];
+  /** Every system notification shown, in order. */
+  readonly notifications: { readonly title: string; readonly body: string }[];
+  /** Every file shown in Explorer, in order. */
+  readonly revealed: string[];
+}
+
+/** The value of one `set_progress_bar` call. */
+export interface TaskbarCall {
+  readonly status?: string;
+  readonly progress?: number;
 }
 
 /** Name of the settings file, as opened by the real shell. */
@@ -167,7 +188,13 @@ export function installMockBackend(): MockBackend {
     jobs: new MockJobs(),
     outputs: new Set(),
     presets: new MockPresets(),
+    runAnswerDelayMs: 0,
+    focused: true,
+    taskbar: [],
+    notifications: [],
+    revealed: [],
   };
+  installNotificationShim();
   const installedAt = performance.now();
   const store = (cmd: string, args: StoreArgs) => {
     if (cmd === "plugin:store|get_store") return args.path === SETTINGS_FILE ? SETTINGS_RID : null;
@@ -208,6 +235,23 @@ export function installMockBackend(): MockBackend {
       return leak ? { frame: leak.frame_range[0], rect: leak.rect } : null;
     },
   });
+
+  /** Writes the export of `path` and answers the render's summary. */
+  const render = (path: string, output: ExportSettings) => {
+    const { report, unverified } = backend.projects.state(path);
+    const state = unverified.length > 0 ? "Unverified" : (report?.summary.state ?? "Unverified");
+    const { media } = mockProject(path);
+    const written = mockOutput(path, media, output, backend.outputs, state === "Clean").path;
+    backend.outputs.add(pathKey(written));
+    backend.projects.state(path).lastOutput = written;
+    return {
+      frames: frameCount(path),
+      elapsed_ms: backend.jobs.durationMs,
+      output: written,
+      verify: state,
+      warnings: 0,
+    };
+  };
 
   mockIPC(async (cmd, args) => {
     if (events.handles(cmd)) return events.invoke(cmd, args as Parameters<typeof events.invoke>[1]);
@@ -306,23 +350,74 @@ export function installMockBackend(): MockBackend {
         const { settings: output, onEvent } = args as unknown as RenderRequest & {
           onEvent: MockChannel;
         };
-        const { media } = mockProject(path);
-        return backend.jobs.start("Render", frameCount(path), onEvent, () => {
-          const { report, unverified } = backend.projects.state(path);
-          const state =
-            unverified.length > 0 ? "Unverified" : (report?.summary.state ?? "Unverified");
-          const written = mockOutput(path, media, output, backend.outputs, state === "Clean").path;
-          backend.outputs.add(pathKey(written));
-          backend.projects.state(path).lastOutput = written;
+        return backend.jobs.start("Render", frameCount(path), onEvent, () => render(path, output));
+      }
+      case "start_reverify": {
+        const path = pathOf(args);
+        const { onEvent } = args as unknown as { onEvent: MockChannel };
+        const frames = backend.projects
+          .state(path)
+          .unverified.reduce((sum, [f0, f1]) => sum + Math.max(f1 - f0 + 1, 1), 0);
+        return backend.jobs.start("ReverifyRanges", frames, onEvent, () => {
+          backend.projects.reverify(path);
           return {
-            frames: frameCount(path),
+            frames,
             elapsed_ms: backend.jobs.durationMs,
-            output: written,
-            verify: state,
+            output: null,
+            verify: backend.projects.state(path).report?.summary.state ?? null,
             warnings: 0,
           };
         });
       }
+      case "start_run": {
+        const { files, onEvent } = args as unknown as { files: RunFile[]; onEvent: MockChannel };
+        const entries = files.map((file) => {
+          const path = pathOf(file);
+          const { analyzed, unverified } = backend.projects.state(path);
+          // Like the backend: a file whose analysis is current is only rendered.
+          const current = analyzed && unverified.length === 0;
+          return {
+            kind: current ? ("Render" as const) : ("Run" as const),
+            totalFrames: frameCount(path),
+            finish: () => {
+              if (!current) {
+                backend.projects.analyze(
+                  path,
+                  new Set(file.regions.enabled.filter(isEngineRegion)),
+                  file.verify.enabled,
+                );
+              }
+              return render(path, file.settings);
+            },
+          };
+        });
+        const jobs = backend.jobs.enqueue(entries, onEvent);
+        await delay(backend.runAnswerDelayMs);
+        return jobs;
+      }
+      case "pause_queue":
+        backend.jobs.paused = true;
+        return null;
+      case "resume_queue":
+        backend.jobs.paused = false;
+        return null;
+      case "plugin:window|set_progress_bar":
+        backend.taskbar.push((args as { value: TaskbarCall }).value);
+        return null;
+      case "plugin:window|is_focused":
+        return backend.focused;
+      case "plugin:notification|is_permission_granted":
+        return true;
+      case "plugin:notification|request_permission":
+        return "granted";
+      case "plugin:notification|notify": {
+        const { options } = args as { options: { title: string; body?: string } };
+        backend.notifications.push({ title: options.title, body: options.body ?? "" });
+        return null;
+      }
+      case "plugin:opener|reveal_item_in_dir":
+        backend.revealed.push(...(args as { paths: string[] }).paths);
+        return null;
       case "accept_report": {
         const path = pathOf(args);
         const { reportId } = args as { reportId: string };

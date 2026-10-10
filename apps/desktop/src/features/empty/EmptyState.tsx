@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { browseFiles, browseFolder } from "@/features/import/import";
 import { GpuStatusCard } from "@/features/gpu/GpuStatusCard";
+import { RecentExports } from "@/features/jobs/RecentExports";
 import { SHORTCUTS } from "@/lib/shortcuts";
 
 /** Local storage key that hides the first-run checklist for good. */
@@ -36,8 +37,9 @@ function dismissChecklist(): void {
 /**
  * The preview frame while the queue is empty (design 8.2): brand mark,
  * what blurrd does, the two ways to add recordings, the accepted formats,
- * the GPU card and, until dismissed, a three-step checklist. The whole
- * window is a drop target, so the text invites dropping too.
+ * the GPU card, the files exported in this session and, until
+ * dismissed, a three-step checklist. The whole window is a drop target,
+ * so the text invites dropping too.
  */
 export function EmptyState() {
   const [showChecklist, setShowChecklist] = useState(() => !checklistDismissed());
@@ -76,6 +78,7 @@ export function EmptyState() {
       </div>
       <div className="flex w-full max-w-xl flex-wrap justify-center gap-3 text-left">
         <GpuStatusCard variant="full" className="min-w-64 flex-1" />
+        <RecentExports className="min-w-64 flex-1" />
         {showChecklist && (
           <Card aria-label="Getting started" className="relative min-w-64 flex-1 gap-2 px-3 py-3">
             <h2 className="pr-6 text-ui-base font-medium">Getting started</h2>

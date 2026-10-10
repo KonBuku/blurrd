@@ -529,8 +529,9 @@ regions from the shown file's settings.
   dropped when the row closes. "Accept and rename" (outputs named
   `_UNVERIFIED`) calls `accept_report`.
 - **Footer:** Analyze, Export, Export again or Cancel for the shown file,
-  and the export summary. Job events update the queue status
-  (`src/features/jobs/jobs.ts`).
+  "Export N files" when several are selected, and the export summary
+  (Ctrl+E runs the same action from anywhere in the workspace). Job
+  events update the queue status (`src/features/jobs/jobs.ts`).
 
 The request builders (`src/lib/job-request.ts`) put every inspector
 value into the request unchanged; `inspector.test.tsx` changes every
@@ -545,6 +546,47 @@ in `window.blurrdMock.presets.files`, and serves leak crops at
 Manual checks in the real window (not automated: no visible windows in
 agent runs): the native folder dialog of "Choose folder", the open
 dialog of "Import presets…" and the save dialog of "Export preset".
+
+### Processing
+
+An export of one file first verifies the frame ranges that edits changed
+(`start_reverify`), then renders (`start_render`). "Export N files"
+hands the selected files to the backend's run queue (`start_run`, one
+job per file, run one after another); the files wait as "Waiting to
+export" until their job starts. Events of a job whose id the command
+has not answered yet are kept and delivered once it has. Operations that
+overlap form a batch (`src/lib/batch.ts`):
+
+- **Processing card** (`src/features/jobs/ProcessingCard.tsx`), above the
+  transport while the shown file runs: the stages of its jobs, the
+  overall progress, speed, frames and time left, Pause/Resume
+  (`pause_queue`, `resume_queue`) and Cancel. Cancel works at every
+  stage, for waiting files, and before the backend has answered the job
+  id (it is sent with the id).
+- **Queue progress** above the GPU card and the **taskbar button**
+  (`setProgressBar`) show the batch's percentage: paused while the queue
+  is paused, red once a file failed. The button only hears about changes
+  of the whole percentage or the state.
+- When the batch ends: one Windows notification (Settings › General,
+  only while the window is in the background), and the folder of the
+  last export opens if the user asked for that. Toasts name each result;
+  "Show in folder" reveals the file, "Details" on a failure opens the
+  message and the technical detail with "Copy details" (also in the queue
+  menu: "Show error details…"). The empty state lists this session's
+  exports (in memory only).
+
+The frontend reacts to job events only, never to timers or animation
+frames, so a minimised window does not slow the queue down; queue rows
+follow progress at most four times a second, the card at the event
+rate. The mock backend (`window.blurrdMock`) records the taskbar states
+(`taskbar`), notifications (`notifications`, focus in `focused`) and
+revealed files (`revealed`); its jobs run on their own clock, report at
+20 Hz and support `paused`; `runAnswerDelayMs` lets `start_run` answer
+after the first events.
+
+Manual checks in the real window: the taskbar progress (normal, paused,
+error), a notification while blurrd is minimised or behind another
+window, and "Show in folder" opening File Explorer.
 
 ### Design tokens and typography
 

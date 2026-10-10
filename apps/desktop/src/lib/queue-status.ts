@@ -26,6 +26,11 @@ export type QueueStatus =
       readonly fps: number | null;
       readonly etaMs: number | null;
     }
+  /**
+   * Queued for export in the backend's run queue, behind other files;
+   * `prior` is the status it returns to when the export never starts.
+   */
+  | { readonly kind: "waiting"; readonly prior: RestingStatus }
   /** Verification is running. */
   | { readonly kind: "verifying"; readonly pass: number; readonly passes: number }
   /** Exported; `verified` is false when verification was switched off. */
@@ -48,7 +53,7 @@ export type QueueStatusKind = QueueStatus["kind"];
 /** Statuses that survive a restart (no job is running). */
 export type RestingStatus = Exclude<
   QueueStatus,
-  { kind: "probing" | "analyzing" | "exporting" | "verifying" }
+  { kind: "probing" | "analyzing" | "exporting" | "waiting" | "verifying" }
 >;
 
 /** Colour role of a status glyph; the text always says the same. */
@@ -91,6 +96,8 @@ export function statusText(status: QueueStatus): string {
         fps(status.fps),
         status.etaMs === null ? null : `${formatDuration(status.etaMs / 1000)} left`,
       );
+    case "waiting":
+      return "Waiting to export";
     case "verifying":
       return `Verifying${JOINER}pass ${status.pass}/${status.passes}`;
     case "done":
@@ -110,6 +117,7 @@ export function statusText(status: QueueStatus): string {
 export function statusTone(status: QueueStatus): StatusTone {
   switch (status.kind) {
     case "queued":
+    case "waiting":
     case "canceled":
       return "muted";
     case "done":
@@ -124,12 +132,13 @@ export function statusTone(status: QueueStatus): StatusTone {
   }
 }
 
-/** Whether a job (probe, analysis, export or verification) is running. */
+/** Whether a job (probe, analysis, export or verification) is running or waiting to run. */
 export function isRunning(status: QueueStatus): boolean {
   return (
     status.kind === "probing" ||
     status.kind === "analyzing" ||
     status.kind === "exporting" ||
+    status.kind === "waiting" ||
     status.kind === "verifying"
   );
 }
@@ -176,6 +185,8 @@ export function restingStatus(status: QueueStatus): RestingStatus {
     case "exporting":
     case "verifying":
       return { kind: "ready", boxes: null };
+    case "waiting":
+      return status.prior;
     default:
       return status;
   }
@@ -222,11 +233,12 @@ const SORT_ORDER: Readonly<Record<QueueStatusKind, number>> = {
   exporting: 3,
   verifying: 4,
   analyzing: 5,
-  probing: 6,
-  ready: 7,
-  queued: 8,
-  done: 9,
-  canceled: 10,
+  waiting: 6,
+  probing: 7,
+  ready: 8,
+  queued: 9,
+  done: 10,
+  canceled: 11,
 };
 
 /** Rank of a status when sorting by status (lower first). */

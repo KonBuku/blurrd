@@ -3,7 +3,7 @@
  * into the request unchanged; lists are normalised (regions in inspector
  * order, words trimmed and distinct) so equal settings give equal requests.
  */
-import type { AnalysisRequest, RenderRequest } from "@/ipc/jobs";
+import type { AnalysisRequest, RenderRequest, RunFile } from "@/ipc/jobs";
 
 import { orderedRegions, parseWordList, type JobSettings } from "./job-settings";
 
@@ -33,4 +33,10 @@ export function renderRequest(projectId: string, settings: JobSettings): RenderR
     blur: settings.blur,
     enabled: orderedRegions(settings.regions.enabled),
   };
+}
+
+/** One file of a `start_run` request: the analysis and render requests in one. */
+export function runFile(projectId: string, settings: JobSettings): RunFile {
+  const { settings: exportSettings, blur, enabled } = renderRequest(projectId, settings);
+  return { ...analysisRequest(projectId, settings), settings: exportSettings, blur, enabled };
 }

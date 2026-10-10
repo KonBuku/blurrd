@@ -8,9 +8,10 @@ import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyState } from "@/features/empty/EmptyState";
+import { ProcessingCard } from "@/features/jobs/ProcessingCard";
 import { INSPECTOR_ID } from "@/features/inspector/Inspector";
 import { Frame, FrameHeader, FrameTitle } from "@/features/shell/Frame";
-import { baseName, previewSummary } from "@/lib/media";
+import { baseName, pathKey, previewSummary } from "@/lib/media";
 import { SHORTCUTS } from "@/lib/shortcuts";
 import { usePreviewStore } from "@/store/preview";
 import { shownItemId, useQueueStore } from "@/store/queue";
@@ -165,6 +166,7 @@ function ProjectPreview({ path, toggle }: ProjectPreviewProps) {
               </>
             )}
           </VideoStage>
+          <ProcessingCard itemId={pathKey(path)} />
           <Transport data={state.data} />
           <Timeline data={state.data} report={report.data ?? null} />
         </>
