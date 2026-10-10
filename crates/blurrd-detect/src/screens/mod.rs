@@ -1,7 +1,8 @@
 //! Screen surfaces: names outside the gameplay HUD (decision D8).
 //!
-//! These surfaces show player names on full-screen or large overlays;
-//! each gets its reader in its own module.
+//! These surfaces show player names on full-screen or large overlays:
+//!
+//! - the scoreboard ([`scoreboard`]).
 //!
 //! Each is found from structure only, in three steps:
 //!
@@ -9,7 +10,7 @@
 //!    edges of the surface's panel make a frame a candidate, at a cost
 //!    small enough for every frame of normal gameplay.
 //! 2. **Read**: only for candidate frames, the surface's native name
-//!    zone is resampled to reference pixels; the panel's
+//!    zone ([`zone`]) is resampled to reference pixels; the panel's
 //!    structure is confirmed and placed precisely, and every name slot is
 //!    listed with whether it shows ink ([`Slot`]).
 //! 3. **Temporal** ([`temporal`]): confirmed frames form runs (short gaps
@@ -27,11 +28,48 @@
 //! do not change what is found. World-space name tags above players'
 //! heads have no panel and are never boxed (out of scope, D8).
 
+mod detector;
 pub mod edges;
 pub mod gate;
+mod ink;
 mod sample;
+pub mod scoreboard;
 pub mod temporal;
 
+use blurrd_core::{RectI, Region};
+
+pub use detector::{ScreenDetector, ScreenSignals};
 pub use gate::{GATE_STEP, GATE_THRESHOLD, GateSignal, GateSpec, Gates};
+pub use ink::{INK_CONTRAST, INK_MIN_CELLS, INK_MIN_COLUMNS};
 pub use sample::{Anchor, FrameView, RefPlane, ScreenMap};
 pub use temporal::{Slot, SurfaceFrame, SurfaceTrack};
+
+/// The gate of a screen surface, or `None` for a HUD region.
+pub const fn gate_spec(region: Region) -> Option<&'static GateSpec> {
+    match region {
+        Region::Scoreboard => Some(&scoreboard::GATE),
+        _ => None,
+    }
+}
+
+/// How a screen surface is anchored, or `None` for a HUD region. Boxes of
+/// the surface (reference pixels) map to source pixels with
+/// [`ScreenMap::to_source`] and this anchor.
+pub const fn anchor(region: Region) -> Option<Anchor> {
+    match region {
+        Region::Scoreboard => Some(Anchor::Center),
+        _ => None,
+    }
+}
+
+/// The native zone a surface's reader needs, in source pixels of a frame
+/// mapped by `map`, or `None` for a HUD region. The engine crops it
+/// (only for frames where the surface's gate makes a candidate) and
+/// passes it as a [`FrameView::crop`].
+pub fn zone(region: Region, map: &ScreenMap) -> Option<RectI> {
+    let rect = match region {
+        Region::Scoreboard => scoreboard::ZONE,
+        _ => return None,
+    };
+    Some(map.to_source(rect, anchor(region)?))
+}

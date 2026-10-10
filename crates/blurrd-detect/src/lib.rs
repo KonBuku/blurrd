@@ -65,5 +65,6 @@ pub use classes::{Class, ClassParams, PixelClasses, hsv};
 pub use detection::{DetectError, Detection};
 pub use image::{BitMask, GrayImage, ImageError, RgbView};
 pub use killfeed::KillFeedDetector;
+pub use screens::ScreenDetector;
 pub use temporal::killfeed::KillFeedTracker;
 pub use voice::{VoiceDetector, VoiceTracker};
