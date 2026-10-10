@@ -16,11 +16,13 @@
 //! its structure to be found; the post-roll covers the end of a fade-out
 //! and the encoder's ghosting of the last frame.
 //!
-//! While a surface is on, every name slot that showed ink in any
-//! confirmed frame of the run (seen so far within the lookahead) gets its
-//! slot box in every frame of the run: a name too faint to show ink
-//! while fading is still covered, and an empty row (fewer players) stays
-//! unblurred. Slots are followed from frame to frame by position (the
+//! While a surface is on, every name slot that showed ink in at least
+//! [`MIN_CONFIRMED`] confirmed frames of the run (seen so far within the
+//! lookahead) gets its slot box in every frame of the run: a name too
+//! faint to show ink while fading is still covered, an empty row (fewer
+//! players) stays unblurred, and a slot found in a single read (a
+//! marginal structure, such as a killer's strip read into gameplay above
+//! a combat report) blurs nothing. Slots are followed from frame to frame by position (the
 //! same kind, overlapping columns, centres at most [`MATCH_DY`] apart),
 //! so a reader may miss a faint row or card without confusing the
 //! others. Positions are trusted only from reads in which the slot shows
@@ -39,11 +41,11 @@ use blurrd_core::{NameKind, RectI, Region};
 
 use crate::detection::Detection;
 
-/// Fewest confirmed frames a run needs to get boxes: a structure found in
-/// one frame only is a coincidence of gameplay (measured on real clips:
-/// such single frames, never a real surface, which stays open for tens
-/// of frames). Two frames keep a surface flashed open for 1/30 s
-/// covered.
+/// Fewest confirmed frames a run needs to get boxes, and fewest reads in
+/// which a slot must show ink to get its box: a structure found in one
+/// frame only is a coincidence of gameplay (measured on real clips: such
+/// single frames, never a real surface, which stays open for tens of
+/// frames). Two frames keep a surface flashed open for 1/30 s covered.
 pub const MIN_CONFIRMED: u32 = 2;
 /// Most frames a decision waits for.
 pub const LOOKAHEAD: u32 = 60;
@@ -106,8 +108,9 @@ struct Run {
     held: bool,
     /// Confirmed frames in the run.
     confirmed: u32,
-    /// The slots that showed ink, each at its last known position.
-    ink: Vec<Slot>,
+    /// The slots that showed ink, each at its last known position, with
+    /// the number of reads in which it showed ink.
+    ink: Vec<(Slot, u32)>,
 }
 
 impl Slot {
@@ -181,11 +184,13 @@ impl SurfaceTrack {
                 run.last = frame;
                 run.held = true;
                 run.confirmed += 1;
-                for s in slots {
-                    match run.ink.iter_mut().find(|k| k.matches(s)) {
-                        Some(known) if s.ink => known.rect = s.rect,
-                        None if s.ink => run.ink.push(*s),
-                        _ => {}
+                for s in slots.iter().filter(|s| s.ink) {
+                    match run.ink.iter_mut().find(|(k, _)| k.matches(s)) {
+                        Some((known, seen)) => {
+                            known.rect = s.rect;
+                            *seen += 1;
+                        }
+                        None => run.ink.push((*s, 1)),
                     }
                 }
             }
@@ -246,7 +251,8 @@ impl SurfaceTrack {
             .and_then(|(_, s)| s.as_ref());
         run.ink
             .iter()
-            .map(|known| {
+            .filter(|(_, seen)| *seen >= MIN_CONFIRMED)
+            .map(|(known, _)| {
                 let read = own.and_then(|s| s.iter().find(|s| s.ink && s.matches(known)));
                 let (rect, margin) = match read {
                     Some(slot) => (slot.rect, 0),
@@ -323,22 +329,51 @@ mod tests {
     #[test]
     fn covers_pre_roll_run_and_post_roll_with_union_of_ink() {
         let mut frames = vec![(false, false); 20];
-        // Read at 8..=11; ink only at 10 (a name too faint before).
+        // Read at 8..=11; ink only at 10 and 11 (a name too faint before).
         for f in &mut frames[8..12] {
             *f = (true, false);
         }
         frames[10].1 = true;
+        frames[11].1 = true;
         let out = run(&frames);
         let boxed: Vec<u32> = out.iter().filter(|o| o.1 > 0).map(|o| o.0).collect();
         let first = 8 - PRE_ROLL;
         let last = 11 + POST_ROLL;
         assert_eq!(boxed, (first..=last).collect::<Vec<_>>());
-        // Only the read with ink gives a position: frame 10 uses its own,
-        // every other frame that one grown by the margin.
+        // Only the reads with ink give a position: frames 10 and 11 use
+        // their own, every other frame the nearest one grown by the margin.
         assert_eq!(out[10].2, 110);
-        for f in [first, 9, 11, last] {
+        assert_eq!(out[11].2, 111);
+        for f in [first, 9] {
             assert_eq!(out[f as usize].2, 110 - UNREAD_MARGIN);
         }
+        assert_eq!(out[last as usize].2, 111 - UNREAD_MARGIN);
+    }
+
+    #[test]
+    fn a_slot_with_ink_in_a_single_read_gets_no_box() {
+        let slot = |y: i32, ink: bool| Slot {
+            kind: NameKind::RecapName,
+            rect: RectI::new(10, y, 50, y + 20).unwrap(),
+            ink,
+        };
+        let mut track = SurfaceTrack::new(Region::DeathRecap);
+        let mut out = vec![];
+        for i in 0..10 {
+            // A card read in every frame; a strip above it in frame 4 only.
+            let mut slots = vec![slot(200, true)];
+            if i == 4 {
+                slots.push(slot(100, true));
+            }
+            let data = SurfaceFrame {
+                candidate: true,
+                slots: Some(slots),
+            };
+            track.push(i, data, &mut out);
+        }
+        track.finish(&mut out);
+        assert_eq!(out.len(), 10);
+        assert!(out.iter().all(|(_, b)| b.len() == 1 && b[0].rect.y0 == 200));
     }
 
     #[test]
