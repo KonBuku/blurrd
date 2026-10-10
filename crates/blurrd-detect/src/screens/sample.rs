@@ -180,7 +180,7 @@ pub struct RefPlane {
     data: Vec<[i16; 3]>,
     edges_x: Vec<(usize, usize)>,
     edges_y: Vec<(usize, usize)>,
-    sums: Vec<[u32; 3]>,
+    columns: Vec<u32>,
 }
 
 impl Default for RefPlane {
@@ -198,7 +198,7 @@ impl Default for RefPlane {
             data: Vec::new(),
             edges_x: Vec::new(),
             edges_y: Vec::new(),
-            sums: Vec::new(),
+            columns: Vec::new(),
         }
     }
 }
@@ -251,6 +251,16 @@ impl RefPlane {
             vh,
         );
         let width = self.width;
+        // The view columns any cell covers (cells outside the view have
+        // empty footprints).
+        let span = self
+            .edges_x
+            .iter()
+            .filter(|&&(x0, x1)| x1 > x0)
+            .fold(None, |acc: Option<(usize, usize)>, &(x0, x1)| {
+                Some(acc.map_or((x0, x1), |(a, b)| (a.min(x0), b.max(x1))))
+            })
+            .unwrap_or((0, 0));
         // Whether every cell covers at most one view column (1080p and
         // below at step 1): then a cell row is a plain copy.
         let single_columns = self.edges_x.iter().all(|&(x0, x1)| x1 - x0 <= 1);
@@ -277,22 +287,28 @@ impl RefPlane {
                 }
                 continue;
             }
-            let rows = (y0..y1).map(|y| view.pixels.row(y as u32));
-            self.sums.clear();
-            self.sums.resize(width, [0; 3]);
-            for row in rows {
-                for (sum, &(x0, x1)) in self.sums.iter_mut().zip(&self.edges_x) {
-                    for px in row[3 * x0..3 * x1].as_chunks::<3>().0 {
-                        sum[0] += u32::from(px[0]);
-                        sum[1] += u32::from(px[1]);
-                        sum[2] += u32::from(px[2]);
-                    }
+            // Sum the footprint's rows per view column (a plain, vectorised
+            // add), then every cell's sum from those column sums: the
+            // cell loop runs once per cell row, not once per view row.
+            self.columns.clear();
+            self.columns.resize(3 * (span.1 - span.0), 0);
+            for y in y0..y1 {
+                let row = &view.pixels.row(y as u32)[3 * span.0..3 * span.1];
+                for (sum, &v) in self.columns.iter_mut().zip(row) {
+                    *sum += u32::from(v);
                 }
             }
             let h = (y1 - y0) as u32;
-            for ((cell, sum), &(x0, x1)) in cells.iter_mut().zip(&self.sums).zip(&self.edges_x) {
+            for (cell, &(x0, x1)) in cells.iter_mut().zip(&self.edges_x) {
                 let n = h * (x1 - x0) as u32;
                 if n > 0 {
+                    let mut sum = [0u32; 3];
+                    for px in self.columns[3 * (x0 - span.0)..3 * (x1 - span.0)]
+                        .as_chunks::<3>()
+                        .0
+                    {
+                        sum = [sum[0] + px[0], sum[1] + px[1], sum[2] + px[2]];
+                    }
                     *cell = sum.map(|s| ((s + n / 2) / n) as i16);
                 }
             }
