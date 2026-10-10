@@ -47,14 +47,16 @@ enum Surface {
     Deathmatch,
     Recap(usize),
     Spectating,
+    MatchEnd,
 }
 
-const SURFACES: [Surface; 5] = [
+const SURFACES: [Surface; 6] = [
     Surface::Teams,
     Surface::Deathmatch,
     Surface::Recap(1),
     Surface::Recap(4),
     Surface::Spectating,
+    Surface::MatchEnd,
 ];
 
 fn names(rng: &mut Rng, n: usize, scripts: bool) -> Vec<String> {
@@ -137,6 +139,15 @@ fn scene(
             fonts,
             SpectatingSpec {
                 name: synth_name(&mut rng, NameStyle::TwoWord),
+                timing,
+            },
+        ),
+        Surface::MatchEnd => s.with_match_end(
+            fonts,
+            MatchEndSpec {
+                kind: MatchEndKind::Victory,
+                names: names(&mut rng, 5, scripts),
+                mvp: 1,
                 timing,
             },
         ),
@@ -404,7 +415,7 @@ fn names_in_other_scripts_are_covered() {
         }
         Err(missing) => panic!("{missing}"),
     };
-    for surface in [Surface::Teams, Surface::Recap(3)] {
+    for surface in [Surface::Teams, Surface::Recap(3), Surface::MatchEnd] {
         let s = scene(
             &fonts,
             Layout::reference(),

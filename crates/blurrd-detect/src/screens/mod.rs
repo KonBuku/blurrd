@@ -4,7 +4,8 @@
 //!
 //! - the scoreboard ([`scoreboard`]),
 //! - the death recap and combat report ([`recap`]),
-//! - the spectated player's "switch player" widget ([`spectating`]).
+//! - the spectated player's "switch player" widget ([`spectating`]),
+//! - the match-end, MVP and round-end screens ([`match_end`]).
 //!
 //! Each is found from structure only, in three steps:
 //!
@@ -34,6 +35,7 @@ mod detector;
 pub mod edges;
 pub mod gate;
 mod ink;
+pub mod match_end;
 pub mod recap;
 mod sample;
 pub mod scoreboard;
@@ -54,6 +56,7 @@ pub const fn gate_spec(region: Region) -> Option<&'static GateSpec> {
         Region::Scoreboard => Some(&scoreboard::GATE),
         Region::DeathRecap => Some(&recap::GATE),
         Region::Spectating => Some(&spectating::GATE),
+        Region::MatchEnd => Some(&match_end::GATE),
         _ => None,
     }
 }
@@ -63,7 +66,7 @@ pub const fn gate_spec(region: Region) -> Option<&'static GateSpec> {
 /// [`ScreenMap::to_source`] and this anchor.
 pub const fn anchor(region: Region) -> Option<Anchor> {
     match region {
-        Region::Scoreboard => Some(Anchor::Center),
+        Region::Scoreboard | Region::MatchEnd => Some(Anchor::Center),
         Region::DeathRecap => Some(Anchor::Right),
         Region::Spectating => Some(Anchor::Left),
         _ => None,
@@ -79,6 +82,7 @@ pub fn zone(region: Region, map: &ScreenMap) -> Option<RectI> {
         Region::Scoreboard => scoreboard::ZONE,
         Region::DeathRecap => recap::ZONE,
         Region::Spectating => spectating::ZONE,
+        Region::MatchEnd => match_end::ZONE,
         _ => return None,
     };
     Some(map.to_source(rect, anchor(region)?))

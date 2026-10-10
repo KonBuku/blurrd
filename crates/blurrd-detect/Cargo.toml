@@ -29,6 +29,10 @@ name = "killfeed"
 harness = false
 
 [[bench]]
+name = "screens"
+harness = false
+
+[[bench]]
 name = "voice"
 harness = false
 

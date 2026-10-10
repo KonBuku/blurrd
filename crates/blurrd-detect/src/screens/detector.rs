@@ -6,6 +6,7 @@ use blurrd_core::{Region, RegionSet};
 
 use super::gate::{GateSignal, Gates};
 use super::gate_spec;
+use super::match_end::MatchEndReader;
 use super::recap::RecapReader;
 use super::sample::{FrameView, ScreenMap};
 use super::scoreboard::ScoreboardReader;
@@ -37,6 +38,7 @@ pub struct ScreenDetector {
     scoreboard: ScoreboardReader,
     recap: RecapReader,
     spectating: SpectatingReader,
+    match_end: MatchEndReader,
     tracks: [SurfaceTrack; 4],
     /// Decided frames per surface, not yet merged.
     decided: [VecDeque<(u32, Vec<Detection>)>; 4],
@@ -53,6 +55,7 @@ impl ScreenDetector {
             scoreboard: ScoreboardReader::new(),
             recap: RecapReader::new(),
             spectating: SpectatingReader::new(),
+            match_end: MatchEndReader::new(),
             tracks: SURFACES.map(SurfaceTrack::new),
             decided: Default::default(),
             scratch: Vec::new(),
@@ -84,6 +87,7 @@ impl ScreenDetector {
             Region::Scoreboard => self.scoreboard.read(native, map, signal),
             Region::DeathRecap => self.recap.read(native, map),
             Region::Spectating => self.spectating.read(native, map),
+            Region::MatchEnd => self.match_end.read(native, map, signal),
             _ => None,
         }
     }
