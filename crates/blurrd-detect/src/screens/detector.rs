@@ -123,6 +123,7 @@ impl ScreenDetector {
         let mut surfaces: [SurfaceFrame; 4] = Default::default();
         for (i, region) in SURFACES.into_iter().enumerate() {
             let signal = signals[i];
+            surfaces[i].candidate = signal.candidate;
             if signal.candidate {
                 surfaces[i].slots = self.read(region, native, map, &signal);
             }

@@ -4,7 +4,12 @@
 //! A frame is *confirmed* when its native read found the surface's
 //! structure ([`SurfaceFrame::slots`] is `Some`). Confirmed frames with
 //! gaps of at most [`BRIDGE`] frames between them form a *run*, which
-//! counts only with at least [`MIN_CONFIRMED`] confirmed frames; the
+//! counts only with at least [`MIN_CONFIRMED`] confirmed frames. A
+//! longer gap of at most [`HOLD`] frames joins the run too if the
+//! surface's gate made every frame of it a candidate: the panel was
+//! still on screen and only its native read failed (a filter or an
+//! effect over the panel); such a gap gets boxes only once a confirmed
+//! frame ends it. The
 //! surface is on from [`PRE_ROLL`] frames before a run's first confirmed
 //! frame to [`POST_ROLL`] frames after its last one. The pre-roll covers
 //! the first frames of a fade-in, while the panel is still too faint for
@@ -55,6 +60,13 @@ pub const POST_ROLL: u32 = 2;
 /// (a flash or an effect over the panel). At least `PRE_ROLL +
 /// POST_ROLL`, so that two runs never claim the same frame.
 pub const BRIDGE: u32 = PRE_ROLL + POST_ROLL;
+/// Longest gap between confirmed frames that is bridged while the gate
+/// holds every frame of it (measured: reads failed for up to 9
+/// consecutive frames of an open scoreboard in a greyscale 720p copy of
+/// a real recording and of an open recap under a vibrance filter). Well
+/// below [`LOOKAHEAD`], so that a held run is always closed or extended
+/// before a frame of its gap is decided.
+pub const HOLD: u32 = 30;
 /// Vertical growth, in reference pixels, of the boxes of frames without
 /// their own read (at least the largest slide the surfaces allow).
 pub const UNREAD_MARGIN: i32 = 20;
@@ -79,6 +91,8 @@ pub struct Slot {
 /// otherwise (no candidate, or nothing found).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SurfaceFrame {
+    /// Whether the surface's gate made the frame a candidate.
+    pub candidate: bool,
     /// The name slots of a confirmed frame.
     pub slots: Option<Vec<Slot>>,
 }
@@ -88,6 +102,8 @@ struct Run {
     first: u32,
     last: u32,
     closed: bool,
+    /// Whether the gate held every frame since `last`.
+    held: bool,
     /// Confirmed frames in the run.
     confirmed: u32,
     /// The slots that showed ink, each at its last known position.
@@ -142,9 +158,12 @@ impl SurfaceTrack {
         self.newest = Some(frame);
         if let Some(run) = self.runs.back_mut()
             && !run.closed
-            && frame > run.last + BRIDGE + 1
         {
-            run.closed = true;
+            run.held &= data.candidate || data.slots.is_some();
+            let gap = frame - run.last - 1;
+            if gap > BRIDGE && (!run.held || gap > HOLD) {
+                run.closed = true;
+            }
         }
         if let Some(slots) = &data.slots {
             let joins = self.runs.back().is_some_and(|r| !r.closed);
@@ -153,12 +172,14 @@ impl SurfaceTrack {
                     first: frame,
                     last: frame,
                     closed: false,
+                    held: true,
                     confirmed: 0,
                     ink: Vec::new(),
                 });
             }
             if let Some(run) = self.runs.back_mut() {
                 run.last = frame;
+                run.held = true;
                 run.confirmed += 1;
                 for s in slots {
                     match run.ink.iter_mut().find(|k| k.matches(s)) {
@@ -267,11 +288,13 @@ mod tests {
     use blurrd_core::{NameKind, RectI, Region};
 
     use super::{
-        BRIDGE, LOOKAHEAD, POST_ROLL, PRE_ROLL, Slot, SurfaceFrame, SurfaceTrack, UNREAD_MARGIN,
+        BRIDGE, HOLD, LOOKAHEAD, POST_ROLL, PRE_ROLL, Slot, SurfaceFrame, SurfaceTrack,
+        UNREAD_MARGIN,
     };
 
     fn frame(read: bool, ink: bool, y: i32) -> SurfaceFrame {
         SurfaceFrame {
+            candidate: read,
             slots: read.then(|| {
                 vec![Slot {
                     kind: NameKind::ScoreboardRow,
@@ -365,5 +388,50 @@ mod tests {
         // first one did.
         assert!(out[23..].iter().all(|o| o.1 == 0), "{out:?}");
         assert!(out[..3].iter().all(|o| o.1 == 1));
+    }
+
+    /// Boxes per frame of a track over frames that are confirmed (`C`),
+    /// held by the gate without a read (`h`) or neither (`.`).
+    fn held_run(pattern: &str) -> Vec<usize> {
+        let mut track = SurfaceTrack::new(Region::Scoreboard);
+        let mut out = vec![];
+        for (i, c) in (0u32..).zip(pattern.chars()) {
+            let data = match c {
+                'C' => frame(true, true, 100),
+                'h' => SurfaceFrame {
+                    candidate: true,
+                    slots: None,
+                },
+                _ => frame(false, false, 100),
+            };
+            track.push(i, data, &mut out);
+        }
+        track.finish(&mut out);
+        assert_eq!(out.len(), pattern.len());
+        out.iter().map(|(_, b)| b.len()).collect()
+    }
+
+    #[test]
+    fn bridges_gaps_the_gate_holds_until_a_confirmed_frame() {
+        let gap = |c: &str, n: u32| c.repeat(n as usize);
+        // A held gap longer than the bridge, ended by a confirmed frame.
+        let p = format!("CCC{}CCC", gap("h", HOLD));
+        assert!(held_run(&p).iter().all(|&b| b == 1));
+        // The same gap with one frame the gate did not hold is split.
+        let p = format!("CCC{}.{}CCC", gap("h", 10), gap("h", 10));
+        let boxes = held_run(&p);
+        assert_eq!(boxes[2 + POST_ROLL as usize], 1);
+        assert_eq!(boxes[3 + POST_ROLL as usize], 0);
+        // A held gap that no confirmed frame ends gets no boxes after the
+        // post-roll.
+        let p = format!("CCC{}{}", gap("h", 20), gap(".", 10));
+        let boxes = held_run(&p);
+        assert_eq!(boxes.iter().sum::<usize>(), 3 + POST_ROLL as usize);
+        // A held gap longer than `HOLD` is not bridged.
+        let p = format!("CCC{}CCC", gap("h", HOLD + 1));
+        assert_eq!(
+            held_run(&p).iter().filter(|&&b| b == 0).count(),
+            (HOLD + 1 - PRE_ROLL - POST_ROLL) as usize
+        );
     }
 }
