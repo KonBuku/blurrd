@@ -27,7 +27,8 @@
 //! sets the brightness thresholds of the name, so darkening filters of GPU
 //! drivers (brightness, contrast, gamma) lower them together. The ticks
 //! themselves pass either by absolute brightness (bright backgrounds) or by
-//! their contrast to the rows above and below (darkened video).
+//! their contrast to the rows above and below (darkened video), and a tick
+//! in front of a bright background passes by matching the other tick.
 
 mod plate;
 mod tracker;
@@ -89,6 +90,11 @@ const TICK_COUNT: u32 = 6;
 const TICK_MIN_HEIGHT: u32 = 3;
 /// ... and a tick needs at least this many such columns.
 const TICK_MIN_COLUMNS: u32 = 2;
+/// A tick next to a found one may be this much darker than the found
+/// tick's mean level. On 4,146 tick pairs where both ticks pass alone
+/// (7 recorded banners, unfiltered, darkened and gamma 1.5), each tick
+/// passes as the other's partner in 4,145 cases (4,107 with 20 levels).
+const PARTNER_TOLERANCE: u8 = 30;
 /// The name thresholds move down once the ticks are darker than this.
 /// Unfiltered ticks average 240 to 253 once the box is fully shown and
 /// 215 to 230 in the first frames of its fade-in (measured on 25
@@ -290,15 +296,56 @@ fn mn_at(crop: &RgbView<'_>, x: i32, y: i32) -> u8 {
 /// The banner gate (`banner_gate`): both corner ticks of the banner box.
 /// Returns the mean level of the tick pixels, or `None` if a tick is
 /// missing.
+///
+/// A tick in front of a bright background (a sky in darkened video) has
+/// no contrast and misses the absolute threshold. Both ticks are drawn in
+/// the same white, so once one tick is found, the other one only needs
+/// pixels as bright as it ([`partner_tick`]).
 fn gate(crop: &RgbView<'_>) -> Option<u8> {
-    let (mut sum, mut total) = (0u32, 0u32);
-    for columns in TICK_COLUMNS {
-        let (count, level) = tick(crop, columns)?;
-        sum += level;
-        total += count;
-    }
+    let [left, right] = TICK_COLUMNS;
+    let ((count_a, level_a), (count_b, level_b)) = match (tick(crop, left), tick(crop, right)) {
+        (Some(a), Some(b)) => (a, b),
+        (Some(a), None) => (a, partner_tick(crop, right, a)?),
+        (None, Some(b)) => (partner_tick(crop, left, b)?, b),
+        (None, None) => return None,
+    };
     // The mean of `u8` values fits.
-    u8::try_from(sum / total).ok()
+    u8::try_from((level_a + level_b) / (count_a + count_b)).ok()
+}
+
+/// The tick in columns `x0..x1` next to a found tick of `count` pixels
+/// with the level sum `level`: pixels at most [`PARTNER_TOLERANCE`]
+/// darker than the found tick's mean (and at least
+/// [`TICK_MIN_RELATIVE`]), in the shape [`tick`] requires (at least
+/// [`TICK_COUNT`] pixels in [`TICK_MIN_COLUMNS`] columns with
+/// [`TICK_MIN_HEIGHT`] each).
+fn partner_tick(
+    crop: &RgbView<'_>,
+    (x0, x1): (i32, i32),
+    (count, level): (u32, u32),
+) -> Option<(u32, u32)> {
+    // The mean of `u8` values fits.
+    let mean = u8::try_from(level / count.max(1)).ok()?;
+    let min = mean
+        .saturating_sub(PARTNER_TOLERANCE)
+        .max(TICK_MIN_RELATIVE);
+    let (mut pixels, mut pixel_level, mut columns) = (0, 0, 0);
+    for x in x0..x1 {
+        let (mut column, mut column_level) = (0, 0);
+        for y in TICK_ROWS.0..TICK_ROWS.1 {
+            let v = mn_at(crop, x, y);
+            if v >= min {
+                column += 1;
+                column_level += u32::from(v);
+            }
+        }
+        if column >= TICK_MIN_HEIGHT {
+            pixels += column;
+            pixel_level += column_level;
+            columns += 1;
+        }
+    }
+    (pixels >= TICK_COUNT && columns >= TICK_MIN_COLUMNS).then_some((pixels, pixel_level))
 }
 
 /// One corner tick in columns `x0..x1`: the number of tick pixels and the

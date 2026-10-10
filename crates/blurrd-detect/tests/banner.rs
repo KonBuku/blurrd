@@ -271,6 +271,53 @@ fn colour_filters_keep_the_banner() {
 }
 
 #[test]
+fn a_bright_background_behind_one_tick_keeps_the_gate_in_darkened_video() {
+    // A white sky behind the right corner tick: the tick has no contrast,
+    // and darkening pulls it below the absolute threshold. The left tick
+    // is found by contrast, and the right one is as bright as it.
+    let filters = [
+        Filter::Levels {
+            brightness: -0.12,
+            contrast: 0.85,
+        },
+        Filter::Levels {
+            brightness: -0.3,
+            contrast: 0.9,
+        },
+    ];
+    for (f, filter) in filters.into_iter().enumerate() {
+        let name = synth_name(&mut Rng::new(90 + f as u64), NameStyle::Latin(8));
+        let (mut scene, spec) = banner_scene(&name, Background::dusk());
+        for start in 0..spec.end() + 20 {
+            scene = scene.with_flash(Flash {
+                start,
+                frames: 1,
+                amount: 0.9,
+                area: Some(RectI {
+                    x0: 1190,
+                    y0: 262,
+                    x1: 1240,
+                    y1: 296,
+                }),
+            });
+        }
+        let run = run_banner(&scene, Some(filter));
+        let context = format!("{filter:?}");
+        run.assert_clean(&context);
+        let shown = spec.settle()..spec.settle() + 40;
+        assert!(
+            shown.clone().all(|f| run.seen[f as usize].gate),
+            "{context}"
+        );
+        let settled = &run.boxes[spec.settle() as usize + 20];
+        assert!(
+            settled.len() == 1 && settled[0].conf == Confidence::Tracked,
+            "{context}: {settled:?}"
+        );
+    }
+}
+
+#[test]
 fn glare_over_the_settled_name_gets_the_fallback_box() {
     // Glare washes out the name from just before it centres to the end:
     // the episode never settles (port spec failure F4), the fallback box
