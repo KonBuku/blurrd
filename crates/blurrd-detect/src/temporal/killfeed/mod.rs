@@ -107,6 +107,11 @@ const TEMPLATE_BAND: (i32, i32) = (4, 29);
 /// has nothing to follow.
 const MIN_TEMPLATE_STD: f64 = 3.0;
 
+/// The killer portrait is measured in the reference frame and the frames
+/// before it that read the row's first name at the same place, up to this
+/// many frames in all.
+const CLEARANCE_FRAMES: u32 = 4;
+
 /// A part whose box overlaps a new reference's box this much in the
 /// reference frame follows the same name.
 const SAME_NAME_IOU: f32 = 0.7;
@@ -231,6 +236,10 @@ struct Part {
     /// The left edge of the box of the row's first name, relative to the
     /// template's top-left corner.
     row_x0: i32,
+    /// The left limit of the row's boxes, right of the killer portrait,
+    /// relative to the template's top-left corner, if a portrait was
+    /// found ([`compose::killer_clearance`]).
+    killer_clear: Option<i32>,
     /// The pre-roll before the name's first frame, at a row's birth.
     pre_roll: Option<PreRoll>,
     /// Clear frames in a row that showed a companion away from its place
@@ -734,9 +743,33 @@ impl KillFeedTracker {
             end: None,
             row_top: top - area.y0,
             row_x0,
+            killer_clear: self.killer_clear(r.frame, top, &row).map(|x| x - origin.0),
             pre_roll: None,
             misplaced: 0,
         })
+    }
+
+    /// The killer portrait's clearance (strip coordinates) of the feed
+    /// row at `top` with the detections `row`, seen in frame `frame`: the
+    /// lowest of the frames up to it that read the row's first name at the
+    /// same place (the background behind a translucent bar changes from
+    /// frame to frame, the portrait does not), never right of the row's
+    /// other names.
+    fn killer_clear(&self, frame: u32, top: i32, row: &[&Detection]) -> Option<i32> {
+        let first = row.iter().map(|c| c.text).min_by_key(|t| t.x0)?;
+        let bound = row
+            .iter()
+            .map(|c| c.text.x0)
+            .filter(|&x| x > first.x0)
+            .min()
+            .map_or(i32::MAX, |x| x - STRIP.x0 - compose::TEXT_HALO);
+        (0..CLEARANCE_FRAMES)
+            .filter_map(|k| self.ring.get(frame.checked_sub(k)?))
+            .filter(|s| s.names.contains(&first))
+            .filter_map(|s| {
+                compose::killer_clearance(&s.mn, top - STRIP.y0, compose::local(first), bound)
+            })
+            .min()
     }
 
     /// Hands out frame `f` and forgets what only earlier frames needed.

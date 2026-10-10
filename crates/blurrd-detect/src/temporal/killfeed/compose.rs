@@ -44,13 +44,18 @@
 //!   of the victim portrait, so the soft edge of the default blur padding
 //!   stays off it, but never closer to the text than the glyph halo of
 //!   the goldens ([`TEXT_HALO`]); and no pre-roll or slot widening reaches
-//!   left of the row's first name, where the killer portrait sits.
+//!   left of the row's first name. The killer portrait left of that name
+//!   is found from its structure ([`killer_clearance`]): boxes start
+//!   [`PORTRAIT_CLEARANCE`] pixels right of it, also where a reading of the
+//!   name (and every box built from it: gaps, holds, companions, merges)
+//!   reached into the portrait.
 //! - **Merge:** boxes of the same name from several parts (IoU ≥
 //!   [`MERGE_IOU`]) become their union.
 
 use blurrd_core::{Confidence, NameKind, RectI};
 
 use crate::detection::Detection;
+use crate::image::GrayImage;
 use crate::killfeed::VICTIM_X1;
 use crate::track::ncc::{Template, score_at};
 
@@ -72,13 +77,68 @@ const PRE_CHANGED: f32 = 0.5;
 /// A name alone in its row (a self-kill shows only the victim) has its
 /// slot reach this far towards the kill icon.
 const SLOT_REACH: i32 = 80;
-/// Boxes end this far left of the victim portrait: the horizontal padding
-/// of the default blur parameters (`BlurParams::default().pad.0`), where
-/// the soft edge lies.
+/// Boxes end this far left of the victim portrait and start this far
+/// right of the killer portrait: the horizontal padding of the default
+/// blur parameters (`BlurParams::default().pad.0`), where the soft edge
+/// lies.
 const PORTRAIT_CLEARANCE: i32 = 4;
 /// ... but at least this far right of the name's text (the goldens'
 /// glyph extents are dilated by 2 reference pixels).
-const TEXT_HALO: i32 = 2;
+pub(super) const TEXT_HALO: i32 = 2;
+/// Rows of a feed row (from its top, half-open) above the text: flat bar
+/// over the names, the art of the killer portrait left of them (the
+/// portrait spans the row's full height). Cap tops are at + 10; the band
+/// keeps 4 rows from them, out of reach of the ringing of a sharpen
+/// filter.
+const ART_BAND: (i32, i32) = (1, 6);
+/// A column shows art if the mean absolute step of `min(R, G, B)` to its
+/// right neighbour over [`ART_BAND`] is at least this. Measured on the
+/// goldens: bars 0 to 2 (up to 16 next to the portrait frame under a
+/// sharpen filter), portrait art 3 to 150, most columns above 10.
+const ART_STEP: u32 = 6;
+/// The portrait is a run: at least [`ART_DENSE`] of the [`ART_RUN`]
+/// columns that end at its right edge show art. The portrait is 62 px
+/// wide; a stray column (an accent, the ringing of a sharpen filter)
+/// is not a run.
+const ART_RUN: usize = 24;
+/// See [`ART_RUN`]. Under a deutan filter only the portrait's frame
+/// (11 of the last 24 columns) is textured in [`ART_BAND`].
+const ART_DENSE: usize = 10;
+/// Art columns this far apart belong to one run (flat patches of the
+/// portrait art, measured up to 7 columns); an edge farther from the
+/// portrait (the slanted start of a highlighted row's bar) is not part of
+/// it.
+const ART_GAP: usize = 8;
+/// The portrait's edge is dense art: at least [`ART_EDGE_DENSE`] of the
+/// [`ART_EDGE_RUN`] columns that end there. Sparse columns right of the
+/// portrait (where the bar starts, the ringing of a sharpen filter
+/// around the first glyphs) are not its edge.
+const ART_EDGE_RUN: usize = 6;
+/// See [`ART_EDGE_RUN`].
+const ART_EDGE_DENSE: usize = 4;
+/// Rows of a feed row (from its top, half-open) with the name's strokes:
+/// cap tops at + 10, baseline at + 24.
+const TEXT_BAND: (i32, i32) = (9, 25);
+/// The portrait is searched up to this far left of the first name's
+/// reading ...
+const ART_SEARCH: i32 = 90;
+/// ... and its edge accepted at most this far right of the reading's left
+/// end: a misreading that took portrait columns for text (measured up to
+/// 33 px under GPU filters). An edge farther right would be art inside
+/// the name, which a feed row does not have.
+const MISREAD_MAX: i32 = 40;
+/// A settled row has flat bar between the portrait and the name's first
+/// stroke (10 columns on the goldens). Only an edge with at least this
+/// many such columns overrules a reading that starts left of it; without
+/// that gap (a row still sliding in, another row's animation or the
+/// background seen through the bar, the slanted start of a bar) the art
+/// may be glyphs.
+const NAME_GAP: i32 = 4;
+/// A reading with at least this share (numerator, denominator) of art
+/// columns above it lies on the portrait. Names sit on flat bar (0 to a
+/// few columns from the background behind a translucent bar); readings on
+/// the portrait art measured 46 % and more.
+const ON_ART: (usize, usize) = (1, 3);
 /// Boxes overlapping this much are the same name and merged (port spec
 /// 7.1 step 7).
 const MERGE_IOU: f32 = 0.5;
@@ -203,11 +263,133 @@ fn changed(a: &Frame<'_>, b: &Frame<'_>, area: RectI) -> bool {
     total > 0 && moved as f32 >= PRE_CHANGED * total as f32
 }
 
+/// The left limit of the boxes of the row at `top` whose first name was
+/// read at `text` (both in strip coordinates): [`PORTRAIT_CLEARANCE`]
+/// right of the killer portrait, but never right of the glyph halo of the
+/// first stroke after it, nor of `bound` (the glyph halo of the row's
+/// other names), nor of the reading unless the reading reached into a
+/// clearly separated portrait ([`NAME_GAP`]). `None` if no portrait is
+/// there or the frame cannot tell.
+///
+/// The portrait is found from structure alone: right of it the bar is flat
+/// above the text ([`ART_BAND`]), the portrait's art is not. The search
+/// runs from the right end of the name leftwards (the name's columns are
+/// flat in that band, also where the reading started too far right) to the
+/// first run of art columns. The name starts at the first column right of
+/// the portrait with strokes in the text band ([`TEXT_BAND`]); a gap between
+/// portrait and bar (the background shows through) can bring the art up
+/// to two pixels from the text. Colour presets, colour filters and the
+/// reading itself change nothing; a missed portrait leaves the boxes as
+/// they were.
+pub(super) fn killer_clearance(
+    plane: &GrayImage,
+    top: i32,
+    text: RectI,
+    bound: i32,
+) -> Option<i32> {
+    let width = plane.width() as i32;
+    let lo = (text.x0 - ART_SEARCH).max(0);
+    let hi = text.x1.min(width - 1);
+    if hi <= lo || top + TEXT_BAND.1 > plane.height() as i32 || top + ART_BAND.0 < 0 {
+        return None;
+    }
+    portrait_clearance(plane, top, text, bound, hi).or_else(|| {
+        // A "name" read on the portrait art (or a name held where a new
+        // row's portrait now is) is no name: the portrait's edge lies
+        // right of it, up to [`ART_SEARCH`] away. `bound` keeps the
+        // clearance off the names right of it.
+        let x0 = text.x0.max(lo);
+        let on_art = ON_ART.1 * (x0..hi).filter(|&x| textured(plane, x, top)).count()
+            >= ON_ART.0 * (hi - x0).max(1) as usize;
+        on_art
+            .then(|| {
+                let far = (text.x1 + ART_SEARCH).min(width - 1);
+                portrait_clearance(plane, top, text, bound, far)
+            })
+            .flatten()
+    })
+}
+
+/// [`killer_clearance`] with the portrait's edge searched left of `hi`;
+/// an edge more than [`MISREAD_MAX`] right of the reading only counts
+/// where the search reached past the reading.
+fn portrait_clearance(
+    plane: &GrayImage,
+    top: i32,
+    text: RectI,
+    bound: i32,
+    hi: i32,
+) -> Option<i32> {
+    let width = plane.width() as i32;
+    let lo = (text.x0 - ART_SEARCH).max(0);
+    // `art[i]`: column `lo + i` differs from its right neighbour.
+    let art: Vec<bool> = (lo..hi).map(|x| textured(plane, x, top)).collect();
+    // Art columns among the `n` columns that end at `i`, up to the first
+    // gap of more than `ART_GAP` columns without art.
+    let run = |i: usize, n: usize| {
+        let mut gap = 0;
+        art[(i + 1).saturating_sub(n)..=i]
+            .iter()
+            .rev()
+            .take_while(|&&a| {
+                gap = if a { 0 } else { gap + 1 };
+                gap <= ART_GAP
+            })
+            .filter(|&&a| a)
+            .count()
+    };
+    let at = (0..art.len()).rev().find(|&i| {
+        art[i] && run(i, ART_EDGE_RUN) >= ART_EDGE_DENSE && run(i, ART_RUN) >= ART_DENSE
+    })?;
+    let edge = lo + at as i32 + 1;
+    if hi <= text.x1 && edge > text.x0 + MISREAD_MAX {
+        return None;
+    }
+    // The name starts at the first stroke right of the art.
+    let stroke = (edge..width - 1)
+        .find(|&x| step(plane, x, top, TEXT_BAND) >= ART_STEP * (TEXT_BAND.1 - TEXT_BAND.0) as u32);
+    let clear = (edge + PORTRAIT_CLEARANCE).min(bound);
+    // A reading that starts right of the art, or at that first stroke, is
+    // the name's own extent: the clearance never passes it.
+    if text.x0 >= edge || stroke.is_some_and(|x| text.x0 >= x - TEXT_HALO) {
+        let clear = clear.min(text.x0 - TEXT_HALO);
+        return Some(stroke.map_or(clear, |x| clear.min(x - TEXT_HALO)));
+    }
+    // One that starts left of the art took portrait columns for text, but
+    // only if a flat gap ([`NAME_GAP`]) separates the art from the first
+    // stroke; without it the art may be glyphs or background seen through
+    // the bar, and this frame tells nothing.
+    let x = stroke.filter(|&x| x - edge >= NAME_GAP)?;
+    Some(clear.min(x - TEXT_HALO))
+}
+
+/// The sum of the absolute steps of `min(R, G, B)` from column `x` to its
+/// right neighbour over the rows `band` of the feed row at `top`.
+fn step(plane: &GrayImage, x: i32, top: i32, band: (i32, i32)) -> u32 {
+    (top + band.0..top + band.1)
+        .map(|y| {
+            let row = plane.row(y as u32);
+            u32::from(row[x as usize].abs_diff(row[x as usize + 1]))
+        })
+        .sum()
+}
+
+/// Whether column `x` shows art: a mean step of at least [`ART_STEP`] over
+/// [`ART_BAND`] of the feed row at `top`.
+fn textured(plane: &GrayImage, x: i32, top: i32) -> bool {
+    step(plane, x, top, ART_BAND) >= ART_STEP * (ART_BAND.1 - ART_BAND.0) as u32
+}
+
 /// One box before merging.
 #[derive(Debug, Clone, Copy)]
 struct Candidate {
     /// The final box.
     rect: RectI,
+    /// No box of this name starts left of this column: the clearance of
+    /// the killer portrait (`i32::MIN` if none was found).
+    floor: i32,
+    /// The right end of the name's text.
+    text_x1: i32,
     /// The name's own box at its position(s), to compare names.
     name: RectI,
     kind: NameKind,
@@ -239,9 +421,9 @@ pub(super) fn compose(
     // Such a box keeps its rows (the vertical evidence of its own part)
     // but takes the columns of the box that follows the name. A pre-roll
     // box is no such evidence: it is a guess where the row will be, not
-    // a reading of the name. The right end never shrinks: a misreading
-    // that reaches too far left is the edge of the killer portrait or of
-    // a cover bar, while a short reading lost its last glyph.
+    // a reading of the name. Neither end shrinks: a short reading lost
+    // its first or last glyph, while a misreading that reaches too far
+    // left into the killer portrait is cut at the portrait's clearance.
     let kept: Vec<Candidate> = candidates
         .iter()
         .map(|&c| {
@@ -260,10 +442,11 @@ pub(super) fn compose(
             match follower {
                 Some(d) if !confident => Candidate {
                     rect: RectI {
-                        x0: d.rect.x0,
+                        x0: d.rect.x0.min(c.rect.x0),
                         x1: d.rect.x1.max(c.rect.x1),
                         ..c.rect
                     },
+                    floor: lower_floor(c.floor, d.floor),
                     ..c
                 },
                 _ => c,
@@ -274,6 +457,8 @@ pub(super) fn compose(
     for c in kept {
         if let Some(m) = merged.iter_mut().find(|m| m.rect.iou(&c.rect) >= MERGE_IOU) {
             m.rect = union(m.rect, c.rect);
+            m.floor = lower_floor(m.floor, c.floor);
+            m.text_x1 = m.text_x1.max(c.text_x1);
             if rank(c.confidence) > rank(m.confidence) {
                 // The weakest evidence decides how the box is blurred; the
                 // grid stays anchored to the first name.
@@ -283,12 +468,22 @@ pub(super) fn compose(
             merged.push(c);
         }
     }
-    out.extend(merged.into_iter().map(|c| FeedBox {
-        rect: c.rect,
-        kind: c.kind,
-        confidence: c.confidence,
-        part: c.part,
-        offset: c.offset,
+    // A union may hold a box of a part that did not find the killer
+    // portrait: the clearance of the others applies to it as well. A
+    // "name" whose text lies left of the clearance was read on the
+    // portrait art.
+    out.extend(merged.into_iter().filter_map(|c| {
+        let rect = RectI {
+            x0: c.rect.x0.max(c.floor),
+            ..c.rect
+        };
+        (rect.x0 < rect.x1 && c.floor < c.text_x1).then_some(FeedBox {
+            rect,
+            kind: c.kind,
+            confidence: c.confidence,
+            part: c.part,
+            offset: c.offset,
+        })
     }));
 }
 
@@ -339,6 +534,37 @@ fn part_candidates(
                     .flatten()
                     .any(|g| part.position(g).is_some_and(|(_, c)| uncertain(c)))
             });
+    // A gap or hold spanning horizontal motion keeps the clearance of its
+    // leftmost position: the name may be there. A pre-roll frame shows the
+    // row still sliding in, the portrait is not at its place yet.
+    let floor = match part.killer_clear {
+        Some(x) if confidence != Confidence::PreRoll => STRIP.x0 + pos.x0 + x,
+        _ => i32::MIN,
+    };
+    // A position that is not a match of this frame is a guess: a new row
+    // may already show its killer portrait where the guess puts the name.
+    // The frame's own portrait limits it as well, where the row's height
+    // is known.
+    let floor = match frame {
+        Some(fr) if confidence != Confidence::Tracked && pos.y0 == pos.y1 => part
+            .boxes
+            .iter()
+            .map(|b| place(pos, b.text))
+            .min_by_key(|t| t.x0)
+            .and_then(|t| {
+                // The names the frame shows right of it in its row.
+                let bound = fr
+                    .names
+                    .iter()
+                    .filter(|n| n.y0 < t.y1 && n.y1 > t.y0 && n.x0 > t.x0)
+                    .map(|n| n.x0 - STRIP.x0 - TEXT_HALO)
+                    .min()
+                    .unwrap_or(i32::MAX);
+                killer_clearance(fr.plane, pos.y0 + part.row_top, local(t), bound)
+            })
+            .map_or(floor, |x| floor.max(STRIP.x0 + x)),
+        _ => floor,
+    };
     let after_last_match = matches!(confidence, Confidence::PostRoll)
         || part.positions.get(&f).is_some_and(|p| p.how == How::Hold);
     for (i, b) in part.boxes.iter().enumerate() {
@@ -359,14 +585,17 @@ fn part_candidates(
             rect = union(rect, place(pos, b.slot));
         }
         // The killer portrait sits left of the row's first name: no
-        // widening reaches past that name's box.
-        rect.x0 = rect.x0.max(STRIP.x0 + pos.x0 + part.row_x0);
+        // widening reaches past that name's box, and no box into the
+        // portrait where it was found.
+        rect.x0 = rect.x0.max(STRIP.x0 + pos.x0 + part.row_x0).max(floor);
         let text_x1 = STRIP.x0 + pos.x1 + b.text.2;
         rect.x1 = rect
             .x1
             .min((VICTIM_X1 - PORTRAIT_CLEARANCE).max(text_x1 + TEXT_HALO));
         out.push(Candidate {
             rect,
+            floor,
+            text_x1,
             name,
             kind: b.kind,
             confidence,
@@ -546,6 +775,18 @@ pub(super) fn slots(row: &[(NameKind, Offset)]) -> Vec<Offset> {
         .collect()
 }
 
+/// The clearance of a box built from two boxes with clearances `a` and
+/// `b`: the lower one. Both were measured right of the same portrait, and
+/// one measured in a frame where the row moved can reach into the name; a
+/// leak is worse than a few pixels of portrait. A box without a clearance
+/// takes the other's.
+fn lower_floor(a: i32, b: i32) -> i32 {
+    match (a, b) {
+        (i32::MIN, x) | (x, i32::MIN) => x,
+        (a, b) => a.min(b),
+    }
+}
+
 /// Whether a frame found as `c` is escalated to the slot box (plan 7.3).
 const fn uncertain(c: Confidence) -> bool {
     matches!(
@@ -578,7 +819,7 @@ pub(super) const fn place(pos: Pos, offset: Offset) -> RectI {
 }
 
 /// A reference rectangle in strip coordinates.
-const fn local(r: RectI) -> RectI {
+pub(super) const fn local(r: RectI) -> RectI {
     RectI {
         x0: r.x0 - STRIP.x0,
         y0: r.y0 - STRIP.y0,
@@ -599,9 +840,98 @@ fn union(a: RectI, b: RectI) -> RectI {
 
 #[cfg(test)]
 mod tests {
-    use blurrd_core::{BlurParams, NameKind};
+    use blurrd_core::{BlurParams, NameKind, RectI};
 
-    use super::{PORTRAIT_CLEARANCE, SLOT_REACH, slots};
+    use crate::image::GrayImage;
+
+    use super::{PORTRAIT_CLEARANCE, SLOT_REACH, TEXT_HALO, killer_clearance, slots};
+
+    /// A feed row at the top of a 200 × 40 plane: flat bar, portrait art in
+    /// the columns `art` over the full row height, and a glyph stroke (rows
+    /// + 10 to + 24) in columns 90 and 91.
+    fn row(art: std::ops::Range<u32>) -> GrayImage {
+        let mut plane = GrayImage::new(200, 40);
+        for y in 0..40 {
+            for x in 0..200 {
+                let value = if art.contains(&x) {
+                    // Textured, without a flat run.
+                    40 + ((x * 37 + y * 11) % 7) * 30
+                } else if (90..92).contains(&x) && (10..25).contains(&y) {
+                    250
+                } else {
+                    100
+                };
+                plane.data_mut()[(y * 200 + x) as usize] = value as u8;
+            }
+        }
+        plane
+    }
+
+    fn text(x0: i32) -> RectI {
+        RectI {
+            x0,
+            y0: 10,
+            x1: 150,
+            y1: 25,
+        }
+    }
+
+    #[test]
+    fn killer_clearance_is_right_of_the_portrait_art() {
+        // The art ends at column 82, the stroke starts at 90.
+        let plane = row(20..82);
+        let clear = 82 + PORTRAIT_CLEARANCE;
+        // A reading of the name itself and one that took 22 portrait
+        // columns for text give the same clearance.
+        assert_eq!(killer_clearance(&plane, 0, text(90), i32::MAX), Some(clear));
+        assert_eq!(killer_clearance(&plane, 0, text(60), i32::MAX), Some(clear));
+        // No portrait: no clearance.
+        assert_eq!(killer_clearance(&row(0..0), 0, text(90), i32::MAX), None);
+    }
+
+    #[test]
+    fn killer_clearance_never_passes_the_name() {
+        // Art right up to the stroke (a slanted bar start): the clearance
+        // keeps the glyph halo of the first stroke and of the reading.
+        let plane = row(20..89);
+        assert_eq!(
+            killer_clearance(&plane, 0, text(90), i32::MAX),
+            Some(89 - TEXT_HALO)
+        );
+        // A reading that starts right of the art.
+        let plane = row(20..82);
+        assert_eq!(
+            killer_clearance(&plane, 0, text(84), i32::MAX),
+            Some(84 - TEXT_HALO)
+        );
+        // Nor the other names of the row.
+        assert_eq!(killer_clearance(&plane, 0, text(60), 80), Some(80));
+    }
+
+    #[test]
+    fn killer_clearance_needs_a_gap_before_the_name() {
+        // Art right up to the stroke and a reading that starts inside it:
+        // the art may be glyphs, the frame tells nothing.
+        let plane = row(20..89);
+        assert_eq!(killer_clearance(&plane, 0, text(60), i32::MAX), None);
+    }
+
+    #[test]
+    fn killer_clearance_finds_the_portrait_right_of_a_reading_on_it() {
+        // A "name" read on the portrait art, left of its edge: the
+        // clearance lies right of it, so its box is dropped.
+        let plane = row(20..82);
+        let on_art = RectI {
+            x0: 40,
+            y0: 10,
+            x1: 70,
+            y1: 25,
+        };
+        assert_eq!(
+            killer_clearance(&plane, 0, on_art, i32::MAX),
+            Some(82 + PORTRAIT_CLEARANCE)
+        );
+    }
 
     #[test]
     fn clearance_is_the_default_padding() {

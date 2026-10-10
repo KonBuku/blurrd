@@ -542,7 +542,7 @@ fn covers_names_with_colour_blind_palettes_and_filters() {
         );
         // In black and white the per-frame detector loses words of names
         // on light bars next to a textured portrait (two of this video's
-        // names, see the M10 decisions in the plan).
+        // names; plan 18.27b, "Detector limits in black and white").
         assert!(
             run.detector_limits.len() <= 2,
             "{context}: per-frame misses {:?}",
