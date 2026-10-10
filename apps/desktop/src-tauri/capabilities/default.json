@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions of the main window: the custom title bar's window controls, forwarding frontend log records, reading and writing the settings store that the Rust side opens (no permission to open other store files), the open dialog for adding recordings, choosing the output folder and importing presets, the save dialog for exporting presets, the taskbar button's progress and the focus check for job notifications, system notifications, and showing exported files in Explorer. Grants nothing beyond the commands and plugins listed in the architecture plan (section 9.1).",
+  "description": "Permissions of the main window: the custom title bar's window controls, forwarding frontend log records, reading and writing the settings store that the Rust side opens (no permission to open other store files), the open dialog for adding recordings, choosing the output folder and importing presets, the save dialog for exporting presets, the taskbar button's progress and the focus check for job notifications, system notifications, showing exported files in Explorer, and opening the project's GitHub pages (About: repository, issues, FFmpeg source archive) in the browser. Grants nothing beyond the commands and plugins listed in the architecture plan (section 9.1).",
   "windows": ["main"],
   "permissions": [
     "core:window:allow-minimize",
@@ -24,6 +24,13 @@
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify",
-    "opener:allow-reveal-item-in-dir"
+    "opener:allow-reveal-item-in-dir",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://github.com/KonBuku/blurrd" },
+        { "url": "https://github.com/KonBuku/blurrd/*" }
+      ]
+    }
   ]
 }

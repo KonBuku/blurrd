@@ -2,6 +2,13 @@ import type { blurProbe } from "./features/preview/gl/blur-probe";
 import type { MockBackend } from "./ipc/mock";
 
 declare global {
+  interface ImportMetaEnv {
+    /** The app version (`package.json`), set at build time by `vite.config.ts`. */
+    readonly APP_VERSION: string;
+    /** The commit the app was built from, set at build time by `vite.config.ts`. */
+    readonly APP_COMMIT: string;
+  }
+
   interface Window {
     /** The mock backend, present only in the `mock` mode (tests, browser dev). */
     blurrdMock?: MockBackend;

@@ -271,6 +271,25 @@ overwritten. `e2e/settings.spec.ts` covers theme switching (system, light,
 dark, title bar menu), persistence across reloads, interface size, reduce
 motion, focus handling and an axe scan of each page in both themes.
 
+The command palette (`src/features/command`, Ctrl+K or the search button
+in the title bar) lists the actions of the mounted features. A feature
+offers its commands with `useCommandSource(source, commands)` while it is
+on screen (the preview's only while a recording is shown), so the palette
+never lists an action without a target. Search requires every typed word
+in the label, group or keywords (`commandScore`); a chosen command runs
+after the palette has closed and returned the focus. `e2e/command.spec.ts`
+covers the keyboard flow, the file dialog, the preview commands and axe.
+
+About (`src/features/about`) is a dialog from the palette and the page
+Settings › About: build version and commit (Vite `define`s
+`import.meta.env.APP_VERSION` / `APP_COMMIT`), the FFmpeg version the
+backend reports, the FFmpeg source archive, project links (the opener
+capability allows only `https://github.com/KonBuku/blurrd` URLs) and the
+trademark statements. Open-source licenses lists the generated
+`licenses.json` (see [Third-party notices](#third-party-notices)), loaded
+as its own chunk on first use; `e2e/about.spec.ts` covers search, licence
+texts, links, focus return and axe in both themes.
+
 `e2e/layout.spec.ts` checks the layout from 1024x680 to 2560x1440 (no
 overflow, limits respected, sheet below the breakpoint), resizing by drag
 and keyboard, and runs an axe accessibility scan of the shell and the sheet

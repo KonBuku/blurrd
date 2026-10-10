@@ -1,4 +1,6 @@
 /// <reference types="vitest/config" />
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -10,8 +12,31 @@ import { defineConfig } from "vite";
 const tauriPlatform = process.env.TAURI_ENV_PLATFORM;
 const tauriDebug = Boolean(process.env.TAURI_ENV_DEBUG);
 
+/** The app version, kept equal to the workspace version by `pnpm release`. */
+const appVersion: string = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+).version;
+
+/**
+ * The commit being built (12 hex digits, "-dirty" with uncommitted
+ * changes), shown in About; "unknown" outside a Git checkout.
+ */
+function gitCommit(): string {
+  try {
+    return execFileSync("git", ["describe", "--always", "--dirty", "--abbrev=12", "--exclude=*"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    "import.meta.env.APP_VERSION": JSON.stringify(appVersion),
+    "import.meta.env.APP_COMMIT": JSON.stringify(gitCommit()),
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

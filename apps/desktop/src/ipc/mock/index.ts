@@ -102,6 +102,8 @@ export interface MockBackend {
   readonly notifications: { readonly title: string; readonly body: string }[];
   /** Every file shown in Explorer, in order. */
   readonly revealed: string[];
+  /** URLs opened in the browser (opener plugin), in order. */
+  readonly opened: string[];
 }
 
 /** The value of one `set_progress_bar` call. */
@@ -193,6 +195,7 @@ export function installMockBackend(): MockBackend {
     taskbar: [],
     notifications: [],
     revealed: [],
+    opened: [],
   };
   installNotificationShim();
   const installedAt = performance.now();
@@ -417,6 +420,9 @@ export function installMockBackend(): MockBackend {
       }
       case "plugin:opener|reveal_item_in_dir":
         backend.revealed.push(...(args as { paths: string[] }).paths);
+        return null;
+      case "plugin:opener|open_url":
+        backend.opened.push((args as { url: string }).url);
         return null;
       case "accept_report": {
         const path = pathOf(args);

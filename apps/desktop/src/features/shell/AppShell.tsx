@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { AboutDialogs } from "@/features/about/AboutDialogs";
 import { COMMAND_PALETTE_ID, CommandPalette } from "@/features/command/CommandPalette";
 import { useCommandStore } from "@/features/command/registry";
 import { DropOverlay } from "@/features/import/DropOverlay";
@@ -128,6 +129,7 @@ export function AppShell() {
       <FailureDetailsDialog />
       <ExportShortcut />
       <CommandPalette />
+      <AboutDialogs />
     </div>
   );
 }

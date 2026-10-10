@@ -2,11 +2,13 @@ import {
   FilePlus,
   FolderOpen,
   FolderPlus,
+  Info,
   Keyboard,
   ListX,
   Palette,
   PanelLeft,
   PanelRight,
+  ScrollText,
   Settings,
   SlidersHorizontal,
 } from "lucide-react";
@@ -14,6 +16,7 @@ import { useMemo } from "react";
 
 import type { Theme } from "@/bindings/Theme";
 import { RegionIcon } from "@/components/ui/region-chip";
+import { useAboutStore } from "@/features/about/store";
 import { browseFiles, browseFolder } from "@/features/import/import";
 import { showInFolder } from "@/features/jobs/batch-end";
 import { useJobsStore } from "@/features/jobs/jobs";
@@ -157,6 +160,22 @@ function useWindowCommands(): readonly PaletteCommand[] {
         keywords: ["keys", "hotkeys", "settings"],
         icon: <Keyboard aria-hidden />,
         run: () => ui().openSettings("shortcuts"),
+      },
+      {
+        id: "help.about",
+        group: "Help",
+        label: "About blurrd",
+        keywords: ["version", "commit", "trademarks"],
+        icon: <Info aria-hidden />,
+        run: () => useAboutStore.getState().show("about"),
+      },
+      {
+        id: "help.licenses",
+        group: "Help",
+        label: "Open-source licenses",
+        keywords: ["licences", "third-party", "notices", "credits"],
+        icon: <ScrollText aria-hidden />,
+        run: () => useAboutStore.getState().show("licenses"),
       },
     );
     return commands;

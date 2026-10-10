@@ -1,4 +1,4 @@
-import { ChevronRight, Keyboard, Palette, SlidersHorizontal, X } from "lucide-react";
+import { ChevronRight, Info, Keyboard, Palette, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, type ComponentType, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { SHORTCUTS } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import { useUiStore, type SettingsSection } from "@/store/ui";
 
+import { AboutSettings } from "./AboutSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
@@ -36,6 +37,7 @@ const SECTIONS: readonly {
     page: AppearanceSettings,
   },
   { id: "shortcuts", label: "Shortcuts", icon: <Keyboard aria-hidden />, page: ShortcutSettings },
+  { id: "about", label: "About", icon: <Info aria-hidden />, page: AboutSettings },
 ];
 
 /**
