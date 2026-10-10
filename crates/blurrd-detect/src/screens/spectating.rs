@@ -118,7 +118,14 @@ impl SpectatingReader {
         let (top, bottom) = (BAR_Y.0 + dy, BAR_Y.1 + dy);
         let (column, row0) = self.plane.cell(x, top);
         let (_, row1) = self.plane.cell(x, bottom);
-        if edges::line_share(&self.plane, column, row0, row1) < MIN_LINE {
+        // The edge found may be either side of the line: in a rescaled
+        // recording the bar's left edge can be the weaker one (ringing of
+        // the scaler), so the line may also start up to `LINE_W` cells
+        // before it.
+        let line = (column - edges::LINE_W..=column)
+            .map(|c| edges::line_share(&self.plane, c, row0, row1))
+            .fold(0.0, f32::max);
+        if line < MIN_LINE {
             return None;
         }
         let shift = |r: RectI| RectI {
@@ -141,5 +148,55 @@ impl SpectatingReader {
             rect,
             ink: has_ink(&self.plane, inner, &mut self.ink),
         }])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BAR_X, BAR_Y, LABEL, NAME_SLOT, SpectatingReader, ZONE};
+    use crate::image::RgbView;
+    use crate::screens::sample::{FrameView, ScreenMap};
+
+    /// The widget over a flat backdrop (128) as a crop of [`ZONE`]: a
+    /// one-pixel bar (176) with a darker pixel right of it (126, the
+    /// scaler's undershoot) and, in every tenth row, a bright pixel left
+    /// of it (165, ringing) that hides the bar's left edge there; text
+    /// blocks in the name slot and the label line.
+    fn widget() -> (Vec<u8>, u32, u32) {
+        let (w, h) = (ZONE.width(), ZONE.height());
+        let mut data = vec![128u8; (3 * w * h) as usize];
+        let mut set = |x: i32, y: i32, v: u8| {
+            let i = 3 * ((y - ZONE.y0) as u32 * w + (x - ZONE.x0) as u32) as usize;
+            data[i..i + 3].copy_from_slice(&[v; 3]);
+        };
+        for y in BAR_Y.0..BAR_Y.1 {
+            set(BAR_X, y, 176);
+            set(BAR_X + 1, y, 126);
+            if y % 10 == 0 {
+                set(BAR_X - 1, y, 165);
+            }
+        }
+        for r in [NAME_SLOT, LABEL] {
+            for y in r.y0 + 8..r.y1 - 8 {
+                for x in (r.x0 + 6..r.x0 + 120).filter(|x| x % 6 < 3) {
+                    set(x, y, 250);
+                }
+            }
+        }
+        (data, w, h)
+    }
+
+    #[test]
+    fn finds_a_bar_whose_left_edge_fades_in_some_rows() {
+        let (data, w, h) = widget();
+        let view = FrameView::crop(
+            RgbView::new(&data, w, h, 3 * w as usize).unwrap(),
+            (ZONE.x0, ZONE.y0),
+        );
+        let slots = SpectatingReader::new()
+            .read(&view, &ScreenMap::REFERENCE)
+            .unwrap();
+        assert_eq!(slots.len(), 1);
+        assert!(slots[0].ink);
     }
 }
