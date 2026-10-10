@@ -18,15 +18,20 @@
 //!   pushed up by a new message). Lines read where they were overrule a box
 //!   top that only seemed to rise; the darkness that makes a box part solid
 //!   enough to count is learned per video, so filters that lighten the box
-//!   do not hide pushes. A fading line that is no longer read thus stays
-//!   covered where it went.
+//!   do not hide pushes. A rise that no line read confirmed is undone when
+//!   a pushed line is read at its old place soon after (the top part of
+//!   the box was only missed for a frame or two). A fading line that is no
+//!   longer read thus stays covered where it went.
 //! - **Hold**: a line that is not read in a frame is covered with the
 //!   extent it was read with while it lies in a box band, while the box's
-//!   edge ratio at its rows stays below 0.97 as the band fades (plan 7.3),
-//!   and, for up to [`FADE_MAX`] frames after the band, while the strokes
-//!   of its name or of its whole line (the white message keeps its
-//!   contrast in greyscale video) stand out from the empty rows above it;
-//!   then for [`POST_ROLL`] more frames. A line not read for more than
+//!   edge ratio at its rows stays below 0.97 as the band fades (plan 7.3)
+//!   and rises no faster than a fade (a box that vanishes at once, as the
+//!   open chat's panel when it closes, or a line pushed out of the chat
+//!   is no fade), and, for up to [`FADE_MAX`] frames after the band, while
+//!   the strokes of its name or of its whole line (the white message keeps
+//!   its contrast in greyscale video) stand out from the empty rows above
+//!   it; then for [`POST_ROLL`] more frames, unless it moved to where
+//!   neither its box nor its text was seen. A line not read for more than
 //!   [`HOLD_MAX`] frames is covered for the widest name from its start
 //!   (the Safe slot box of the health rule, plan 7.3). A line that ended
 //!   and is read again at its place with the same name end soon after (a
@@ -36,6 +41,10 @@
 //!   frames before, back to the frame its message arrived in or up to two
 //!   frames before its part of the box appeared, at most [`BACKFILL_MAX`]
 //!   frames.
+//!
+//! The open chat needs nothing of its own: its history lines are read in
+//! its panel's band like the lines of the closed chat, new messages push
+//! them up the grid, and the line pushed out at the panel's top ends.
 //!
 //! The extent of a line comes from all its readings: per end, the
 //! outermost value of the most precise ways of finding it that make up at
@@ -62,9 +71,22 @@ use super::{ChatDetector, ChatLine, INK_X, NameEnd, NameStart, SEARCH_Y, name_de
 /// line's rows is below this (plan 7.3: the chat ends when the band ratio
 /// is 0.97 or more again).
 const PRESENT_RATIO: f32 = 0.97;
-/// Rows from a line's top over which its part of the box is measured: the
-/// text rows of one line.
+/// A line's part of the box is measured over this many rows, from
+/// [`PRESENCE_ABOVE`] rows above the top of its text.
 const PRESENCE_ROWS: i32 = 14;
+/// Rows above the top of a line's text where its part of the box is first
+/// measured: the box starts about 6 rows above the text.
+const PRESENCE_ABOVE: i32 = 4;
+/// The middle row of a line's text, from its top.
+const LINE_MIDDLE: i32 = 7;
+/// A line's part of the box fades out gradually: its edge ratio rises by
+/// about 0.02 per frame (0.66 to 1 in 12 to 23 frames), and textured
+/// gameplay passing the edges in a fast camera turn makes it jump by up to
+/// 0.14 (measured). A rise by more than this from one frame to the next is
+/// no fade: the box vanished at once (the open chat closed, from about
+/// 0.66 to 0.9 or more), or the line moved to where there is no box
+/// (pushed out of the chat).
+const FADE_STEP: f32 = 0.2;
 /// A line that is not read is covered with the extent it was read with
 /// for at most this many frames after it was last read (twice the ±15
 /// frames of the port spec: the fade alone takes up to 23 frames), then
@@ -112,6 +134,11 @@ const STEP_TOLERANCE: i32 = 6;
 /// The rise of the box top is measured over at most this many frames: a
 /// box part appearing with a new message can take two frames to be found.
 const PUSH_WINDOW: u32 = 3;
+/// A push that no line read confirmed is undone if, within this many
+/// frames, a pushed line is read at its place before the push before any
+/// is read at its new place: the box top only seemed to rise (an object
+/// at the box edge hid the top part of the box for a frame or two).
+const CONFIRM_WINDOW: u32 = 10;
 /// A box band is solid if its darkness (1 minus its edge ratio) is at
 /// least this fraction of the darkness of a fully visible box: about 0.34
 /// (ratio 0.66) on recordings, less where a filter lifts the shadows or
@@ -323,26 +350,57 @@ struct Track {
     shift: i32,
     /// Last frame the line was read in.
     last_read: u32,
+    /// Last frame it was read with the name end its readings know: a
+    /// reading at its place that ends elsewhere may be another message.
+    last_alike: u32,
     /// Last frame it lay in a box band.
     last_band: u32,
     /// Last frame its part of the box was visible in.
     last_box: u32,
     /// Last frame its box part or, through the fade, its text was seen in.
     last_seen: u32,
+    /// Last frame it moved up in.
+    moved: u32,
+    /// The edge ratio at its place in the last frame ([`presence`]).
+    ratio: f32,
 }
 
 impl Track {
-    /// The line `id`, read in frame `frame` where it has not moved.
-    const fn new(id: u32, frame: u32) -> Self {
+    /// The line `id`, read in frame `frame` where it has not moved and its
+    /// part of the box has edge ratio `ratio`.
+    const fn new(id: u32, frame: u32, ratio: f32) -> Self {
         Self {
             id,
             shift: 0,
             last_read: frame,
+            last_alike: frame,
             last_band: frame,
             last_box: frame,
             last_seen: frame,
+            moved: 0,
+            ratio,
         }
     }
+}
+
+/// A rise of the box top by a grid step.
+#[derive(Debug, Clone, Copy)]
+struct Rise {
+    /// The last frame before the rise.
+    since: u32,
+    /// The grid step.
+    step: i32,
+}
+
+/// A push of the live lines by a rise of the box top.
+#[derive(Debug, Clone)]
+struct Push {
+    /// The frame the lines moved up in.
+    frame: u32,
+    /// How far they moved.
+    step: i32,
+    /// The lines that moved.
+    ids: Vec<u32>,
 }
 
 /// A frame's own reading of a line.
@@ -396,11 +454,16 @@ pub struct ChatTracker {
     next_id: u32,
     /// Recent box tops and their frames, oldest first.
     box_tops: VecDeque<(u32, i32)>,
+    /// The last push that no line read has confirmed yet.
+    unconfirmed: Option<Push>,
     /// The darkness of the darkest band in recent frames with a box (see
     /// [`SOLID_FRACTION`] and [`DARKNESS_FRAMES`]), oldest first.
     darkness: VecDeque<f32>,
     /// Buffer for the median of `darkness`.
     darkness_sorted: Vec<f32>,
+    /// The darkness of a fully visible box as of the current frame: the
+    /// median of `darkness`.
+    full_darkness: f32,
     /// Lines that ended but are still covered in a pending frame: one read
     /// again at its place resumes.
     ended: Vec<Track>,
@@ -415,6 +478,13 @@ impl ChatTracker {
     /// Adds the state of `detector` after it read frame `frame`. Frames
     /// must be pushed in increasing order.
     pub fn push(&mut self, frame: u32, detector: &ChatDetector) {
+        if self
+            .unconfirmed
+            .as_ref()
+            .is_some_and(|push| frame.saturating_sub(push.frame) > CONFIRM_WINDOW)
+        {
+            self.unconfirmed = None;
+        }
         let arrived = self.follow_box_top(frame, detector);
         let (mut lines, read) = self.cover_read(frame, detector, arrived);
         self.hold_unread(frame, detector, &read, &mut lines);
@@ -443,23 +513,44 @@ impl ChatTracker {
                 start: line.start,
                 end: line.end,
             });
-            let mut nearest = (0..self.tracks.len())
-                .filter(|&i| !read[i])
-                .map(|i| (i, (self.top_of(&self.tracks[i]) - line.top).abs()))
-                .filter(|&(_, d)| d <= MATCH_ROWS)
-                .min_by_key(|&(_, d)| d)
-                .map(|(i, _)| i);
+            let mut nearest = self.nearest_unread(&read, line.top);
             let mut replaced = None;
-            if let Some(i) = nearest.filter(|&i| self.is_replaced(frame, &self.tracks[i], line)) {
+            if let Some(i) =
+                nearest.filter(|&i| self.is_replaced(frame, &self.tracks[i], line, detector))
+            {
                 // Another message took the line's place: it arrived after
                 // the line was last read and pushed the line up, unless a
                 // line above was read where it was (then the old line had
                 // faded out).
                 if !read.iter().any(|&r| r) {
-                    self.push_up(i, line.top);
+                    self.push_up(i, line.top, frame);
                 }
                 replaced = Some(self.tracks[i].id);
                 nearest = None;
+            }
+            // After a push by one grid step, a line read at its old place
+            // lies where the line above it went: the name end tells them
+            // apart.
+            let alike = |tracker: &Self, i: usize| {
+                tracker
+                    .model(tracker.tracks[i].id)
+                    .is_some_and(|model| model.ends_alike(line))
+            };
+            if !nearest.is_some_and(|i| alike(self, i))
+                && replaced.is_none()
+                && self.undo_push(line)
+            {
+                nearest = self.nearest_unread(&read, line.top);
+            }
+            if let Some(i) = nearest
+                && alike(self, i)
+                && self
+                    .unconfirmed
+                    .as_ref()
+                    .is_some_and(|push| push.ids.contains(&self.tracks[i].id))
+            {
+                // A pushed line was read at its new place.
+                self.unconfirmed = None;
             }
             let resumed = if nearest.is_none() {
                 self.resume(frame, line)
@@ -473,10 +564,17 @@ impl ChatTracker {
             }
             let (id, shift) = if let Some(i) = nearest {
                 read[i] = true;
+                let last_alike = if alike(self, i) {
+                    frame
+                } else {
+                    self.tracks[i].last_alike
+                };
                 let track = &mut self.tracks[i];
                 *track = Track {
                     shift: track.shift,
-                    ..Track::new(track.id, frame)
+                    moved: track.moved,
+                    last_alike,
+                    ..Track::new(track.id, frame, presence(detector.edge_ratios(), line.top))
                 };
                 let (id, shift) = (track.id, track.shift);
                 if let Some(model) = self.model_mut(id) {
@@ -487,8 +585,9 @@ impl ChatTracker {
                 let id = self.next_id;
                 self.next_id = self.next_id.wrapping_add(1);
                 self.models.push((id, Model::new(line)));
-                self.backfill(id, line.top, arrived, replaced);
-                self.tracks.push(Track::new(id, frame));
+                let ratio = presence(detector.edge_ratios(), line.top);
+                self.backfill(id, line.top, ratio, arrived, replaced);
+                self.tracks.push(Track::new(id, frame, ratio));
                 read.push(true);
                 (id, 0)
             };
@@ -500,6 +599,17 @@ impl ChatTracker {
             });
         }
         (lines, read)
+    }
+
+    /// The live line not read yet in this frame whose top is nearest to
+    /// `top`, at most [`MATCH_ROWS`] away.
+    fn nearest_unread(&self, read: &[bool], top: i32) -> Option<usize> {
+        (0..self.tracks.len())
+            .filter(|&i| !read[i])
+            .map(|i| (i, (self.top_of(&self.tracks[i]) - top).abs()))
+            .filter(|&(_, d)| d <= MATCH_ROWS)
+            .min_by_key(|&(_, d)| d)
+            .map(|(i, _)| i)
     }
 
     /// Covers the live lines not read in this frame: held while their part
@@ -529,14 +639,19 @@ impl ChatTracker {
             // After the band is gone, the edge ratio follows the box through
             // its fade, frame after frame, and the text can outlast both.
             let after_band = frame.saturating_sub(track.last_band) <= FADE_MAX;
+            let ratio = presence(edges, top);
             let in_box = in_band
-                || (after_band && frame.saturating_sub(track.last_box) <= 1 && present(edges, top));
+                || (after_band
+                    && frame.saturating_sub(track.last_box) <= 1
+                    && ratio < PRESENT_RATIO
+                    && ratio <= track.ratio + FADE_STEP);
             let fading = !in_box
                 && after_band
                 && self
                     .model(track.id)
                     .is_some_and(|m| line_visible(detector, m.text(track.shift)));
             let track = &mut self.tracks[i];
+            track.ratio = ratio;
             if in_band {
                 track.last_band = frame;
             }
@@ -546,8 +661,12 @@ impl ChatTracker {
             if in_box || fading {
                 track.last_seen = frame;
             }
-            let held =
-                !taken && top >= SEARCH_Y.0 && frame.saturating_sub(track.last_seen) <= POST_ROLL;
+            // A line that moved where neither its box nor its text is seen
+            // has left the chat (pushed out at the top).
+            let held = !taken
+                && top >= SEARCH_Y.0
+                && track.last_seen >= track.moved
+                && frame.saturating_sub(track.last_seen) <= POST_ROLL;
             if held {
                 lines.push(Covered {
                     id: track.id,
@@ -604,19 +723,22 @@ impl ChatTracker {
                 .count();
             (moved, stayed)
         };
-        let (shift, since) = if let Some((since, step)) = rise {
-            let (moved, stayed) = evidence(step);
+        let (shift, since) = if let Some(rise) = rise {
+            let (moved, stayed) = evidence(rise.step);
             // A rise that no line read in this frame confirms counts only
             // for a box in one piece: a separate band above it is gameplay
             // texture or a fading line, not a pushed one.
             if stayed > moved || (moved == 0 && detector.bands().len() > 1) {
                 return false;
             }
+            self.unconfirmed = (moved == 0).then(|| Push {
+                frame,
+                step: rise.step,
+                ids: self.tracks.iter().map(|t| t.id).collect(),
+            });
             // Later rises are measured from the grown box.
-            let grown = self.box_tops.back().copied();
-            self.box_tops.clear();
-            self.box_tops.extend(grown);
-            (step, Some(since))
+            self.restart_box_tops();
+            (rise.step, Some(rise.since))
         } else {
             let best = GRID_STEPS
                 .into_iter()
@@ -644,6 +766,7 @@ impl ChatTracker {
         }
         for track in &mut self.tracks {
             track.shift += shift;
+            track.moved = frame;
         }
         let Some(since) = since else {
             return true;
@@ -657,14 +780,7 @@ impl ChatTracker {
     /// whether it arrived in the current frame instead (no pending frame
     /// follows `since`).
     fn cover_moved(&mut self, since: u32, shift: i32) -> bool {
-        let mut first = None;
-        for (k, pending) in self.pending.iter().enumerate().rev() {
-            if pending.frame <= since {
-                break;
-            }
-            first = Some(k);
-        }
-        let Some(first) = first else {
+        let Some(first) = self.pending.iter().position(|p| p.frame > since) else {
             return true;
         };
         self.pending[first].arrived = true;
@@ -681,11 +797,13 @@ impl ChatTracker {
                 })
                 .collect();
             for covered in moved {
-                let top = self.covered_top(&covered);
+                // Another line covered at the new place (one read with a
+                // wrong extent, or the line above before it moved too)
+                // does not cover this one.
                 if !self.pending[k]
                     .lines
                     .iter()
-                    .any(|c| (self.covered_top(c) - top).abs() <= MATCH_ROWS)
+                    .any(|c| c.id == covered.id && c.shift == covered.shift)
                 {
                     self.pending[k].lines.push(covered);
                 }
@@ -694,9 +812,15 @@ impl ChatTracker {
         false
     }
 
-    /// Follows the box top. Returns the frame before a rise of the box top
-    /// by a grid step and the step, if the box top rose.
-    fn box_rise(&mut self, frame: u32, detector: &ChatDetector) -> Option<(u32, i32)> {
+    /// Forgets the box tops before the latest one: a push moved the box.
+    fn restart_box_tops(&mut self) {
+        let latest = self.box_tops.back().copied();
+        self.box_tops.clear();
+        self.box_tops.extend(latest);
+    }
+
+    /// Follows the box top. Returns its rise by a grid step, if it rose.
+    fn box_rise(&mut self, frame: u32, detector: &ChatDetector) -> Option<Rise> {
         let bands = detector.bands();
         // Learned from the darkest band, so that filters that lighten the
         // box do not make every band look faded.
@@ -707,13 +831,14 @@ impl ChatTracker {
             }
             self.darkness.push_back(darkest);
         }
+        self.full_darkness = self.median_darkness();
         let top = bands
             .first()
             .filter(|_| bands.last().is_some_and(|b| b.y1 >= BOX_BOTTOM_MIN))
             .map(|band| band.y0)?;
         // A new message comes with its part of the box fully dark; a fading
         // box breaks up into faint bands whose tops jump.
-        let solid = darkest >= SOLID_FRACTION * self.full_darkness();
+        let solid = self.is_solid(darkest);
         while self
             .box_tops
             .front()
@@ -730,12 +855,19 @@ impl ChatTracker {
         GRID_STEPS
             .into_iter()
             .find(|step| (step - (low - top)).abs() <= STEP_TOLERANCE)
-            .map(|step| (since, step))
+            .map(|step| Rise { since, step })
+    }
+
+    /// Whether a box band of darkness `darkness` (1 minus its edge ratio)
+    /// is solid: a new message comes with its part of the box fully dark,
+    /// a fading one gets lighter.
+    fn is_solid(&self, darkness: f32) -> bool {
+        darkness >= SOLID_FRACTION * self.full_darkness
     }
 
     /// The darkness of a fully visible box: the median of the recent
     /// darkest bands.
-    fn full_darkness(&mut self) -> f32 {
+    fn median_darkness(&mut self) -> f32 {
         let sorted = &mut self.darkness_sorted;
         sorted.clear();
         sorted.extend(self.darkness.iter().copied());
@@ -744,6 +876,55 @@ impl ChatTracker {
         }
         let mid = sorted.len() / 2;
         *sorted.select_nth_unstable_by(mid, f32::total_cmp).1
+    }
+
+    /// Undoes the last push that no line read confirmed if `line` is one of
+    /// the pushed lines, read at its place before the push with its name
+    /// end: the lines move back down and are also covered there in the
+    /// frames since the push. Returns whether the push was undone.
+    fn undo_push(&mut self, line: &ChatLine) -> bool {
+        let Some(push) = &self.unconfirmed else {
+            return false;
+        };
+        let pushed_here = self.tracks.iter().chain(&self.ended).any(|track| {
+            push.ids.contains(&track.id)
+                && (self.top_of(track) + push.step - line.top).abs() <= MATCH_ROWS
+                && self
+                    .model(track.id)
+                    .is_some_and(|model| model.ends_alike(line))
+        });
+        if !pushed_here {
+            return false;
+        }
+        let Some(push) = self.unconfirmed.take() else {
+            return false;
+        };
+        for track in self.tracks.iter_mut().chain(&mut self.ended) {
+            if push.ids.contains(&track.id) {
+                track.shift -= push.step;
+                track.moved = track.moved.min(push.frame.saturating_sub(1));
+            }
+        }
+        for pending in self.pending.iter_mut().filter(|p| p.frame >= push.frame) {
+            let back: Vec<Covered> = pending
+                .lines
+                .iter()
+                .filter(|c| push.ids.contains(&c.id))
+                .map(|c| Covered {
+                    shift: c.shift - push.step,
+                    own: None,
+                    ..*c
+                })
+                .filter(|b| {
+                    !pending
+                        .lines
+                        .iter()
+                        .any(|c| c.id == b.id && c.shift == b.shift)
+                })
+                .collect();
+            pending.lines.extend(back);
+        }
+        true
     }
 
     /// Resumes the line that `line` ends like, if one ended at its place
@@ -776,13 +957,25 @@ impl ChatTracker {
     }
 
     /// Whether `line`, read in frame `frame` at the place of `track`, is
-    /// another message: its name ends at a colon elsewhere than the colon
-    /// the track's readings know, and the track was not read in the frame
-    /// before (a colon misread in one frame of a line read throughout does
-    /// not split it).
-    fn is_replaced(&self, frame: u32, track: &Track, line: &ChatLine) -> bool {
-        frame.saturating_sub(track.last_read) > 1
+    /// another message: it is the lowest line read in the frame (a new
+    /// message arrives at the bottom; a line read above another one is no
+    /// new message, also in the open chat), its name ends at a colon
+    /// elsewhere than the colon the track's readings know, the track was
+    /// not read in the frame before (a colon misread in one frame of a line
+    /// read throughout does not split it), and its part of the box is solid
+    /// (a broken glyph of a fading line can look like a colon, but a new
+    /// message is not faded).
+    fn is_replaced(
+        &self,
+        frame: u32,
+        track: &Track,
+        line: &ChatLine,
+        detector: &ChatDetector,
+    ) -> bool {
+        detector.lines().iter().all(|other| other.top <= line.top)
+            && frame.saturating_sub(track.last_read) > 1
             && line.end == NameEnd::Colon
+            && self.is_solid(1.0 - line.band.ratio)
             && self
                 .model(track.id)
                 .is_some_and(|model| model.end_confident() && !model.ends_alike(line))
@@ -791,9 +984,9 @@ impl ChatTracker {
     /// Moves the live lines up for a message read at row `top` in the place
     /// of the line `self.tracks[i]`: the line goes one line above the new
     /// message (a grid step up), the lines above it with it, and they are
-    /// covered at their new places since the line was last read. Nothing
-    /// moves if that is not a grid step.
-    fn push_up(&mut self, i: usize, top: i32) {
+    /// covered at their new places since the line was last read with its
+    /// name end. Nothing moves if that is not a grid step.
+    fn push_up(&mut self, i: usize, top: i32, frame: u32) {
         let shift = self.top_of(&self.tracks[i]) - (top - LINE_PITCH);
         if !GRID_STEPS
             .iter()
@@ -801,26 +994,29 @@ impl ChatTracker {
         {
             return;
         }
-        let since = self.tracks[i].last_read;
+        let since = self.tracks[i].last_alike;
         for track in &mut self.tracks {
             track.shift += shift;
+            track.moved = frame;
         }
         // The box top may still be growing with the new message: later
         // rises are measured from here, so the push is not counted twice.
-        let latest = self.box_tops.back().copied();
-        self.box_tops.clear();
-        self.box_tops.extend(latest);
+        self.restart_box_tops();
         self.cover_moved(since, shift);
     }
 
-    /// Covers the line `id`, first read at row `top`, in the frames before,
-    /// back to the frame its message arrived in (`arrived`: it arrived in
-    /// the current frame) or up to [`POP_IN`] frames before its part of the
-    /// box appeared. The line `replaced`, whose place the new line took, is
-    /// not in the way.
-    fn backfill(&mut self, id: u32, top: i32, arrived: bool, replaced: Option<u32>) {
+    /// Covers the line `id`, first read at row `top` with edge ratio
+    /// `ratio` at its place, in the frames before, back to the frame its
+    /// message arrived in (`arrived`: it arrived in the current frame) or up
+    /// to [`POP_IN`] frames before its part of the box appeared: going back
+    /// in time, the box is there while its edge ratio stays below
+    /// [`PRESENT_RATIO`] without a jump up (a fading box was darker
+    /// before). The line `replaced`, whose place the new line took, is not
+    /// in the way.
+    fn backfill(&mut self, id: u32, top: i32, ratio: f32, arrived: bool, replaced: Option<u32>) {
         let mut arrived = arrived;
         let mut absent = 0;
+        let mut later = ratio;
         for k in (0..self.pending.len()).rev() {
             let pending = &self.pending[k];
             if arrived
@@ -830,7 +1026,9 @@ impl ChatTracker {
             {
                 break;
             }
-            if present(&pending.edges, top) {
+            let earlier = presence(&pending.edges, top);
+            if earlier < PRESENT_RATIO && earlier <= later + FADE_STEP {
+                later = earlier;
                 absent = 0;
             } else {
                 absent += 1;
@@ -933,14 +1131,15 @@ impl ChatTracker {
 }
 
 /// Whether the line whose text starts at row `top` lies in a box band of
-/// the detector's last frame (its middle row, with the line finder's
-/// tolerance).
+/// the detector's last frame: its text starts inside the band (a line
+/// pushed out of the open chat's panel at its top does not), and its middle
+/// row lies in it with the line finder's tolerance.
 fn in_band(detector: &ChatDetector, top: i32) -> bool {
-    let middle = top + PRESENCE_ROWS / 2;
+    let middle = top + LINE_MIDDLE;
     detector
         .bands()
         .iter()
-        .any(|b| b.y0 - BAND_TOLERANCE <= middle && middle < b.y1 + BAND_TOLERANCE)
+        .any(|b| b.y0 <= top && middle < b.y1 + BAND_TOLERANCE)
 }
 
 /// Whether a line whose name has text bounds `name` is still visible in
@@ -973,19 +1172,32 @@ fn text_visible(detector: &ChatDetector, text: RectI) -> bool {
     inside >= FADE_INK && inside >= TEXT_CONTRAST * gap
 }
 
-/// Whether the chat box is visible at the line whose text starts at row
-/// `top`, from the edge ratios of a frame.
-fn present(edges: &[f32], top: i32) -> bool {
+/// How visible the chat box is at the line whose text starts at row `top`,
+/// from the edge ratios of a frame: the median over the line's part of the
+/// box, or over the rows just above its text if that is higher (a line
+/// pushed out of the open chat at the top of its panel lies mostly on the
+/// panel, but the rows above it do not), infinite outside the searched
+/// rows.
+fn presence(edges: &[f32], top: i32) -> f32 {
+    let first = top - PRESENCE_ABOVE;
+    median_ratio(edges, first, first + PRESENCE_ROWS).max(median_ratio(edges, first, top))
+}
+
+/// The median of the edge ratios of rows `y0..y1` (clipped to the searched
+/// rows), or infinity if there are none.
+fn median_ratio(edges: &[f32], y0: i32, y1: i32) -> f32 {
     let row = |y: i32| (y - SEARCH_Y.0).clamp(0, edges.len() as i32) as usize;
-    let rows = &edges[row(top)..row(top + PRESENCE_ROWS)];
+    let rows = &edges[row(y0)..row(y1).max(row(y0))];
     let mut ratios = [0.0; PRESENCE_ROWS as usize];
-    let ratios = &mut ratios[..rows.len()];
+    let Some(ratios) = ratios.get_mut(..rows.len()) else {
+        return f32::INFINITY;
+    };
     ratios.copy_from_slice(rows);
     if ratios.is_empty() {
-        return false;
+        return f32::INFINITY;
     }
     let mid = ratios.len() / 2;
-    *ratios.select_nth_unstable_by(mid, f32::total_cmp).1 < PRESENT_RATIO
+    *ratios.select_nth_unstable_by(mid, f32::total_cmp).1
 }
 
 /// The smallest rectangle containing `a` and `b`.

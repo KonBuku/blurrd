@@ -10,12 +10,13 @@
 
 mod support;
 
-use blurrd_core::{NameKind, Region};
+use blurrd_core::{NameKind, RectI, Region};
 use blurrd_detect::chat::{
-    BACKFILL_MAX, ChatDetector, ChatTracker, LEFT_PANEL_ROI, NameEnd, NameStart, POST_ROLL,
+    BACKFILL_MAX, ChatDetector, ChatTracker, FADE_MAX, LEFT_PANEL_ROI, NameEnd, NameStart,
+    POST_ROLL,
 };
 use blurrd_detect::{DetectError, Detection, RgbView};
-use blurrd_testkit::hud::chat::{Channel, ChatMessage, ChatSpec, Language};
+use blurrd_testkit::hud::chat::{Channel, ChatInput, ChatMessage, ChatSpec, INPUT_Y, Language};
 use blurrd_testkit::hud::killfeed::Team;
 use blurrd_testkit::metrics::{OverBlur, item_coverage, over_blur};
 use blurrd_testkit::{
@@ -340,6 +341,36 @@ fn skips_the_continuation_of_wrapped_messages() {
 }
 
 #[test]
+fn ignores_texture_at_the_box_edge() {
+    // Bright background texture next to the left box edge, in the rows of
+    // every line, is no prefix glyph.
+    for seed in 0..6u64 {
+        let mut rng = Rng::new(60 + seed);
+        let messages = (0..3)
+            .map(|i| message(&mut rng, Channel::All, SINGLE_WORD[(seed % 5) as usize], i))
+            .collect();
+        let mut fx = chat_fixture(
+            Language::English,
+            messages,
+            BACKGROUNDS[(seed % 3) as usize],
+            Palette::DEFAULT,
+        );
+        for top in [948, 977, 1006] {
+            let speck = RectI {
+                x0: 30,
+                y0: top + 2,
+                x1: 32,
+                y1: top + 9,
+            };
+            fx.frame.fill_rect(speck, [235, 235, 235], 1.0);
+        }
+        let check = check_frame(&fx);
+        check.assert_clean(&format!("seed {seed}"));
+        assert_eq!(check.detections.len(), 3, "seed {seed}");
+    }
+}
+
+#[test]
 fn reports_the_message_after_the_name() {
     // The message is reported separately (blurred only when the user asks
     // for it), and the name box does not reach into it.
@@ -412,17 +443,32 @@ struct SequenceCheck {
     leaks: Vec<String>,
     /// Boxes that overlap no name.
     false_positives: usize,
+    /// Boxes that reach into the open chat's input line (the player's own
+    /// typed text).
+    on_input_line: usize,
     over_blur: OverBlur,
 }
 
+/// The dark weapon model, whose own edge lies on the right edge of the
+/// chat box: the box darkens the frame inside, but the weapon outside is
+/// darker still.
+const WEAPON: RectI = RectI {
+    x0: 470,
+    y0: 760,
+    x1: 600,
+    y1: 1080,
+};
+
 /// Runs the detector and the tracker over every frame of a scene with
-/// `spec`, with the left panel filtered by `filter` if given, and checks
-/// the tracked boxes against each frame's truth.
+/// `spec`, with the left panel filtered by `filter` and a black object
+/// drawn over `occluder` if given, and checks the tracked boxes against
+/// each frame's truth.
 fn check_sequence(
     spec: ChatSpec,
     background: Background,
     frames: u32,
     filter: Option<Filter>,
+    occluder: Option<RectI>,
 ) -> SequenceCheck {
     let fonts = FontSet::latin();
     let scene = Scene::new(Layout::reference(), background, Palette::DEFAULT, frames)
@@ -458,6 +504,7 @@ fn check_sequence(
                     .iter()
                     .filter(|d| !items.iter().any(|i| i.text.intersection(&d.rect).is_some()))
                     .count();
+                check.on_input_line += boxes.iter().filter(|d| d.rect.y1 > INPUT_Y.0).count();
                 let blur = over_blur(&truth, &prepared);
                 check.over_blur.blurred += blur.blurred;
                 check.over_blur.outside += blur.outside;
@@ -465,10 +512,13 @@ fn check_sequence(
         };
     for index in 0..frames {
         let fx = scene.render(index);
-        let frame = match filter {
+        let mut frame = match filter {
             Some(filter) => filter.region(&fx.frame, LEFT_PANEL_ROI),
             None => fx.frame,
         };
+        if let Some(rect) = occluder {
+            frame.fill_rect(rect, [3, 3, 4], 1.0);
+        }
         detector
             .detect(&left_view(&frame), &mut detections)
             .unwrap();
@@ -537,6 +587,7 @@ fn tracker_covers_lines_through_pushes_and_fades() {
             BACKGROUNDS[b],
             SEQUENCE_FRAMES,
             None,
+            None,
         )
     });
     for ((k, b), check) in runs.into_iter().zip(checks) {
@@ -591,6 +642,7 @@ fn tracker_covers_lines_in_filtered_video() {
             BACKGROUNDS[k % 2],
             SEQUENCE_FRAMES,
             Some(filter),
+            None,
         )
     });
     for ((k, filter), check) in runs.into_iter().zip(checks) {
@@ -633,4 +685,230 @@ fn tracker_returns_every_frame_once() {
     let returned: Vec<u32> = ready.iter().map(|(f, _)| *f).collect();
     assert_eq!(returned, (0..frames).collect::<Vec<_>>());
     assert!(ready.iter().all(|(_, d)| d.is_empty()));
+}
+
+#[test]
+fn tracker_covers_lines_behind_an_edge_without_contrast() {
+    // A dark weapon model whose edge lies on the right edge of the box
+    // hides that edge: the left edge alone shows the box, from the frame a
+    // line pops in.
+    let runs = [0, 1, 2];
+    let checks = in_parallel(&runs, |&b| {
+        let mut rng = Rng::new(800 + b as u64);
+        check_sequence(
+            sequence(&mut rng, Language::ALL[b]),
+            BACKGROUNDS[b],
+            SEQUENCE_FRAMES,
+            None,
+            Some(WEAPON),
+        )
+    });
+    for (b, check) in runs.into_iter().zip(checks) {
+        assert!(check.leaks.is_empty(), "background {b}: {:?}", check.leaks);
+        assert!(
+            check.false_positives <= 7 * POST_ROLL as usize + 2,
+            "background {b}: {} false-positive boxes",
+            check.false_positives
+        );
+    }
+}
+
+/// Frames of [`fourth_line`] and [`open_chat`].
+const LONG_FRAMES: u32 = 280;
+
+/// A closed chat that shows four lines: the oldest line is pushed up above
+/// the three-line grid while it fades (frames 66 to 80), and later four
+/// fully visible lines stand on the grid.
+fn fourth_line(rng: &mut Rng, language: Language) -> ChatSpec {
+    let times = [2, 40, 50, 66, 150, 160, 170, 180];
+    let messages = times
+        .iter()
+        .zip(0..)
+        .map(|(&time, i)| {
+            let style = NameStyle::LATIN_MIX[i % 7];
+            message(rng, CHANNELS[i % 4], style, time)
+        })
+        .collect();
+    ChatSpec {
+        life: 60,
+        shown: 4,
+        ..ChatSpec::new(language, messages)
+    }
+}
+
+#[test]
+fn tracker_covers_a_fourth_line_above_the_grid() {
+    let runs = [0, 1, 2];
+    let checks = in_parallel(&runs, |&b| {
+        let mut rng = Rng::new(900 + b as u64);
+        check_sequence(
+            fourth_line(&mut rng, Language::ALL[b]),
+            BACKGROUNDS[b],
+            LONG_FRAMES,
+            None,
+            None,
+        )
+    });
+    for (b, check) in runs.into_iter().zip(checks) {
+        assert!(check.leaks.is_empty(), "background {b}: {:?}", check.leaks);
+        // Where gameplay texture keeps the edge ratio of a faded box part
+        // below 0.97 by chance, a line can be held until FADE_MAX frames
+        // after its band (two lines fade out on their own).
+        assert!(
+            check.false_positives <= 8 * POST_ROLL as usize + 2 * FADE_MAX as usize + 2,
+            "background {b}: {} false-positive boxes",
+            check.false_positives
+        );
+    }
+}
+
+/// A chat that is opened for typing at frame 100 and closed at frame 220:
+/// the open chat shows the whole history, faded messages included, as far
+/// as the panel reaches; two messages arrive while it is open (one of them
+/// wrapped) and push the history up, out of the panel at its top.
+fn open_chat(rng: &mut Rng, language: Language) -> ChatSpec {
+    let mut messages: Vec<_> = (0..9)
+        .map(|i| {
+            let style = NameStyle::LATIN_MIX[i % 7];
+            message(rng, CHANNELS[i % 5], style, 2 + 6 * i as u32)
+        })
+        .collect();
+    messages.push(message(rng, Channel::All, NameStyle::Latin(10), 150));
+    let mut wrapped = message(rng, Channel::Team, NameStyle::TwoWord, 175);
+    "watch the flank and save the ult for the retake".clone_into(&mut wrapped.text);
+    wrapped.wrap = true;
+    messages.push(wrapped);
+    ChatSpec {
+        life: 60,
+        input: Some(ChatInput {
+            from: 100,
+            to: 220,
+            channel: Channel::Team,
+            text: "rotate b".to_owned(),
+        }),
+        ..ChatSpec::new(language, messages)
+    }
+}
+
+#[test]
+fn finds_every_line_of_the_open_chat() {
+    // The panel is full: eight lines on the grid, the oldest message
+    // scrolled out at its top.
+    for (k, language) in Language::ALL.into_iter().enumerate() {
+        for (b, background) in BACKGROUNDS.into_iter().enumerate() {
+            let mut rng = Rng::new(950 + 3 * k as u64 + b as u64);
+            let fonts = FontSet::latin();
+            let fx = Scene::new(Layout::reference(), background, Palette::DEFAULT, 200)
+                .with_chat(&fonts, open_chat(&mut rng, language))
+                .render(160);
+            let check = check_frame(&fx);
+            let context = format!("{language:?}, background {b}");
+            check.assert_clean(&context);
+            assert_eq!(check.items, 8, "{context}");
+            assert!(
+                check.detections.iter().all(|d| d.rect.y1 <= INPUT_Y.0),
+                "{context}: the typed text is covered: {:?}",
+                check.detections
+            );
+        }
+    }
+}
+
+#[test]
+fn finds_open_chat_lines_without_edge_contrast() {
+    // Over the top lines of the open panel, an opaque overlay on the left
+    // of the screen (a spectator's player card) hides the left box edge, a
+    // black scene leaves both edges without a step, or a filter that lifts
+    // the shadows of a black scene leaves a flat grey on both sides of the
+    // edges of the whole panel (the scrollbar thumb stays white).
+    let rect = |x0, y0, x1, y1| RectI { x0, y0, x1, y1 };
+    let cases: [(&str, Vec<RectI>, [u8; 3]); 3] = [
+        ("overlay", vec![rect(0, 795, 34, 880)], [120, 110, 100]),
+        (
+            "black",
+            vec![rect(0, 795, 26, 880), rect(457, 795, 500, 880)],
+            [1, 1, 1],
+        ),
+        (
+            "flat",
+            vec![
+                rect(18, 787, 34, 1028),
+                rect(446, 787, 458, 1028),
+                rect(458, 787, 470, 945),
+            ],
+            [33, 33, 33],
+        ),
+    ];
+    for (b, background) in BACKGROUNDS.into_iter().enumerate() {
+        for (name, rects, colour) in &cases {
+            let mut rng = Rng::new(970 + b as u64);
+            let fonts = FontSet::latin();
+            let mut fx = Scene::new(Layout::reference(), background, Palette::DEFAULT, 200)
+                .with_chat(&fonts, open_chat(&mut rng, Language::English))
+                .render(160);
+            for rect in rects {
+                fx.frame.fill_rect(*rect, *colour, 1.0);
+            }
+            let check = check_frame(&fx);
+            let context = format!("background {b}, {name}");
+            check.assert_clean(&context);
+            assert_eq!(check.detections.len(), 8, "{context}");
+        }
+    }
+}
+
+#[test]
+fn finds_open_chat_names_too_faint_to_see_in_greyscale() {
+    // On a bright background in greyscale video, a red name and its prefix
+    // are darker than the panel around them and leave no bright strokes:
+    // the line's first glyph is the colon.
+    for (b, background) in BACKGROUNDS.into_iter().enumerate() {
+        let mut rng = Rng::new(990 + b as u64);
+        let fonts = FontSet::latin();
+        let fx = Scene::new(Layout::reference(), background, Palette::DEFAULT, 200)
+            .with_chat(&fonts, open_chat(&mut rng, Language::English))
+            .render(160);
+        let fx = Fixture {
+            frame: Filter::Saturation(0.0).region(&fx.frame, LEFT_PANEL_ROI),
+            ..fx
+        };
+        let check = check_frame(&fx);
+        let context = format!("background {b}");
+        check.assert_clean(&context);
+        assert_eq!(check.detections.len(), 8, "{context}");
+    }
+}
+
+#[test]
+fn tracker_covers_the_open_chat() {
+    // Every history line is covered from the frame the chat opens until it
+    // closes, through the pushes of new messages; the typed text is not.
+    let runs = [(0, 0), (1, 1), (2, 2)];
+    let checks = in_parallel(&runs, |&(k, b)| {
+        let mut rng = Rng::new(980 + 3 * k as u64 + b as u64);
+        check_sequence(
+            open_chat(&mut rng, Language::ALL[k]),
+            BACKGROUNDS[b],
+            LONG_FRAMES,
+            None,
+            None,
+        )
+    });
+    for ((k, b), check) in runs.into_iter().zip(checks) {
+        let context = format!("{:?}, background {b}", Language::ALL[k]);
+        assert!(check.leaks.is_empty(), "{context}: {:?}", check.leaks);
+        assert_eq!(check.on_input_line, 0, "{context}");
+        // Lines that leave the panel at its top, or vanish when the chat
+        // closes, stay covered for the post-roll.
+        assert!(
+            check.false_positives <= 12 * POST_ROLL as usize + 2,
+            "{context}: {} false-positive boxes",
+            check.false_positives
+        );
+        assert!(
+            check.names >= 8 * 100,
+            "{context}: {} name-frames",
+            check.names
+        );
+    }
 }

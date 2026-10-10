@@ -2,7 +2,8 @@
 //!
 //! The text chat sits on the bottom left of the screen. Up to three
 //! messages are shown on a 29 px line grid inside a dark box that
-//! darkens the frame multiplicatively:
+//! darkens the frame multiplicatively (four on some recordings, the oldest
+//! one above the grid of three, often while it fades):
 //!
 //! ```text
 //! (All) SenderName: message text
@@ -12,7 +13,12 @@
 //!
 //! A new message appears at the bottom line within one frame and pushes
 //! the older ones up; old messages fade out together with their part of
-//! the box. [`ChatDetector`] finds the box from its vertical edges, the
+//! the box. While the player types, the chat is open: the history of up to
+//! eight lines on the same grid fills a taller panel above the input line,
+//! and messages do not fade. Its lines are read like those of the closed
+//! chat. The typed text is the player's own: it lies on the input line,
+//! which reaches below the left-panel crop, and is not covered.
+//! [`ChatDetector`] finds the box from its vertical edges, the
 //! text lines inside it from their ink, and the name in each line from its
 //! layout. It works on the left-panel crop of plan 5.4
 //! ([`LEFT_PANEL_ROI`]) and reports reference-pixel boxes. [`ChatTracker`]
@@ -57,11 +63,28 @@ pub const LEFT_PANEL_ROI: RectI = RectI {
 };
 
 /// Left and right edge columns of the dark chat box (`CHAT_X0`,
-/// `CHAT_X1`).
+/// `CHAT_X1`); the open chat's input line spans them too.
 pub const BOX_X: (i32, i32) = (26, 469);
 
-/// Rows searched for chat lines (`CHAT_Y0`, `CHAT_Y1`).
-pub const SEARCH_Y: (i32, i32) = (930, 1040);
+/// The right edge column of the open chat's history panel (its scrollbar
+/// lies to the right of it).
+pub const PANEL_X1: i32 = 457;
+
+/// Rows searched for the chat box and its lines: the port spec's rows
+/// 930..1040 (`CHAT_Y0`, `CHAT_Y1`) of the closed chat, extended up over
+/// the open chat's history panel, whose box starts at row 787.
+pub const SEARCH_Y: (i32, i32) = (780, 1040);
+
+/// The ink is measured from this row at least: the closed chat's three
+/// lines (port spec `CHAT_Y0`). Above it, it is measured over the box
+/// bands found there, a fourth line of the closed chat or the open chat's
+/// panel, and while their lines fade.
+const CLOSED_INK_TOP: i32 = 930;
+
+/// Rows above a box band from which its ink is measured: the text starts
+/// about 6 rows below the band top, and a fading line is told from the
+/// empty rows above its text.
+const INK_MARGIN: i32 = 8;
 
 /// Columns searched for text: the inside of the box.
 const INK_X: (i32, i32) = (30, BOX_X.1 - 2);
@@ -110,6 +133,8 @@ pub struct ChatLine {
 #[derive(Debug, Clone, Default)]
 struct Scratch {
     lines: line::LineScratch,
+    /// The edges of each searched row.
+    rows: Vec<band::RowEdge>,
 }
 
 /// Finds the sender names in the text chat of one frame.
@@ -122,6 +147,10 @@ pub struct ChatDetector {
     frames_without_box: u32,
     /// Whether the ink was measured in the last frame.
     ink_measured: bool,
+    /// Rows the ink area reaches above [`CLOSED_INK_TOP`] (the open chat's
+    /// panel), and frames since a band last asked for that.
+    ink_extra: i32,
+    ink_extra_age: u32,
     bands: Vec<BoxBand>,
     lines: Vec<ChatLine>,
     scratch: Scratch,
@@ -142,9 +171,10 @@ impl ChatDetector {
 
     /// How visible the chat box was in each searched row of the last frame
     /// (`SEARCH_Y.0 + i` for entry `i`): the brightness inside the box
-    /// relative to outside, at its left and right edges, whichever is
-    /// closer to 1. About 0.66 inside a fully visible box, rising to 1
-    /// while it fades out, around 1 without a box.
+    /// relative to outside, at its left and right edges (the closed box's
+    /// or the open panel's), whichever is closer to 1, or at the left edge
+    /// alone where that is a clear step. About 0.66 inside a fully visible
+    /// box, rising to 1 while it fades out, around 1 without a box.
     pub fn edge_ratios(&self) -> &[f32] {
         &self.edges
     }
@@ -187,7 +217,13 @@ impl ChatDetector {
             });
         }
         let origin = (LEFT_PANEL_ROI.x0, LEFT_PANEL_ROI.y0);
-        band::find_bands(crop, origin.1, &mut self.edges, &mut self.bands);
+        band::find_bands(
+            crop,
+            origin.1,
+            &mut self.edges,
+            &mut self.scratch.rows,
+            &mut self.bands,
+        );
         // The ink is measured while the box is visible and through the
         // fade after it, where text can outlast the box edge.
         self.frames_without_box = if self.bands.is_empty() {
@@ -199,7 +235,8 @@ impl ChatDetector {
         if !self.ink_measured {
             return Ok(());
         }
-        self.scratch.lines.compute_ink(crop, origin);
+        let top = self.ink_top();
+        self.scratch.lines.compute_ink(crop, origin, top);
         if self.bands.is_empty() {
             return Ok(());
         }
@@ -234,6 +271,25 @@ impl ChatDetector {
             },
         );
         Ok(())
+    }
+
+    /// The first row of this frame's ink area: [`CLOSED_INK_TOP`], or
+    /// above it over the topmost box band. It stays up for [`FADE_MAX`]
+    /// frames after the band is gone, while the lines that were there
+    /// fade.
+    fn ink_top(&mut self) -> i32 {
+        let wanted = self
+            .bands
+            .first()
+            .map_or(0, |band| CLOSED_INK_TOP - (band.y0 - INK_MARGIN))
+            .max(0);
+        if wanted >= self.ink_extra || self.ink_extra_age >= track::FADE_MAX {
+            self.ink_extra = wanted;
+            self.ink_extra_age = 0;
+        } else {
+            self.ink_extra_age += 1;
+        }
+        CLOSED_INK_TOP - self.ink_extra
     }
 }
 

@@ -27,7 +27,9 @@ const LINE_ROWS: (u32, u32) = (8, 22);
 const SPLIT_MARGIN: (u32, u32) = (6, 5);
 /// A line starting at most this far below the previous line's top is the
 /// continuation of a wrapped message (messages are 29 px apart, a wrapped
-/// line 18 px).
+/// line 18 px). Lines split from a run of more than two lines (an
+/// overlay's ink joins them) are left out of this rule: the split also
+/// yields texture, and the overlay's ink shifts the tops of the parts.
 const WRAP_MAX: i32 = 23;
 /// A line's centre lies in a box band, with this tolerance.
 const BAND_TOLERANCE: f32 = 3.0;
@@ -38,6 +40,10 @@ const COLUMN_MIN_INK: usize = 2;
 const WORD_GAP: u32 = 2;
 /// The prefix ("(All)") starts at most this far into the ink area.
 const PREFIX_MAX_X: u32 = 16;
+/// Ink that ends before this column of the ink area is background texture
+/// next to the box edge, not text: the text starts 8 or 9 columns in, and
+/// its first glyph is at least 2 columns wide.
+const EDGE_COLUMNS: u32 = 7;
 /// The prefix is at most this wide (last column minus first):
 /// "(Broadcast)" is 72 px wide, translated prefixes are up to about 90 px.
 const PREFIX_MAX_WIDTH: u32 = 140;
@@ -151,48 +157,63 @@ pub(super) struct NameLine {
 }
 
 /// Reusable buffers of the line finder.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(super) struct LineScratch {
     strokes: InkScratch,
+    /// The ink area of the last [`compute_ink`](Self::compute_ink) in
+    /// reference pixels: the box interior over the rows that can hold text.
+    area: RectI,
     /// The top-hat of every pixel of the ink area, row after row.
     levels: Vec<u8>,
     profile: Vec<u32>,
 }
 
-/// The ink area in reference pixels: the box interior over the searched
-/// rows.
-const fn ink_rect() -> RectI {
+impl Default for LineScratch {
+    fn default() -> Self {
+        Self {
+            strokes: InkScratch::default(),
+            area: ink_rect(SEARCH_Y.1),
+            levels: Vec::new(),
+            profile: Vec::new(),
+        }
+    }
+}
+
+/// The ink area in reference pixels from row `top`: the box interior down
+/// to the last searched row.
+const fn ink_rect(top: i32) -> RectI {
     RectI {
         x0: INK_X.0,
-        y0: SEARCH_Y.0,
+        y0: top,
         x1: INK_X.1,
         y1: SEARCH_Y.1,
     }
 }
 
 impl LineScratch {
-    /// Measures the strokes of the ink area: the white top-hat of each
-    /// channel, as in a crop of only that area, the largest of the three.
-    /// `crop` is the left panel, whose top-left pixel is reference pixel
-    /// `origin`.
-    pub(super) fn compute_ink(&mut self, crop: &RgbView<'_>, origin: (i32, i32)) {
+    /// Measures the strokes of the ink area from row `top` (reference
+    /// pixels, inside [`SEARCH_Y`]): the white top-hat of each channel, as
+    /// in a crop of only that area, the largest of the three. `crop` is the
+    /// left panel, whose top-left pixel is reference pixel `origin`.
+    pub(super) fn compute_ink(&mut self, crop: &RgbView<'_>, origin: (i32, i32), top: i32) {
+        self.area = ink_rect(top.clamp(SEARCH_Y.0, SEARCH_Y.1 - 1));
         self.strokes
-            .stroke_levels(crop, origin, ink_rect(), &mut self.levels);
+            .stroke_levels(crop, origin, self.area, &mut self.levels);
     }
 
     /// Top-hat levels of row `y` (ink-area coordinates).
     fn levels_row(&self, y: u32) -> &[u8] {
-        let w = ink_rect().width() as usize;
+        let w = self.area.width() as usize;
         &self.levels[y as usize * w..(y as usize + 1) * w]
     }
 
     /// The stroke pixels in `rect` (reference pixels, clipped to the ink
     /// area) as of the last [`compute_ink`](Self::compute_ink).
     pub(super) fn strokes_in(&self, rect: RectI) -> u32 {
-        let Some(r) = rect.intersection(&ink_rect()) else {
+        let area = self.area;
+        let Some(r) = rect.intersection(&area) else {
             return 0;
         };
-        let area = ink_rect();
         let (x0, x1) = ((r.x0 - area.x0) as usize, (r.x1 - area.x0) as usize);
         ((r.y0 - area.y0) as u32..(r.y1 - area.y0) as u32)
             .map(|y| {
@@ -218,7 +239,7 @@ pub(super) fn find_names<F>(
 ) where
     F: FnMut(NameLine, &super::BoxBand),
 {
-    let area = ink_rect();
+    let area = scratch.area;
     // Taken out of the scratch while the line test borrows the ink.
     let mut profile = std::mem::take(&mut scratch.profile);
     profile.clear();
@@ -230,6 +251,7 @@ pub(super) fn find_names<F>(
             .map(|row| row.iter().map(|&v| u32::from(v > INK_MIN)).sum::<u32>()),
     );
     let mut prev_top = i32::MIN / 2;
+    let mut parts = Vec::new();
     let candidates = runs(profile.iter().map(|&p| p >= ROW_MIN_INK));
     for run in candidates.into_iter().filter(|r| r.len() >= MIN_RUN) {
         let (mut a, mut b) = (run.start, run.end - 1);
@@ -245,27 +267,21 @@ pub(super) fn find_names<F>(
         while b > a && low(profile[b as usize]) {
             b -= 1;
         }
-        let parts = if b - a + 1 > LINE_ROWS.1 {
-            let lo = a + SPLIT_MARGIN.0;
-            let hi = b - SPLIT_MARGIN.1;
-            // The first weakest row, as `argmin` picks it.
-            let m = (lo..hi)
-                .min_by_key(|&i| (profile[i as usize], i))
-                .unwrap_or(lo);
-            [Some((a, m - 1)), Some((m + 1, b))]
-        } else {
-            [Some((a, b)), None]
-        };
-        for (a, b) in parts.into_iter().flatten() {
+        parts.clear();
+        split_lines(&profile, a, b, &mut parts);
+        let joined = parts.len() > 2;
+        for &(a, b) in &parts {
             let rows = b - a + 1;
             if !(LINE_ROWS.0..=LINE_ROWS.1).contains(&rows) {
                 continue;
             }
             let top = area.y0 + a as i32;
-            let wrapped = top - prev_top <= WRAP_MAX;
-            prev_top = top;
-            if wrapped {
-                continue;
+            if !joined {
+                let wrapped = top - prev_top <= WRAP_MAX;
+                prev_top = top;
+                if wrapped {
+                    continue;
+                }
             }
             let centre = area.y0 as f32 + (a + b) as f32 / 2.0;
             let Some(band) = bands.iter().find(|band| {
@@ -299,6 +315,25 @@ pub(super) fn find_names<F>(
     scratch.profile = profile;
 }
 
+/// Appends the lines of the run of text rows `a..=b` to `out`, top to
+/// bottom: a run taller than a line is touching lines (or lines joined by
+/// an overlay's ink between them), split at its first weakest row, each
+/// part again until it is no taller than a line.
+fn split_lines(profile: &[u32], a: u32, b: u32, out: &mut Vec<(u32, u32)>) {
+    let lo = a + SPLIT_MARGIN.0;
+    let hi = b.saturating_sub(SPLIT_MARGIN.1);
+    if b - a < LINE_ROWS.1 || lo >= hi {
+        out.push((a, b));
+        return;
+    }
+    // The first weakest row, as `argmin` picks it.
+    let m = (lo..hi)
+        .min_by_key(|&i| (profile[i as usize], i))
+        .unwrap_or(lo);
+    split_lines(profile, a, m - 1, out);
+    split_lines(profile, m + 1, b, out);
+}
+
 /// The ink and colours of one line (rows `a..=b` of the ink area).
 struct LineInk<'a> {
     scratch: &'a LineScratch,
@@ -311,7 +346,8 @@ struct LineInk<'a> {
     /// Ink-area rows over which glyph shapes are measured (inclusive).
     shape_rows: (u32, u32),
     /// Runs of ink columns (columns with at least [`COLUMN_MIN_INK`] stroke
-    /// pixels): glyphs or groups of touching glyphs.
+    /// pixels): glyphs or groups of touching glyphs. Runs within
+    /// [`EDGE_COLUMNS`] of the box edge are left out.
     segments: Vec<Run>,
     /// The same for high-contrast ink: faint texture and anti-aliasing do
     /// not join the white colon to its neighbours.
@@ -332,21 +368,26 @@ impl<'a> LineInk<'a> {
             origin,
             a,
             height: b - a + 1,
-            width: ink_rect().width(),
+            width: scratch.area.width(),
             shape_rows: (
                 a.saturating_sub(SHAPE_MARGIN.0),
-                (b + SHAPE_MARGIN.1).min(ink_rect().height() - 1),
+                (b + SHAPE_MARGIN.1).min(scratch.area.height() - 1),
             ),
             segments: Vec::new(),
             strong_segments: Vec::new(),
         };
-        line.segments = runs(
-            (0..line.width)
-                .map(|x| (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK),
-        );
-        line.strong_segments = runs((0..line.width).map(|x| {
+        let text = |segments: Vec<Run>| {
+            segments
+                .into_iter()
+                .filter(|s| s.end > EDGE_COLUMNS)
+                .collect()
+        };
+        line.segments = text(runs((0..line.width).map(|x| {
+            (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK
+        })));
+        line.strong_segments = text(runs((0..line.width).map(|x| {
             (0..line.height).filter(|&y| line.get_strong(x, y)).count() >= COLUMN_MIN_INK
-        }));
+        })));
         line
     }
 
@@ -394,7 +435,7 @@ impl<'a> LineInk<'a> {
     /// glyphs). Anti-aliased edges and faint texture mix in the background
     /// behind the box, so they and the darker half are left out.
     fn colour(&self, c0: u32, c1: u32) -> Option<[u8; 3]> {
-        let area = ink_rect();
+        let area = self.scratch.area;
         let collect = |stroke: &dyn Fn(u32, u32) -> bool| {
             let mut pixels: Vec<[u8; 3]> = Vec::new();
             for y in 0..self.height {
@@ -431,7 +472,7 @@ impl<'a> LineInk<'a> {
     /// line's stroke pixels stay below: the white of the message where the
     /// line has one.
     fn white_level(&self) -> u8 {
-        let area = ink_rect();
+        let area = self.scratch.area;
         let mut levels: Vec<u8> = Vec::new();
         for y in 0..self.height {
             for x in 0..self.width {
@@ -478,7 +519,7 @@ struct NameRead {
 fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
     let first = *line.segments.first()?;
     if first.start > PREFIX_MAX_X {
-        return None;
+        return faint_name(line);
     }
     let paren = opening_paren(line);
     let words = merge_runs(&line.segments, WORD_GAP);
@@ -496,59 +537,75 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
                 // Without an opening parenthesis (broken strokes on low
                 // contrast) the prefix is the first word, as in the
                 // prototype.
-                let name = words.get(1)?;
+                let Some(name) = words.get(1) else {
+                    return faint_name(line);
+                };
                 if !(PREFIX_WIDTH.0..=PREFIX_WIDTH.1).contains(&(prefix.end - 1 - prefix.start)) {
-                    return None;
+                    return faint_name(line);
                 }
                 (NameStart::Word, prefix.end - 1, name.start)
             }
         };
     let last_ink = line.segments.last()?.end - 1;
     let mut colours = LineColours::new(line, (first.start, prefix_end));
-    if start != NameStart::Shortest
-        && colours.prefix.is_some()
-        && words
-            .get(1)
-            .and_then(|name| line.colour(name.start, name.end))
-            .is_some_and(|c| colours.is_white(c))
-    {
-        // The second word is white, so it is the message: the first word
-        // is the prefix and the name run together, and a tall last letter
-        // of the name looked like the closing parenthesis.
+    let second = words.get(1);
+    let second_is_colon = second.is_some_and(|word| word.len() <= COLON_COLUMNS);
+    let second_is_white = || {
+        colours.prefix.is_some()
+            && second
+                .and_then(|word| line.colour(word.start, word.end))
+                .is_some_and(|c| colours.is_white(c))
+    };
+    if start != NameStart::Shortest && (second_is_colon || second_is_white()) {
+        // The second word is the colon (no name is that narrow) or white,
+        // so it is the message: the first word is the prefix and the name
+        // run together, and a tall last letter of the name looked like the
+        // closing parenthesis.
         (start, prefix_end, nx0) = shortest();
         colours = LineColours::new(line, (first.start, prefix_end));
     }
     let ends_name = |colon: u32| colours.ends_name(line, colon);
-    // The port spec's colon test first; it is exact on recordings. The
-    // glyph test finds colons it cannot (other fonts and scalings).
-    let colon = colon_column(line, nx0 + COLON_FROM, nx0 + COLON_TO, &ends_name)
-        .or_else(|| colon_glyph(line, nx0 + COLON_FROM, nx0 + COLON_TO, &ends_name));
     // The name's last column, the last column to cover, and how the end
-    // was found.
-    let (nx1, cover_end, end) = if let Some(colon) = colon {
-        // Up to the colon: a role before it ("(Broadcast) name (Agent):")
-        // is covered with the name. Its parentheses cannot be told from
-        // tall letters such as "l" reliably, and a role is not private,
-        // while a name cut short is a leak.
-        (colon - 1, colon - 1, NameEnd::Colon)
-    } else if let Some((nx1, next)) = (start != NameStart::Shortest)
-        .then(|| colours.colour_end(line, nx0))
-        .flatten()
-    {
-        // Up to the white glyph after the name: the name's last glyph may
-        // be too faint to be seen.
-        (nx1, next.map_or(nx1, |n| n - 1), NameEnd::Colour)
-    } else {
-        // Where the prefix runs into the name, the name may start as far
-        // as the widest prefix allows, and the colour run includes the
-        // rest of the prefix, so it says nothing about the name's end.
-        let reach = match start {
-            NameStart::Shortest => PREFIX_MAX_WIDTH - MIN_PREFIX_WIDTH + SAFE_NAME_WIDTH,
-            NameStart::Parenthesis | NameStart::Word => SAFE_NAME_WIDTH,
-        };
-        let nx1 = (nx0 + reach - 1).min(last_ink);
-        (nx1, nx1, NameEnd::Safe)
+    // was found, for a name that starts at `nx0`, found by `start`.
+    let name_end = |start: NameStart, nx0: u32| {
+        // The port spec's colon test first; it is exact on recordings. The
+        // glyph test finds colons it cannot (other fonts and scalings).
+        let colon = colon_column(line, nx0 + COLON_FROM, nx0 + COLON_TO, &ends_name)
+            .or_else(|| colon_glyph(line, nx0 + COLON_FROM, nx0 + COLON_TO, &ends_name));
+        if let Some(colon) = colon {
+            // Up to the colon: a role before it ("(Broadcast) name
+            // (Agent):") is covered with the name. Its parentheses cannot
+            // be told from tall letters such as "l" reliably, and a role is
+            // not private, while a name cut short is a leak.
+            (colon - 1, colon - 1, NameEnd::Colon)
+        } else if let Some((nx1, next)) = (start != NameStart::Shortest)
+            .then(|| colours.colour_end(line, nx0))
+            .flatten()
+        {
+            // Up to the white glyph after the name: the name's last glyph
+            // may be too faint to be seen.
+            (nx1, next.map_or(nx1, |n| n - 1), NameEnd::Colour)
+        } else {
+            // Where the prefix runs into the name, the name may start as
+            // far as the widest prefix allows, and the colour run includes
+            // the rest of the prefix, so it says nothing about the name's
+            // end.
+            let reach = match start {
+                NameStart::Shortest => PREFIX_MAX_WIDTH - MIN_PREFIX_WIDTH + SAFE_NAME_WIDTH,
+                NameStart::Parenthesis | NameStart::Word => SAFE_NAME_WIDTH,
+            };
+            let nx1 = (nx0 + reach - 1).min(last_ink);
+            (nx1, nx1, NameEnd::Safe)
+        }
     };
+    let (mut nx1, mut cover_end, mut end) = name_end(start, nx0);
+    if start == NameStart::Word && end == NameEnd::Safe {
+        // Without parentheses, colon or colour, nothing says that the first
+        // word is the prefix alone: the prefix and a faint name may have
+        // run together, and the second word be the message.
+        (start, prefix_end, nx0) = shortest();
+        (nx1, cover_end, end) = name_end(start, nx0);
+    }
     if nx1 < nx0 + MIN_NAME_WIDTH {
         return None;
     }
@@ -568,6 +625,44 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
         start,
         end,
         message,
+    })
+}
+
+/// Reads a line whose prefix and name are too faint to be seen (a coloured
+/// name on a bright background in greyscale video): its first glyph is the
+/// colon, followed by the white message, with at most specks of texture
+/// ([`COLON_COLUMNS`] columns in all) before it. The name is covered from
+/// the text start to the colon, which lies at most as far in as the
+/// widest prefix and name reach.
+fn faint_name(line: &LineInk<'_>) -> Option<NameRead> {
+    let colours = LineColours::new(line, (0, 0));
+    let ends_name = |c: u32| colours.ends_name(line, c);
+    let mut specks = 0;
+    let mut colon = None;
+    for (k, glyph) in line.strong_segments.iter().enumerate() {
+        if glyph.start > PREFIX_MAX_X + PREFIX_MAX_WIDTH + COLON_TO {
+            return None;
+        }
+        if is_colon_glyph(line, k, &ends_name) {
+            colon = Some(*glyph);
+            break;
+        }
+        specks += glyph.len();
+        if specks > COLON_COLUMNS {
+            return None;
+        }
+    }
+    let colon = colon?;
+    let last_ink = line.segments.last()?.end - 1;
+    Some(NameRead {
+        name: (EDGE_COLUMNS, colon.start - 1),
+        start: NameStart::Shortest,
+        end: NameEnd::Colon,
+        message: line
+            .segments
+            .iter()
+            .find(|s| s.start > colon.end)
+            .map(|s| (s.start, last_ink)),
     })
 }
 
@@ -602,18 +697,28 @@ impl LineColours {
             && f32::from(max) >= WHITE_FRACTION * f32::from(self.white_level)
     }
 
-    /// Whether the colon candidate in column `colon` can end the name: the
-    /// glyph after it is the white message. A broken glyph inside the
-    /// prefix or the name is followed by more of the name, which has the
-    /// prefix colour or, in greyscale video and on bright backgrounds, is
-    /// darker than the message.
+    /// Whether the colon candidate in column `colon` can end the name: a
+    /// space follows it, and the glyph after that is the white message. A
+    /// broken glyph inside the prefix or the name is followed by more of
+    /// the name, which has the prefix colour or, in greyscale video and on
+    /// bright backgrounds, is darker than the message.
     fn ends_name(&self, line: &LineInk<'_>, colon: u32) -> bool {
+        // A space follows the colon: inside a word, the next glyph is at
+        // most WORD_GAP columns away (a blurred letter of a faint name can
+        // look like a colon in its high-contrast strokes).
+        let spaced = line
+            .segments
+            .iter()
+            .position(|s| s.start <= colon && colon < s.end)
+            .and_then(|k| Some((line.segments[k], line.segments.get(k + 1)?)))
+            .is_none_or(|(glyph, next)| next.start - glyph.end > WORD_GAP);
         // The first ink after the colon, glyph by glyph: on bright
         // backgrounds faint glyphs run together into one segment.
-        (colon + COLON_COLUMNS + 1..line.width)
-            .find(|&x| (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK)
-            .and_then(|x| line.colour(x, x + GLYPH_COLUMNS))
-            .is_none_or(|c| self.is_white(c))
+        spaced
+            && (colon + COLON_COLUMNS + 1..line.width)
+                .find(|&x| (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK)
+                .and_then(|x| line.colour(x, x + GLYPH_COLUMNS))
+                .is_none_or(|c| self.is_white(c))
     }
 
     /// Where the prefix colour ends after the name start `nx0`: the last
@@ -723,30 +828,34 @@ fn colon_glyph(
     let segments = &line.strong_segments;
     (1..segments.len())
         .filter(|&k| segments[k].start >= from && segments[k].start <= to)
-        .find(|&k| {
-            let glyph = segments[k];
-            if glyph.len() > COLON_COLUMNS {
-                return false;
-            }
-            if segments
-                .get(k + 1)
-                .is_some_and(|next| next.start - glyph.end <= WORD_GAP)
-            {
-                return false;
-            }
-            let dots = runs(
-                (0..line.height).map(|y| (glyph.start..glyph.end).any(|x| line.get_strong(x, y))),
-            );
-            let [upper, lower] = dots[..] else {
-                return false;
-            };
-            upper.len() <= MAX_DOT_ROWS
-                && lower.len() <= MAX_DOT_ROWS
-                && (DOT_GAP.0..=DOT_GAP.1).contains(&(lower.start - upper.end))
-                && (lower.end - 1) as f32 >= 0.5 * line.height as f32
-                && ends_name(glyph.start)
-        })
+        .find(|&k| is_colon_glyph(line, k, ends_name))
         .map(|k| segments[k].start)
+}
+
+/// Whether high-contrast segment `k` of the line is a colon glyph that
+/// ends a name ([`colon_glyph`]).
+fn is_colon_glyph(line: &LineInk<'_>, k: usize, ends_name: &impl Fn(u32) -> bool) -> bool {
+    let segments = &line.strong_segments;
+    let glyph = segments[k];
+    if glyph.len() > COLON_COLUMNS {
+        return false;
+    }
+    if segments
+        .get(k + 1)
+        .is_some_and(|next| next.start - glyph.end <= WORD_GAP)
+    {
+        return false;
+    }
+    let dots =
+        runs((0..line.height).map(|y| (glyph.start..glyph.end).any(|x| line.get_strong(x, y))));
+    let [upper, lower] = dots[..] else {
+        return false;
+    };
+    upper.len() <= MAX_DOT_ROWS
+        && lower.len() <= MAX_DOT_ROWS
+        && (DOT_GAP.0..=DOT_GAP.1).contains(&(lower.start - upper.end))
+        && (lower.end - 1) as f32 >= 0.5 * line.height as f32
+        && ends_name(glyph.start)
 }
 
 /// The first column in `from..=to` that holds the colon after a name: two
