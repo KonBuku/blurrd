@@ -9,6 +9,7 @@ use super::gate_spec;
 use super::recap::RecapReader;
 use super::sample::{FrameView, ScreenMap};
 use super::scoreboard::ScoreboardReader;
+use super::spectating::SpectatingReader;
 use super::temporal::{Slot, SurfaceFrame, SurfaceTrack};
 use crate::detection::Detection;
 
@@ -35,6 +36,7 @@ pub struct ScreenDetector {
     gates: Gates,
     scoreboard: ScoreboardReader,
     recap: RecapReader,
+    spectating: SpectatingReader,
     tracks: [SurfaceTrack; 4],
     /// Decided frames per surface, not yet merged.
     decided: [VecDeque<(u32, Vec<Detection>)>; 4],
@@ -50,6 +52,7 @@ impl ScreenDetector {
             gates: Gates::new(),
             scoreboard: ScoreboardReader::new(),
             recap: RecapReader::new(),
+            spectating: SpectatingReader::new(),
             tracks: SURFACES.map(SurfaceTrack::new),
             decided: Default::default(),
             scratch: Vec::new(),
@@ -80,6 +83,7 @@ impl ScreenDetector {
         match region {
             Region::Scoreboard => self.scoreboard.read(native, map, signal),
             Region::DeathRecap => self.recap.read(native, map),
+            Region::Spectating => self.spectating.read(native, map),
             _ => None,
         }
     }

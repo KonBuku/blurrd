@@ -23,6 +23,7 @@ use blurrd_testkit::hud::match_end::{MatchEndKind, MatchEndSpec};
 use blurrd_testkit::hud::recap::RecapSpec;
 use blurrd_testkit::hud::scoreboard::{ScoreRow, ScoreboardMode, ScoreboardSpec};
 use blurrd_testkit::hud::screen::ScreenTiming;
+use blurrd_testkit::hud::spectating::SpectatingSpec;
 use blurrd_testkit::hud::world_tag::WorldTag;
 use blurrd_testkit::metrics::{hf_residuals, item_coverage};
 use blurrd_testkit::truth::ContentKind;
@@ -45,13 +46,15 @@ enum Surface {
     Teams,
     Deathmatch,
     Recap(usize),
+    Spectating,
 }
 
-const SURFACES: [Surface; 4] = [
+const SURFACES: [Surface; 5] = [
     Surface::Teams,
     Surface::Deathmatch,
     Surface::Recap(1),
     Surface::Recap(4),
+    Surface::Spectating,
 ];
 
 fn names(rng: &mut Rng, n: usize, scripts: bool) -> Vec<String> {
@@ -127,6 +130,13 @@ fn scene(
                 agent: "Agent".to_owned(),
                 report: names(&mut rng, n, scripts),
                 timeline: 1,
+                timing,
+            },
+        ),
+        Surface::Spectating => s.with_spectating(
+            fonts,
+            SpectatingSpec {
+                name: synth_name(&mut rng, NameStyle::TwoWord),
                 timing,
             },
         ),

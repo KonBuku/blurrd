@@ -3,7 +3,8 @@
 //! These surfaces show player names on full-screen or large overlays:
 //!
 //! - the scoreboard ([`scoreboard`]),
-//! - the death recap and combat report ([`recap`]).
+//! - the death recap and combat report ([`recap`]),
+//! - the spectated player's "switch player" widget ([`spectating`]).
 //!
 //! Each is found from structure only, in three steps:
 //!
@@ -36,6 +37,7 @@ mod ink;
 pub mod recap;
 mod sample;
 pub mod scoreboard;
+pub mod spectating;
 pub mod temporal;
 
 use blurrd_core::{RectI, Region};
@@ -51,6 +53,7 @@ pub const fn gate_spec(region: Region) -> Option<&'static GateSpec> {
     match region {
         Region::Scoreboard => Some(&scoreboard::GATE),
         Region::DeathRecap => Some(&recap::GATE),
+        Region::Spectating => Some(&spectating::GATE),
         _ => None,
     }
 }
@@ -62,6 +65,7 @@ pub const fn anchor(region: Region) -> Option<Anchor> {
     match region {
         Region::Scoreboard => Some(Anchor::Center),
         Region::DeathRecap => Some(Anchor::Right),
+        Region::Spectating => Some(Anchor::Left),
         _ => None,
     }
 }
@@ -74,6 +78,7 @@ pub fn zone(region: Region, map: &ScreenMap) -> Option<RectI> {
     let rect = match region {
         Region::Scoreboard => scoreboard::ZONE,
         Region::DeathRecap => recap::ZONE,
+        Region::Spectating => spectating::ZONE,
         _ => return None,
     };
     Some(map.to_source(rect, anchor(region)?))

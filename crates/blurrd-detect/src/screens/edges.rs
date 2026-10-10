@@ -61,6 +61,13 @@ pub(super) fn line_at(plane: &RefPlane, x: i32, y: i32) -> bool {
     edge_at(plane, x, y) && (1..=LINE_W).any(|w| edge_at(plane, x + w, y))
 }
 
+/// The share of rows `y0..y1` (plane rows) in which a thin vertical line
+/// starts at plane column `x`.
+pub(super) fn line_share(plane: &RefPlane, x: i32, y0: i32, y1: i32) -> f32 {
+    let n = (y0..y1).filter(|&y| line_at(plane, x, y)).count();
+    n as f32 / (y1 - y0).max(1) as f32
+}
+
 /// Score of a vertical edge at reference x `x` over reference rows
 /// `y0..y1`, the best over line positions within `search` cells.
 ///
