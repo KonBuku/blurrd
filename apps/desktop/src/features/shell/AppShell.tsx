@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { COMMAND_PALETTE_ID, CommandPalette } from "@/features/command/CommandPalette";
+import { useCommandStore } from "@/features/command/registry";
 import { DropOverlay } from "@/features/import/DropOverlay";
 import { browseFiles, browseFolder } from "@/features/import/import";
 import { ExportShortcut } from "@/features/inspector/ExportFooter";
@@ -125,8 +127,16 @@ export function AppShell() {
       <DropOverlay />
       <FailureDetailsDialog />
       <ExportShortcut />
+      <CommandPalette />
     </div>
   );
+}
+
+/** Whether `target` is inside a dialog other than the command palette. */
+function insideOtherDialog(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const dialog = target.closest('[role="dialog"],[role="alertdialog"]');
+  return dialog !== null && dialog.id !== COMMAND_PALETTE_ID;
 }
 
 /**
@@ -161,6 +171,11 @@ function useGlobalShortcuts() {
           break;
         case "openSettings":
           ui.openSettings();
+          break;
+        case "openCommandPalette":
+          // Other dialogs keep the keyboard; inside the palette it closes it.
+          if (insideOtherDialog(event.target)) return;
+          useCommandStore.getState().toggle();
           break;
         case "closeOverlay":
           // Open menus and dialogs handle Escape first (defaultPrevented).

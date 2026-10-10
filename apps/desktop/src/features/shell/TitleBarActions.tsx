@@ -1,4 +1,4 @@
-import { Settings, SunMoon } from "lucide-react";
+import { Search, Settings, SunMoon } from "lucide-react";
 
 import type { Theme } from "@/bindings/Theme";
 import { Button } from "@/components/ui/button";
@@ -12,9 +12,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCommandStore } from "@/features/command/registry";
 import { THEME_OPTIONS } from "@/features/settings/AppearanceSettings";
 import { SETTINGS_BUTTON_ID } from "@/features/settings/SettingsView";
-import { SHORTCUTS } from "@/lib/shortcuts";
+import { ariaKeys, SHORTCUTS } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/store/settings";
 import { useUiStore } from "@/store/ui";
@@ -26,8 +27,8 @@ function isTheme(value: string): value is Theme {
 }
 
 /**
- * App actions in the title bar, left of the window controls: a quick theme
- * menu and the settings toggle (design 8.1).
+ * App actions in the title bar, left of the window controls: the command
+ * palette, a quick theme menu and the settings toggle (design 8.1).
  */
 export function TitleBarActions() {
   const theme = useSettingsStore((state) => state.appearance.theme);
@@ -35,9 +36,31 @@ export function TitleBarActions() {
   const settingsOpen = useUiStore((state) => state.view === "settings");
   const openSettings = useUiStore((state) => state.openSettings);
   const closeSettings = useUiStore((state) => state.closeSettings);
+  const paletteOpen = useCommandStore((state) => state.open);
+  const setPaletteOpen = useCommandStore((state) => state.setOpen);
 
   return (
     <div className="flex items-center gap-0.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-md"
+            aria-label="Command palette"
+            aria-haspopup="dialog"
+            aria-expanded={paletteOpen}
+            aria-keyshortcuts={ariaKeys(SHORTCUTS.openCommandPalette)}
+            className={iconButton}
+            onClick={() => setPaletteOpen(true)}
+          >
+            <Search />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          Command palette
+          <Kbd>{SHORTCUTS.openCommandPalette.keys.join("+")}</Kbd>
+        </TooltipContent>
+      </Tooltip>
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>

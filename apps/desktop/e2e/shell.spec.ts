@@ -33,7 +33,7 @@ test.describe("window shell", () => {
     await expect(page.getByRole("button", { name: "Minimize" })).toBeVisible();
     // Focus order starts in the title bar: queue toggle, app actions, then
     // the window controls.
-    for (const name of ["Hide queue", "Theme", "Settings", "Minimize"]) {
+    for (const name of ["Hide queue", "Command palette", "Theme", "Settings", "Minimize"]) {
       // Each Tab moves on from the focus the previous one left behind.
       // oxlint-disable-next-line no-await-in-loop
       await page.keyboard.press("Tab");
