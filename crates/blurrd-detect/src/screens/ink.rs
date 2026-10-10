@@ -7,6 +7,9 @@
 //! cells that differ clearly from the slot's typical colour, in any
 //! direction (white names, dim grey names of dead players, dark text on
 //! a light filter), spread over several columns. Colour does not matter.
+//! In a bright slot white text cannot stand out by much (a gamma or
+//! brightness filter compresses the highlights), so the contrast needed
+//! shrinks with the headroom left above the slot's median.
 
 use blurrd_core::RectI;
 
@@ -16,6 +19,13 @@ use super::sample::RefPlane;
 /// ink (dim names of dead players differ by about 60 on real
 /// scoreboards).
 pub const INK_CONTRAST: i16 = 28;
+/// Smallest contrast that counts as ink in a bright slot, where white
+/// text has little headroom above the scene behind it: there the
+/// threshold is half the headroom (255 minus the median), but at least
+/// this. A gamma of 1.5 left the white label of the "switch player"
+/// widget 17 above a median of 233 on a real recording (35 above 215
+/// without the filter).
+pub const INK_MIN_BRIGHT_CONTRAST: i16 = 10;
 /// Fewest ink cells a slot needs.
 pub const INK_MIN_CELLS: usize = 10;
 /// Fewest distinct ink columns a slot needs.
@@ -45,12 +55,13 @@ pub(super) fn has_ink(plane: &RefPlane, rect: RectI, scratch: &mut InkScratch) -
     scratch.sorted.clone_from(&scratch.lumas);
     let mid = scratch.sorted.len() / 2;
     let median = *scratch.sorted.select_nth_unstable(mid).1;
+    let contrast = INK_CONTRAST.min(((255 - median) / 2).max(INK_MIN_BRIGHT_CONTRAST));
     let width = (cx1 - cx0) as usize;
     scratch.columns.clear();
     scratch.columns.resize(width, false);
     let mut cells = 0;
     for (i, &l) in scratch.lumas.iter().enumerate() {
-        if (l - median).abs() >= INK_CONTRAST {
+        if (l - median).abs() >= contrast {
             cells += 1;
             scratch.columns[i % width] = true;
         }
@@ -92,6 +103,33 @@ mod tests {
         }
         let view = FrameView::native(RgbView::new(&data, w, h, 3 * w as usize).unwrap());
         plane.sample(&view, &ScreenMap::REFERENCE, Anchor::Left, all, 1);
+        assert!(has_ink(&plane, all, &mut scratch));
+    }
+
+    #[test]
+    fn faint_white_text_counts_in_a_bright_slot() {
+        let (w, h) = (40u32, 12u32);
+        // A bright scene with a little texture (231 and 235).
+        let mut data: Vec<u8> = (0..w * h)
+            .flat_map(|i| [if i % 3 == 0 { 235 } else { 231 }; 3])
+            .collect();
+        let all = RectI::new(0, 0, w as i32, h as i32).unwrap();
+        let mut plane = RefPlane::new();
+        let mut scratch = InkScratch::default();
+        let sample = |data: &[u8], plane: &mut RefPlane| {
+            let view = FrameView::native(RgbView::new(data, w, h, 3 * w as usize).unwrap());
+            plane.sample(&view, &ScreenMap::REFERENCE, Anchor::Left, all, 1);
+        };
+        sample(&data, &mut plane);
+        assert!(!has_ink(&plane, all, &mut scratch));
+        // White text 17 above the scene over 20 columns.
+        for x in 10..30 {
+            for y in 6..8 {
+                let i = 3 * (y * w + x) as usize;
+                data[i..i + 3].copy_from_slice(&[250; 3]);
+            }
+        }
+        sample(&data, &mut plane);
         assert!(has_ink(&plane, all, &mut scratch));
     }
 }

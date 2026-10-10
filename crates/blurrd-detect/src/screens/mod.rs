@@ -46,7 +46,7 @@ use blurrd_core::{RectI, Region};
 
 pub use detector::{ScreenDetector, ScreenSignals};
 pub use gate::{GATE_STEP, GATE_THRESHOLD, GateSignal, GateSpec, Gates};
-pub use ink::{INK_CONTRAST, INK_MIN_CELLS, INK_MIN_COLUMNS};
+pub use ink::{INK_CONTRAST, INK_MIN_BRIGHT_CONTRAST, INK_MIN_CELLS, INK_MIN_COLUMNS};
 pub use sample::{Anchor, FrameView, RefPlane, ScreenMap};
 pub use temporal::{Slot, SurfaceFrame, SurfaceTrack};
 
