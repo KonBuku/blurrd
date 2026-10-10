@@ -20,6 +20,7 @@ use blurrd_detect::{Detection, RgbView, ScreenDetector};
 use blurrd_testkit::hud::banner::BannerSpec;
 use blurrd_testkit::hud::killfeed::{KillFeedSpec, Team};
 use blurrd_testkit::hud::match_end::{MatchEndKind, MatchEndSpec};
+use blurrd_testkit::hud::recap::RecapSpec;
 use blurrd_testkit::hud::scoreboard::{ScoreRow, ScoreboardMode, ScoreboardSpec};
 use blurrd_testkit::hud::screen::ScreenTiming;
 use blurrd_testkit::hud::world_tag::WorldTag;
@@ -43,9 +44,15 @@ const TIMINGS: [ScreenTiming; 2] = [
 enum Surface {
     Teams,
     Deathmatch,
+    Recap(usize),
 }
 
-const SURFACES: [Surface; 2] = [Surface::Teams, Surface::Deathmatch];
+const SURFACES: [Surface; 4] = [
+    Surface::Teams,
+    Surface::Deathmatch,
+    Surface::Recap(1),
+    Surface::Recap(4),
+];
 
 fn names(rng: &mut Rng, n: usize, scripts: bool) -> Vec<String> {
     (0..n)
@@ -109,6 +116,17 @@ fn scene(
             ScoreboardSpec {
                 rows: rows(14, &mut rng),
                 mode: ScoreboardMode::Deathmatch,
+                timing,
+            },
+        ),
+        Surface::Recap(n) => s.with_recap(
+            fonts,
+            RecapSpec {
+                killer: synth_name(&mut rng, NameStyle::Latin(16)),
+                killer_team: Team::Enemy,
+                agent: "Agent".to_owned(),
+                report: names(&mut rng, n, scripts),
+                timeline: 1,
                 timing,
             },
         ),
@@ -376,7 +394,7 @@ fn names_in_other_scripts_are_covered() {
         }
         Err(missing) => panic!("{missing}"),
     };
-    for surface in [Surface::Teams, Surface::Deathmatch] {
+    for surface in [Surface::Teams, Surface::Recap(3)] {
         let s = scene(
             &fonts,
             Layout::reference(),

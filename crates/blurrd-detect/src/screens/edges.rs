@@ -38,6 +38,29 @@ pub(super) fn is_edge(before: [i16; 3], outer: [i16; 3], inner: [i16; 3], after:
     step >= MIN_STEP && step >= 2 * side
 }
 
+/// Widest thin line (a card outline, the spectating bar) in reference
+/// pixels: one source pixel spans up to three reference pixels in a 720p
+/// recording.
+pub const LINE_W: i32 = 3;
+
+/// Whether the vertical line before plane column `x` is an edge in row
+/// `y`.
+pub(super) fn edge_at(plane: &RefPlane, x: i32, y: i32) -> bool {
+    is_edge(
+        plane.at(x - 2, y),
+        plane.at(x - 1, y),
+        plane.at(x, y),
+        plane.at(x + 1, y),
+    )
+}
+
+/// Whether a thin vertical line starts at plane column `x` in row `y`:
+/// edges on both of its sides, at most [`LINE_W`] cells apart. A step
+/// between two textures (card art, a wall) or a wide post has only one.
+pub(super) fn line_at(plane: &RefPlane, x: i32, y: i32) -> bool {
+    edge_at(plane, x, y) && (1..=LINE_W).any(|w| edge_at(plane, x + w, y))
+}
+
 /// Score of a vertical edge at reference x `x` over reference rows
 /// `y0..y1`, the best over line positions within `search` cells.
 ///
