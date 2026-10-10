@@ -3,7 +3,7 @@
  * into the request unchanged; lists are normalised (regions in inspector
  * order, words trimmed and distinct) so equal settings give equal requests.
  */
-import type { AnalysisRequest } from "@/ipc/jobs";
+import type { AnalysisRequest, RenderRequest } from "@/ipc/jobs";
 
 import { orderedRegions, parseWordList, type JobSettings } from "./job-settings";
 
@@ -22,5 +22,15 @@ export function analysisRequest(projectId: string, settings: JobSettings): Analy
     },
     detector,
     verify: { ...verify, ignore_words: parseWordList(verify.ignore_words.join("\n")) },
+  };
+}
+
+/** The `start_render` request of a project with `settings`. */
+export function renderRequest(projectId: string, settings: JobSettings): RenderRequest {
+  return {
+    projectId,
+    settings: settings.export,
+    blur: settings.blur,
+    enabled: orderedRegions(settings.regions.enabled),
   };
 }

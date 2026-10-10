@@ -11,6 +11,7 @@ import type { AppError } from "@/bindings/AppError";
 import type { BlurParams } from "@/bindings/BlurParams";
 import type { Capabilities } from "@/bindings/Capabilities";
 import type { DensityLanes } from "@/bindings/DensityLanes";
+import type { ExportSettings } from "@/bindings/ExportSettings";
 import type { FrameRange } from "@/bindings/FrameRange";
 import type { MediaInfo } from "@/bindings/MediaInfo";
 import type { Override } from "@/bindings/Override";
@@ -173,4 +174,25 @@ export function setOverrides(
   overrides: readonly Override[],
 ): Promise<OverridesSaved> {
   return invoke<OverridesSaved>("set_overrides", { projectId, baseRev, overrides });
+}
+
+/**
+ * Where an export with given settings would go and what it would cost
+ * (`get_output_preview`, plan 9.1): the output path after the naming
+ * template and the conflict policy, the estimated size in bytes and the
+ * estimated duration in seconds at this machine's measured throughput.
+ * Declared here until the engine generates it (plan section 18, M26).
+ */
+export interface OutputPreview {
+  readonly path: string;
+  readonly est_size: number;
+  readonly est_seconds: number;
+}
+
+/** The output path and estimates of exporting a project with `settings`. */
+export function getOutputPreview(
+  projectId: string,
+  settings: ExportSettings,
+): Promise<OutputPreview> {
+  return invoke<OutputPreview>("get_output_preview", { projectId, settings });
 }

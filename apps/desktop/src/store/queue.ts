@@ -83,8 +83,11 @@ export interface QueueState {
    * that can no longer be read is marked failed with the reason.
    */
   readonly refresh: (outcomes: readonly ProbeOutcome[]) => void;
-  /** Changes the status of an item (a job started, progressed or ended). */
-  readonly setStatus: (id: string, status: QueueStatus) => void;
+  /**
+   * Changes the status of an item (a job started, progressed or ended),
+   * and its exported file when `output` is given.
+   */
+  readonly setStatus: (id: string, status: QueueStatus, output?: string) => void;
   readonly remove: (ids: Iterable<string>) => void;
   readonly removeSelected: () => void;
   /** Removes every item in an end state (done, failed, canceled, …). */
@@ -261,9 +264,11 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
     );
   },
 
-  setStatus: (id, status) =>
+  setStatus: (id, status, output) =>
     set((state) => ({
-      items: state.items.map((item) => (item.id === id ? { ...item, status } : item)),
+      items: state.items.map((item) =>
+        item.id === id ? { ...item, status, output: output ?? item.output } : item,
+      ),
     })),
 
   removeSelected: () => get().remove(get().selected),

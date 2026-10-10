@@ -95,7 +95,40 @@ test.describe("inspector", () => {
     ]);
   });
 
+  test("export tab: output name, estimate and an export named unverified", async ({ page }) => {
+    const panel = inspector(page);
+    await panel.getByRole("tab", { name: "Export" }).click();
+    const preview = page.getByTestId("output-preview");
+    await expect(preview).toContainText("match_ascent_01_blurrd_UNVERIFIED.mp4");
+    await expect(preview).toContainText(/About [\d.]+ [KM]B/);
+
+    await panel.getByRole("radio", { name: "Remove" }).click();
+    await expect(page.getByTestId("export-summary")).toContainText("no audio");
+    await panel.getByRole("button", { name: "Export", exact: true }).click();
+    const queue = page.getByRole("listbox", { name: "Recordings" });
+    await expect(queue).toContainText("Unverified · review the report");
+    await expect(panel.getByRole("button", { name: "Export again" })).toBeEnabled();
+    const render = await page.evaluate(() => {
+      const call = window.blurrdMock?.calls.find((c) => c.cmd === "start_render");
+      return (call?.args as { settings: { audio: unknown } } | undefined)?.settings.audio;
+    });
+    expect(render).toBe("Remove");
+    // The next export of the same name gets a number.
+    await expect(preview).toContainText("match_ascent_01_blurrd_UNVERIFIED (2).mp4");
+  });
+
   for (const theme of ["light", "dark"] as const) {
+    test(`export tab has no axe violations (${theme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      const panel = inspector(page);
+      await panel.getByRole("tab", { name: "Export" }).click();
+      await panel.getByRole("radio", { name: "Quality" }).click();
+      await panel.getByRole("button", { name: "Advanced export" }).click();
+      await expect(page.getByTestId("output-preview")).toContainText(".mp4");
+      const results = await new AxeBuilder({ page }).include('[aria-label="Inspector"]').analyze();
+      expect(results.violations).toEqual([]);
+    });
+
     test(`blur tab has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
       const panel = inspector(page);

@@ -11,7 +11,9 @@ import type { AppError } from "@/bindings/AppError";
 import type { Capabilities } from "@/bindings/Capabilities";
 import type { Override } from "@/bindings/Override";
 import type { SessionEntry } from "@/ipc/commands";
-import type { AnalysisRequest } from "@/ipc/jobs";
+import type { AnalysisRequest, RenderRequest } from "@/ipc/jobs";
+import type { ExportSettings } from "@/bindings/ExportSettings";
+import { pathKey } from "@/lib/media";
 import { isEngineRegion } from "@/lib/regions";
 
 import { MOCK_CAPABILITIES } from "./capabilities";
@@ -19,6 +21,7 @@ import { MOCK_CAPABILITIES } from "./capabilities";
 import { MockProjects } from "./edits";
 import { createEventBus } from "./events";
 import { MockJobs, type MockChannel } from "./jobs";
+import { mockOutput } from "./output";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
 import { frameCount, mockDensity, mockProject, mockPts, projectId } from "./project";
 import { installSchemeFetch, type SchemeRequest } from "./scheme";
@@ -39,7 +42,10 @@ export interface MockBackend {
   closed: boolean;
   /** The settings file as last saved, or `null` before the first save. */
   readonly settingsFile: () => Record<string, unknown> | null;
-  /** Paths the next file or folder dialog returns; `null` cancels it. */
+  /**
+   * Paths the next file or folder dialog returns (the first one for a
+   * single-choice dialog); `null` cancels it.
+   */
   dialogResult: string[] | null;
   /** Folders `probe_media` expands: folder path → paths inside it. */
   readonly folders: Map<string, readonly string[]>;
@@ -73,8 +79,10 @@ export interface MockBackend {
   readonly projects: MockProjects;
   /** How long `set_overrides` takes, in milliseconds. */
   saveDelayMs: number;
-  /** The jobs (analysis), their duration and a failure to inject. */
+  /** The jobs (analysis, export), their duration and a failure to inject. */
   readonly jobs: MockJobs;
+  /** Files written by exports (`pathKey`s), for the conflict policy. */
+  readonly outputs: Set<string>;
 }
 
 /** Name of the settings file, as opened by the real shell. */
@@ -153,6 +161,7 @@ export function installMockBackend(): MockBackend {
     projects: new MockProjects(),
     saveDelayMs: 0,
     jobs: new MockJobs(),
+    outputs: new Set(),
   };
   const installedAt = performance.now();
   const store = (cmd: string, args: StoreArgs) => {
@@ -205,8 +214,12 @@ export function installMockBackend(): MockBackend {
         await delay(backend.probeDelayMs);
         if (backend.probeError) throw backend.probeError;
         return probeMedia((args as { paths: string[] }).paths, backend.folders);
-      case "plugin:dialog|open":
-        return backend.dialogResult;
+      case "plugin:dialog|open": {
+        // A single-choice dialog answers with one path, like the real plugin.
+        const { options } = args as { options?: { multiple?: boolean } };
+        if (options?.multiple) return backend.dialogResult;
+        return backend.dialogResult?.[0] ?? null;
+      }
       case "get_capabilities":
         return performance.now() - installedAt < backend.capabilitiesDelayMs
           ? { ...backend.capabilities, probe_state: "Pending", encoders: [] }
@@ -268,6 +281,37 @@ export function installMockBackend(): MockBackend {
           };
         });
       }
+      case "get_output_preview": {
+        const path = pathOf(args);
+        const { settings: output } = args as { settings: ExportSettings };
+        const { report, unverified } = backend.projects.state(path);
+        const clean = report?.summary.state === "Clean" && unverified.length === 0;
+        return mockOutput(path, mockProject(path).media, output, backend.outputs, clean);
+      }
+      case "start_render": {
+        const path = pathOf(args);
+        const { settings: output, onEvent } = args as unknown as RenderRequest & {
+          onEvent: MockChannel;
+        };
+        const { media } = mockProject(path);
+        return backend.jobs.start("Render", frameCount(path), onEvent, () => {
+          const { report, unverified } = backend.projects.state(path);
+          const state =
+            unverified.length > 0 ? "Unverified" : (report?.summary.state ?? "Unverified");
+          const written = mockOutput(path, media, output, backend.outputs, state === "Clean").path;
+          backend.outputs.add(pathKey(written));
+          return {
+            frames: frameCount(path),
+            elapsed_ms: backend.jobs.durationMs,
+            output: written,
+            verify: state,
+            warnings: 0,
+          };
+        });
+      }
+      case "cancel_job":
+        backend.jobs.cancel((args as { job: string }).job);
+        return null;
       case "save_session":
         sessionStorage.setItem(SESSION_KEY, JSON.stringify((args as { entries: unknown }).entries));
         return null;

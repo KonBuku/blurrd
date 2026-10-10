@@ -100,56 +100,94 @@ export function InspectorRow({
   );
 }
 
-export interface SliderRowProps {
+export interface SliderFieldProps {
+  /** Accessible name of the slider (and the visible label with `header`). */
   readonly label: string;
   readonly value: number;
   readonly min: number;
   readonly max: number;
   readonly step?: number;
-  /** Unit after the value, for example "px". */
-  readonly unit: string;
+  /** The value as shown, for example "6 px" or "P4". */
+  readonly valueText: string;
   /** Value a double-click on the thumb restores. */
-  readonly resetValue: number;
+  readonly resetValue?: number;
   readonly onValueChange: (value: number) => void;
+  /** Words under the two ends of the track ("Faster", "Better"). */
+  readonly caption?: readonly [string, string];
+  /** Shows the label and the value above the track. */
+  readonly header?: boolean;
   readonly disabled?: boolean;
 }
 
-/** A labelled slider row with its value at the end (design 8.1 STYLE). */
-export function SliderRow({
+/** A slider with an optional label/value line and end captions. */
+export function SliderField({
   label,
   value,
   min,
   max,
   step = 1,
-  unit,
+  valueText,
   resetValue,
   onValueChange,
+  caption,
+  header = false,
   disabled = false,
-}: SliderRowProps) {
-  const labelId = useId();
+}: SliderFieldProps) {
   return (
-    <InspectorRow
-      label={label}
-      labelId={labelId}
-      control={
-        // The slider itself reports the value to assistive technology.
-        <span aria-hidden className="font-mono text-ui-sm text-foreground-subtle tabular-nums">
-          {value} {unit}
-        </span>
-      }
-    >
+    <div className="flex flex-col gap-1">
+      {header && (
+        // The slider reports its value to assistive technology itself.
+        <div aria-hidden className="flex items-baseline justify-between gap-2 text-ui-sm">
+          <span>{label}</span>
+          <span className="font-mono text-foreground-subtle tabular-nums">{valueText}</span>
+        </div>
+      )}
       <Slider
-        aria-labelledby={labelId}
+        aria-label={label}
         min={min}
         max={max}
         step={step}
         value={[value]}
-        resetValue={[resetValue]}
+        {...(resetValue === undefined ? {} : { resetValue: [resetValue] })}
         disabled={disabled}
         onValueChange={([next]) => {
           if (next !== undefined) onValueChange(next);
         }}
       />
+      {caption && (
+        <div aria-hidden className="flex justify-between text-ui-xs text-foreground-subtle">
+          <span>{caption[0]}</span>
+          <span>{caption[1]}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export interface SliderRowProps extends Omit<
+  SliderFieldProps,
+  "header" | "valueText" | "resetValue"
+> {
+  /** Unit after the value, for example "px"; ignored with `valueText`. */
+  readonly unit?: string;
+  readonly valueText?: string;
+  readonly resetValue: number;
+}
+
+/** A labelled slider row with its value at the end (design 8.1 STYLE). */
+export function SliderRow({ label, unit = "", valueText, ...field }: SliderRowProps) {
+  const text = valueText ?? `${field.value} ${unit}`.trim();
+  return (
+    <InspectorRow
+      label={label}
+      control={
+        // The slider reports its value to assistive technology itself.
+        <span aria-hidden className="font-mono text-ui-sm text-foreground-subtle tabular-nums">
+          {text}
+        </span>
+      }
+    >
+      <SliderField label={label} valueText={text} {...field} />
     </InspectorRow>
   );
 }

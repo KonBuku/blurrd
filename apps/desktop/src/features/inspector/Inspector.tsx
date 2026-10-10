@@ -6,6 +6,8 @@ import { useJobSettingsStore, type ApplyScope } from "@/store/job-settings";
 import { useUiStore, type InspectorTab } from "@/store/ui";
 
 import { BlurInspector } from "./BlurInspector";
+import { ExportFooter } from "./ExportFooter";
+import { ExportInspector } from "./ExportInspector";
 import { useInspectorTarget } from "./useInspector";
 
 /** Id of the inspector frame, referenced by its toggle and resize handle. */
@@ -71,6 +73,8 @@ export function InspectorTabs({ header }: InspectorTabsProps) {
         <TabsContent key={value} value={value} className="overflow-y-auto p-3">
           {value === "blur" ? (
             <BlurInspector />
+          ) : value === "export" ? (
+            <ExportInspector />
           ) : (
             <div className="flex flex-col items-center justify-center gap-1 p-3 text-center">
               <p className="text-ui-base font-medium">No recording selected</p>
@@ -79,6 +83,7 @@ export function InspectorTabs({ header }: InspectorTabsProps) {
           )}
         </TabsContent>
       ))}
+      <ExportFooter />
     </Tabs>
   );
 }

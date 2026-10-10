@@ -3,11 +3,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useJobsStore } from "@/features/jobs/jobs";
-import type { AnalysisRequest } from "@/ipc/jobs";
+import type { AnalysisRequest, RenderRequest } from "@/ipc/jobs";
+import { MOCK_CAPABILITIES } from "@/ipc/mock/capabilities";
 import { installMockBackend, type MockBackend } from "@/ipc/mock";
 import { fakeMedia } from "@/ipc/mock/media";
 import { projectId } from "@/ipc/mock/project";
-import { analysisRequest } from "@/lib/job-request";
+import { analysisRequest, renderRequest } from "@/lib/job-request";
 import { DEFAULT_JOB_SETTINGS, type JobSettings } from "@/lib/job-settings";
 import { pathKey } from "@/lib/media";
 import { settingsOf, useJobSettingsStore } from "@/store/job-settings";
@@ -65,6 +66,21 @@ function choose(group: string, label: string) {
   );
 }
 
+/** Picks `label` in the select named `name`. */
+async function pick(name: string, label: string) {
+  const trigger = screen.getByRole("combobox", { name });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("option", { name: label }));
+  await waitFor(() => expect(trigger.textContent).toBe(label));
+}
+
+/** The arguments of the last call of `cmd`, without the channel. */
+function lastArgs(backend: MockBackend, cmd: string): Record<string, unknown> {
+  const call = backend.calls.findLast((c) => c.cmd === cmd);
+  const { onEvent: _channel, ...args } = (call?.args ?? {}) as Record<string, unknown>;
+  return args;
+}
+
 /** Presses `key` `times` times on the element. */
 function press(element: HTMLElement, key: string, times = 1) {
   for (let i = 0; i < times; i += 1) fireEvent.keyDown(element, { key });
@@ -76,6 +92,7 @@ describe("inspector", () => {
   beforeEach(() => {
     backend = installMockBackend();
     backend.jobs.durationMs = 0;
+    backend.capabilitiesDelayMs = 0;
     useQueueStore.setState(useQueueStore.getInitialState());
     useJobSettingsStore.setState(useJobSettingsStore.getInitialState());
     useJobsStore.setState({ running: {} });
@@ -228,5 +245,152 @@ describe("inspector", () => {
         detail: null,
       }),
     );
+  });
+
+  it("round-trips every export setting into the render request", { timeout: 30_000 }, async () => {
+    backend.dialogResult = ["E:\\Exports"];
+    queue(PATH);
+    useUiStore.setState({ inspectorTab: "export" });
+    renderInspector();
+    await screen.findByTestId("output-preview");
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "HEVC" }).hasAttribute("disabled")).toBe(false),
+    );
+
+    choose("Codec", "HEVC");
+    await pick("Encoder", "NVENC (GPU)");
+    choose("Rate control", "Quality");
+    press(screen.getByRole("slider", { name: "Constant quality" }), "ArrowLeft", 3);
+    press(screen.getByRole("slider", { name: "Preset" }), "ArrowRight", 2);
+    choose("10-bit output", "On");
+    choose("NVENC sessions", "2");
+    choose("Audio", "AAC");
+    await pick("AAC bit rate", "256 kbit/s");
+    toggle("Copy subtitles");
+    await pick("Container", "MKV");
+    choose("Metadata", "All");
+    choose("Output folder", "Choose folder");
+    await screen.findByText("E:\\Exports");
+    const name = screen.getByRole("textbox", { name: "File name" });
+    fireEvent.change(name, { target: { value: "{name} clean" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    await pick("If the file exists", "Overwrite");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced export" }));
+    choose("Split encoding", "Off");
+    choose("Keyframes", "Encoder default");
+    choose("MP4 and MOV index", "End");
+
+    const expected: JobSettings = {
+      ...DEFAULT_JOB_SETTINGS,
+      export: {
+        codec: "Hevc",
+        encoder: { Named: "hevc_nvenc" },
+        rate: { Cq: 18 },
+        preset: 6,
+        ten_bit: "On",
+        split_encode: "Off",
+        nvenc_sessions: "Two",
+        keyframes: "EncoderDefault",
+        smart_render: false,
+        audio: { Aac: 256 },
+        copy_subtitles: false,
+        metadata: "All",
+        container: "Mkv",
+        moov: "AtEnd",
+        trim: null,
+        output: {
+          folder: { Folder: "E:\\Exports" },
+          template: "{name} clean",
+          on_conflict: "Overwrite",
+        },
+      },
+    };
+    expect(settingsFor(PATH)).toEqual(expected);
+    await waitFor(() =>
+      expect(lastArgs(backend, "get_output_preview")).toEqual({
+        projectId: projectId(PATH),
+        settings: expected.export,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("output-preview").textContent).toContain(
+        "match_ascent_01 clean_UNVERIFIED.mkv",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(backend.calls.some((c) => c.cmd === "start_render")).toBe(true));
+    const request = lastArgs(backend, "start_render") as unknown as RenderRequest;
+    expect(request).toEqual(renderRequest(projectId(PATH), expected));
+    expect(request).toEqual({
+      projectId: projectId(PATH),
+      settings: expected.export,
+      blur: expected.blur,
+      enabled: expected.regions.enabled,
+    });
+    await waitFor(() =>
+      expect(useQueueStore.getState().items[0]).toMatchObject({
+        status: { kind: "unverified" },
+        output: "E:\\Exports\\match_ascent_01 clean_UNVERIFIED.mkv",
+      }),
+    );
+  });
+
+  it("disables AV1 with the reason when this PC cannot encode it", async () => {
+    backend.capabilities = {
+      ...MOCK_CAPABILITIES,
+      encoders: MOCK_CAPABILITIES.encoders.filter((encoder) => encoder.codec !== "av1"),
+    };
+    queue(PATH);
+    useUiStore.setState({ inspectorTab: "export" });
+    renderInspector();
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "HEVC" }).hasAttribute("disabled")).toBe(false),
+    );
+    expect(screen.getByRole("radio", { name: "AV1" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText(/AV1 is not available: this PC has no working AV1 encoder/),
+    ).toBeDefined();
+    // H.264 has no 10-bit encoder on this machine: 10-bit cannot be forced on.
+    choose("Codec", "H.264");
+    expect(screen.getByRole("radio", { name: "On" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("10-bit output needs HEVC or AV1.")).toBeDefined();
+  });
+
+  it("keeps the peak bit rate at or above the target and rejects bad file names", async () => {
+    queue(PATH);
+    useUiStore.setState({ inspectorTab: "export" });
+    renderInspector();
+    await screen.findByTestId("output-preview");
+    choose("Rate control", "Bit rate");
+    const target = screen.getByRole("spinbutton", { name: "Target bit rate" });
+    fireEvent.change(target, { target: { value: "60" } });
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(settingsFor(PATH).export.rate).toEqual({
+      Vbr: { target_kbps: 60_000, max_kbps: 60_000 },
+    });
+
+    const name = screen.getByRole("textbox", { name: "File name" });
+    fireEvent.change(name, { target: { value: "clip?" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(/A file name cannot contain/)).toBeDefined();
+    expect(settingsFor(PATH).export.output.template).toBe("{name}_blurrd");
+  });
+
+  it("cancels a running export", async () => {
+    backend.jobs.durationMs = 2_000;
+    queue(PATH);
+    useUiStore.setState({ inspectorTab: "export" });
+    renderInspector();
+    await screen.findByTestId("output-preview");
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    const cancel = await screen.findByRole("button", { name: "Cancel export" });
+    await waitFor(() => expect(cancel.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(cancel);
+    await waitFor(() =>
+      expect(useQueueStore.getState().items[0]?.status).toEqual({ kind: "canceled" }),
+    );
+    expect(lastArgs(backend, "cancel_job")).toEqual({ job: "job-1" });
   });
 });

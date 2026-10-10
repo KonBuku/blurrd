@@ -1,7 +1,8 @@
 /**
  * Jobs of the mock backend: a job sends `Started`, its stages and a few
  * `Progress` events through the channel it was started with, then
- * `Finished` with the summary its `finish` callback computes (or `Failed`). Events go through Tauri's injected callback table, the
+ * `Finished` with the summary its `finish` callback computes (or `Failed`,
+ * or `Canceled` after `cancel_job`). Events go through Tauri's injected callback table, the
  * same path the real channel uses.
  */
 import type { AppError } from "@/bindings/AppError";
@@ -40,13 +41,19 @@ function internals(): TauriInternals {
   return (window as unknown as { __TAURI_INTERNALS__: TauriInternals }).__TAURI_INTERNALS__;
 }
 
-/** Starts the jobs of one mock backend. */
+/** A running mock job. */
+interface RunningJob {
+  canceled: boolean;
+}
+
+/** Starts and cancels the jobs of one mock backend. */
 export class MockJobs {
   /** How long a job runs, in milliseconds. */
   durationMs = 200;
   /** When set, the next job fails with this error (then it is cleared). */
   failNext: AppError | null = null;
   private counter = 0;
+  private readonly running = new Map<string, RunningJob>();
 
   /**
    * Starts a job of `kind` over `totalFrames` frames that reports to
@@ -61,6 +68,8 @@ export class MockJobs {
   ): string {
     this.counter += 1;
     const job = `job-${this.counter}`;
+    const state: RunningJob = { canceled: false };
+    this.running.set(job, state);
     let index = 0;
     const send = (message: JobEvent) => {
       internals().runCallback(channel.id, { index, message });
@@ -76,6 +85,7 @@ export class MockJobs {
       for (let step = 1; step <= PROGRESS_STEPS; step += 1) {
         // oxlint-disable-next-line no-await-in-loop -- progress events are spaced out on purpose
         await pause(this.durationMs / PROGRESS_STEPS);
+        if (state.canceled) break;
         const stage =
           stages[
             Math.min(stages.length - 1, Math.floor(((step - 1) * stages.length) / PROGRESS_STEPS))
@@ -85,10 +95,18 @@ export class MockJobs {
         const eta_ms = Math.round(((totalFrames - frame) / MOCK_JOB_FPS) * 1000);
         send({ type: "Progress", job, frame, total: totalFrames, fps: MOCK_JOB_FPS, eta_ms });
       }
-      if (failure) send({ type: "Failed", job, error: failure });
+      this.running.delete(job);
+      if (state.canceled) send({ type: "Canceled", job });
+      else if (failure) send({ type: "Failed", job, error: failure });
       else send({ type: "Finished", job, summary: finish() });
     })();
     return job;
+  }
+
+  /** `cancel_job`: stops a running job; unknown or finished jobs are ignored. */
+  cancel(job: string): void {
+    const state = this.running.get(job);
+    if (state) state.canceled = true;
   }
 }
 
