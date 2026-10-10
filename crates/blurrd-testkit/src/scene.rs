@@ -1,5 +1,7 @@
 //! Scenes: a background and HUD elements over a number of frames.
 
+use std::sync::OnceLock;
+
 use blurrd_core::RectI;
 
 use crate::background::Background;
@@ -44,9 +46,10 @@ pub struct Fixture {
 
 /// A synthetic video: background, HUD elements and effects in one layout.
 ///
-/// Text is rendered when an element is added, so rendering a frame only
-/// composites. Rendering is deterministic: the same scene and frame index
-/// always give the same pixels.
+/// Text is rendered when an element is added and the background when the
+/// first frame is rendered, so rendering a frame only composites.
+/// Rendering is deterministic: the same scene and frame index always give
+/// the same pixels.
 #[derive(Debug, Clone)]
 pub struct Scene {
     layout: Layout,
@@ -64,6 +67,8 @@ pub struct Scene {
     match_ends: Vec<MatchEnd>,
     world_tags: Option<WorldTags>,
     flashes: Vec<Flash>,
+    /// The rendered background, shared by every frame.
+    backdrop: OnceLock<RgbFrame>,
 }
 
 impl Scene {
@@ -85,6 +90,7 @@ impl Scene {
             match_ends: Vec::new(),
             world_tags: None,
             flashes: Vec::new(),
+            backdrop: OnceLock::new(),
         }
     }
 
@@ -181,8 +187,14 @@ impl Scene {
 
     /// Renders frame `index`.
     pub fn render(&self, index: u32) -> Fixture {
-        let mut frame = RgbFrame::filled(self.layout.width, self.layout.height, [0, 0, 0]);
-        self.background.render(&mut frame, self.layout.image);
+        let mut frame = self
+            .backdrop
+            .get_or_init(|| {
+                let mut frame = RgbFrame::filled(self.layout.width, self.layout.height, [0, 0, 0]);
+                self.background.render(&mut frame, self.layout.image);
+                frame
+            })
+            .clone();
         let mut truth = FrameTruth {
             frame: index,
             scale: self.layout.sy,
