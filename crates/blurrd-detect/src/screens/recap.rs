@@ -65,8 +65,10 @@ const CARD_PITCH: i32 = 58;
 /// Height of a card in a pitch-filled position (measured: 50 px).
 const FILL_H: i32 = 50;
 /// Largest difference, in rows, between a joined run and a whole number
-/// of cards on the pitch.
-const SPLIT_TOLERANCE: i32 = 6;
+/// of cards on the pitch. Marks next to the first or last card extend
+/// the run (measured: 5 rows on a real recap, 7 under a vibrance
+/// filter); each card's own outlines are checked afterwards.
+const SPLIT_TOLERANCE: i32 = 12;
 /// A pitch-filled card's left and right outlines must each be a line in
 /// at least this share of its rows.
 const MIN_FILL: f32 = 0.5;
@@ -98,6 +100,12 @@ const STRIP_H: (i32, i32) = (15, 21);
 const STRIP_BOTTOM: (i32, i32) = (-51, -37);
 /// The strip's band edges must each score at least this.
 const MIN_STRIP: f32 = 0.5;
+/// The strip's top edge may instead be a straight line over the part
+/// left of the cards only: over the card art its contrast can fade (a
+/// real top edge measured 1.0 on the left part and 0.48 across the
+/// panel without colour, 0.52 with it). The bottom edge must still span
+/// the panel.
+const MIN_STRIP_TOP_LEFT: f32 = 0.8;
 /// Rows of the killer's name slot around the strip found (a margin of
 /// three rows on each side).
 const STRIP_MARGIN: i32 = 3;
@@ -222,6 +230,14 @@ impl RecapReader {
         };
         self.card.sample(view, map, Anchor::Right, area, 1);
         let at = |y| edges::horizontal_at_y(&self.card, y, STRIP_EDGE_X.0, STRIP_EDGE_X.1);
+        let top_at = |y| {
+            let left = edges::horizontal_at_y(&self.card, y, STRIP_EDGE_X.0, CARD_X.0 - 2);
+            if left >= MIN_STRIP_TOP_LEFT {
+                at(y).max(MIN_STRIP)
+            } else {
+                at(y)
+            }
+        };
         // The best band whose bottom edge lies in the window `dy` above
         // the first card: `(score, top, bottom)`.
         let band = |dy: i32| {
@@ -232,7 +248,7 @@ impl RecapReader {
                     continue;
                 }
                 for h in STRIP_H.0..=STRIP_H.1 {
-                    let score = b.min(at(bottom - h));
+                    let score = b.min(top_at(bottom - h));
                     if score >= MIN_STRIP && best.is_none_or(|(s, _, _)| score > s) {
                         best = Some((score, bottom - h, bottom));
                     }
@@ -454,4 +470,73 @@ fn best_column(plane: &RefPlane, y0: i32, y1: i32, test: fn(&RefPlane, i32, i32)
         })
         .max()
         .map_or(OUTLINE_HALF, |(_, x)| x)
+}
+
+#[cfg(test)]
+mod tests {
+    use blurrd_testkit::hud::killfeed::Team;
+    use blurrd_testkit::hud::recap::{RecapSpec, SECTIONS};
+    use blurrd_testkit::hud::screen::ScreenTiming;
+    use blurrd_testkit::{Background, FontSet, Layout, Palette, Scene};
+
+    use super::{CARD_PITCH, CARD_X, FILL_H, RecapReader, STRIP_X, split_run};
+    use crate::image::RgbView;
+    use crate::screens::sample::{FrameView, ScreenMap};
+
+    #[test]
+    fn finds_the_strip_when_its_top_edge_fades_over_the_card_art() {
+        let spec = RecapSpec {
+            killer: "Killer Name".to_owned(),
+            killer_team: Team::Enemy,
+            agent: "Agent".to_owned(),
+            report: vec!["Opponent".to_owned()],
+            timeline: 1,
+            timing: ScreenTiming::instant(0, 4),
+        };
+        let strip_top = spec.top() + SECTIONS[0] + SECTIONS[1];
+        let scene = Scene::new(
+            Layout::reference(),
+            Background::noise(3),
+            Palette::DEFAULT,
+            2,
+        )
+        .with_recap(&FontSet::latin(), spec);
+        let mut frame = scene.iter().next().unwrap().frame;
+        // Over the card art (right of the strip's name part) the card art
+        // takes the strip's colour: no edge there.
+        for y in strip_top - SECTIONS[1]..strip_top {
+            for x in CARD_X.0 - 1..1900 {
+                let strip = frame.pixel(x, strip_top + 1).unwrap();
+                frame.set(x, y, strip);
+            }
+        }
+        let view = FrameView::native(
+            RgbView::new(
+                frame.data(),
+                frame.width(),
+                frame.height(),
+                3 * frame.width() as usize,
+            )
+            .unwrap(),
+        );
+        let slots = RecapReader::new()
+            .read(&view, &ScreenMap::REFERENCE)
+            .unwrap();
+        let killer = slots
+            .iter()
+            .find(|s| s.rect.x0 == STRIP_X.0)
+            .expect("the killer's name slot");
+        assert!(killer.ink);
+        assert!(killer.rect.y0 <= strip_top && killer.rect.y1 >= strip_top + SECTIONS[2]);
+    }
+
+    #[test]
+    fn splits_joined_runs_with_marks_at_their_ends() {
+        let tops = |cards: Vec<(i32, i32)>| cards.into_iter().map(|c| c.0).collect::<Vec<_>>();
+        // Four cards (224 rows) joined with seven rows of marks below.
+        let cards = split_run(457, 4 * CARD_PITCH - (CARD_PITCH - FILL_H) + 7);
+        assert_eq!(tops(cards), [457, 515, 573, 631]);
+        // A run between one and two cards holds none.
+        assert_eq!(split_run(457, 85), vec![]);
+    }
 }
