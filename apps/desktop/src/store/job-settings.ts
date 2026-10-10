@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { DEFAULT_JOB_SETTINGS, type JobSettings, type SettingsSection } from "@/lib/job-settings";
+import { DEFAULT_PRESET_ID, withPreset, type PresetData } from "@/lib/presets";
 
 import { useQueueStore, type QueueState } from "./queue";
 
@@ -18,12 +19,19 @@ export interface SettingsTargets {
   readonly defaults: boolean;
 }
 
+/** The settings of one file and the preset they started from. */
+export interface FileSettings {
+  /** Id of the preset applied last; changes since then show as "modified". */
+  readonly presetId: string;
+  readonly values: JobSettings;
+}
+
 /** Job settings per queued file (plan 5.9 `project` settings, inspector). */
 export interface JobSettingsState {
   /** Settings of files that have none of their own, and of files added later. */
-  readonly defaults: JobSettings;
+  readonly defaults: FileSettings;
   /** Settings of files changed in the inspector, by queue item id. */
-  readonly files: Readonly<Record<string, JobSettings>>;
+  readonly files: Readonly<Record<string, FileSettings>>;
   readonly scope: ApplyScope;
   readonly setScope: (scope: ApplyScope) => void;
   /**
@@ -36,21 +44,28 @@ export interface JobSettingsState {
     key: K,
     change: (section: JobSettings[K]) => JobSettings[K],
   ) => void;
+  /** Applies a preset to the targets (their detector options stay). */
+  readonly applyPreset: (targets: SettingsTargets, preset: PresetData) => void;
+}
+
+/** The settings entry of a queue item, or the defaults for `null` (no file). */
+export function fileSettingsOf(state: JobSettingsState, id: string | null): FileSettings {
+  return (id === null ? undefined : state.files[id]) ?? state.defaults;
 }
 
 /** The settings of a queue item, or the defaults for `null` (no file). */
 export function settingsOf(state: JobSettingsState, id: string | null): JobSettings {
-  return (id === null ? undefined : state.files[id]) ?? state.defaults;
+  return fileSettingsOf(state, id).values;
 }
 
 /** Applies `change` to every target. */
 function applyTo(
   state: JobSettingsState,
   targets: SettingsTargets,
-  change: (settings: JobSettings) => JobSettings,
+  change: (entry: FileSettings) => FileSettings,
 ): Pick<JobSettingsState, "defaults" | "files"> {
   const files = { ...state.files };
-  for (const id of targets.ids) files[id] = change(settingsOf(state, id));
+  for (const id of targets.ids) files[id] = change(fileSettingsOf(state, id));
   return { defaults: targets.defaults ? change(state.defaults) : state.defaults, files };
 }
 
@@ -61,13 +76,23 @@ function applyTo(
  * files that leave the queue are dropped.
  */
 export const useJobSettingsStore = create<JobSettingsState>()((set) => ({
-  defaults: DEFAULT_JOB_SETTINGS,
+  defaults: { presetId: DEFAULT_PRESET_ID, values: DEFAULT_JOB_SETTINGS },
   files: {},
   scope: "selected",
   setScope: (scope) => set({ scope }),
   updateSection: (targets, key, change) =>
     set((state) =>
-      applyTo(state, targets, (settings) => ({ ...settings, [key]: change(settings[key]) })),
+      applyTo(state, targets, (entry) => ({
+        ...entry,
+        values: { ...entry.values, [key]: change(entry.values[key]) },
+      })),
+    ),
+  applyPreset: (targets, preset) =>
+    set((state) =>
+      applyTo(state, targets, (entry) => ({
+        presetId: preset.id,
+        values: withPreset(entry.values, preset),
+      })),
     ),
 }));
 

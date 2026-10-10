@@ -32,6 +32,35 @@ function difference(a: readonly number[], b: readonly number[]): number {
   return sum / count;
 }
 
+/**
+ * Mean absolute difference of horizontally adjacent pixels of the `nth`
+ * leak crop in the report dialog: low for a blurred crop, high for text.
+ */
+function imageDetail(page: Page, nth: number): Promise<number> {
+  return page.evaluate(async (index) => {
+    const image = document.querySelectorAll<HTMLImageElement>('[role="dialog"] img[data-view]')[
+      index
+    ];
+    if (!image) throw new Error("no crop");
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("no 2d context");
+    context.drawImage(image, 0, 0);
+    const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+    let sum = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 1; x < width; x += 1) {
+        const i = (y * width + x) * 4;
+        for (let c = 0; c < 3; c += 1) sum += Math.abs((data[i + c] ?? 0) - (data[i - 4 + c] ?? 0));
+      }
+    }
+    return sum / (height * (width - 1) * 3);
+  }, nth);
+}
+
 /** The inspector frame. */
 function inspector(page: Page) {
   return page.getByRole("region", { name: "Inspector" });
@@ -117,7 +146,66 @@ test.describe("inspector", () => {
     await expect(preview).toContainText("match_ascent_01_blurrd_UNVERIFIED (2).mp4");
   });
 
+  test("report: crops stay blurred until revealed; accepting renames the output", async ({
+    page,
+  }) => {
+    const panel = inspector(page);
+    await panel.getByRole("tab", { name: "Export" }).click();
+    await panel.getByRole("button", { name: "Export", exact: true }).click();
+    const queue = page.getByRole("listbox", { name: "Recordings" });
+    await expect(queue).toContainText("Unverified · review the report");
+
+    await panel.getByRole("tab", { name: "Verify" }).click();
+    await panel.getByRole("button", { name: "Open full report" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("match_ascent_01_blurrd_UNVERIFIED.mp4");
+    await expect(dialog).toContainText("Outside the regions (information)");
+    const crops = dialog.locator("img[data-view]");
+    await expect(crops).toHaveCount(2);
+    await expect(dialog.locator('img[data-view="clear"]')).toHaveCount(0);
+    const views = () =>
+      page.evaluate(() =>
+        (window.blurrdMock?.schemeRequests ?? [])
+          .filter((request) => request.path.startsWith("crop/"))
+          .map((request) => request.query),
+      );
+    expect(new Set(await views())).toEqual(new Set(["view=blurred"]));
+    const blurredDetail = await imageDetail(page, 0);
+
+    await dialog.getByRole("button", { name: "Reveal the crop" }).first().click();
+    await expect(dialog.locator('img[data-view="clear"]')).toHaveCount(1);
+    expect(await views()).toContain("view=clear");
+    expect(await imageDetail(page, 0)).toBeGreaterThan(blurredDetail * 2);
+    await dialog.getByRole("button", { name: "Hide the crop" }).click();
+    await expect(dialog.locator('img[data-view="clear"]')).toHaveCount(0);
+
+    await dialog.getByRole("button", { name: "Accept and rename" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(queue).toContainText("Done · 1 possible leak");
+    await expect(page.getByText("renamed to match_ascent_01_blurrd.mp4")).toBeVisible();
+    await expect(panel.getByText("Accepted with leaks")).toBeVisible();
+    const output = await page.evaluate(
+      (path) => window.blurrdMock?.projects.state(path).lastOutput,
+      PATH,
+    );
+    expect(output).toBe("D:\\Recordings\\match_ascent_01_blurrd.mp4");
+  });
+
   for (const theme of ["light", "dark"] as const) {
+    test(`verify tab and report have no axe violations (${theme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      const panel = inspector(page);
+      await panel.getByRole("tab", { name: "Verify" }).click();
+      await panel.getByRole("button", { name: "Advanced verification" }).click();
+      await expect(panel.getByText("240 frames checked")).toBeVisible();
+      let results = await new AxeBuilder({ page }).include('[aria-label="Inspector"]').analyze();
+      expect(results.violations).toEqual([]);
+      await panel.getByRole("button", { name: "Open full report" }).click();
+      await expect(page.getByRole("dialog").locator("img[data-view]")).toHaveCount(2);
+      results = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
+      expect(results.violations).toEqual([]);
+    });
+
     test(`export tab has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
       const panel = inspector(page);

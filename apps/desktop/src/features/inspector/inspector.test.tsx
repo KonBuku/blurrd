@@ -11,7 +11,8 @@ import { projectId } from "@/ipc/mock/project";
 import { analysisRequest, renderRequest } from "@/lib/job-request";
 import { DEFAULT_JOB_SETTINGS, type JobSettings } from "@/lib/job-settings";
 import { pathKey } from "@/lib/media";
-import { settingsOf, useJobSettingsStore } from "@/store/job-settings";
+import { BUILTIN_PRESETS, withPreset, type PresetData } from "@/lib/presets";
+import { fileSettingsOf, settingsOf, useJobSettingsStore } from "@/store/job-settings";
 import { useQueueStore } from "@/store/queue";
 import { useUiStore } from "@/store/ui";
 
@@ -79,6 +80,12 @@ function lastArgs(backend: MockBackend, cmd: string): Record<string, unknown> {
   const call = backend.calls.findLast((c) => c.cmd === cmd);
   const { onEvent: _channel, ...args } = (call?.args ?? {}) as Record<string, unknown>;
   return args;
+}
+
+/** Opens the preset menu and chooses `item`. */
+async function menu(item: string) {
+  fireEvent.keyDown(screen.getByRole("button", { name: "Preset actions" }), { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
 }
 
 /** Presses `key` `times` times on the element. */
@@ -185,7 +192,7 @@ describe("inspector", () => {
     toggle("Kill feed");
     expect(settingsFor(PATH).regions.enabled).not.toContain("KillFeed");
     expect(settingsFor(OTHER).regions.enabled).toContain("KillFeed");
-    expect(useJobSettingsStore.getState().defaults).toBe(DEFAULT_JOB_SETTINGS);
+    expect(useJobSettingsStore.getState().defaults.values).toBe(DEFAULT_JOB_SETTINGS);
 
     choose("Apply changes to", "All");
     expect(screen.getByTestId("inspector-target").textContent).toBe("All 2 files and new files");
@@ -193,7 +200,7 @@ describe("inspector", () => {
     for (const settings of [
       settingsFor(PATH),
       settingsFor(OTHER),
-      useJobSettingsStore.getState().defaults,
+      useJobSettingsStore.getState().defaults.values,
     ]) {
       expect(settings.regions.enabled).not.toContain("TextChat");
     }
@@ -206,11 +213,11 @@ describe("inspector", () => {
     renderInspector();
     expect(screen.getByTestId("inspector-target").textContent).toBe("Defaults for new files");
     fireEvent.click(screen.getByRole("checkbox", { name: "All regions" }));
-    expect(useJobSettingsStore.getState().defaults.regions.enabled).toEqual([]);
+    expect(useJobSettingsStore.getState().defaults.values.regions.enabled).toEqual([]);
     fireEvent.click(screen.getByRole("checkbox", { name: "All regions" }));
-    expect(useJobSettingsStore.getState().defaults.regions.enabled).toHaveLength(8);
+    expect(useJobSettingsStore.getState().defaults.values.regions.enabled).toHaveLength(8);
     queue(PATH);
-    expect(settingsFor(PATH)).toBe(useJobSettingsStore.getState().defaults);
+    expect(settingsFor(PATH)).toBe(useJobSettingsStore.getState().defaults.values);
   });
 
   it("names both region groups and says world name tags are out of scope", () => {
@@ -393,4 +400,140 @@ describe("inspector", () => {
     );
     expect(lastArgs(backend, "cancel_job")).toEqual({ job: "job-1" });
   });
+
+  it(
+    "round-trips every verification setting into the analysis request",
+    { timeout: 30_000 },
+    async () => {
+      queue(PATH);
+      useUiStore.setState({ inspectorTab: "verify" });
+      renderInspector();
+      await screen.findByText("240 frames checked");
+
+      choose("Verification mode", "Report only");
+      choose("Coverage", "Every frame");
+      choose("Audit the export", "Sampled");
+      const words = screen.getByRole("textbox", { name: "Ignore words" });
+      fireEvent.change(words, { target: { value: "ACE, CLUTCH, Haven" } });
+      fireEvent.keyDown(words, { key: "Enter" });
+      fireEvent.click(screen.getByRole("button", { name: "Advanced verification" }));
+      press(screen.getByRole("slider", { name: "Confidence threshold" }), "ArrowRight", 2);
+      press(screen.getByRole("spinbutton", { name: "Full-frame sample interval" }), "ArrowUp", 3);
+      toggle("Verify with OCR");
+
+      const expected: JobSettings = {
+        ...DEFAULT_JOB_SETTINGS,
+        verify: {
+          enabled: false,
+          mode: "ReportOnly",
+          coverage: "EveryFrame",
+          full_frame_sample_ms: 800,
+          min_conf: 0.6,
+          audit_output: "Sampled",
+          ignore_words: ["ACE", "CLUTCH", "Haven"],
+        },
+      };
+      expect(settingsFor(PATH)).toEqual(expected);
+
+      act(() => useUiStore.setState({ inspectorTab: "blur" }));
+      fireEvent.click(screen.getByRole("button", { name: "Advanced detection" }));
+      fireEvent.click(screen.getByRole("button", { name: "Re-analyze" }));
+      await waitFor(() => expect(backend.calls.some((c) => c.cmd === "start_analysis")).toBe(true));
+      expect(lastArgs(backend, "start_analysis")).toEqual(
+        analysisRequest(projectId(PATH), expected),
+      );
+      expect(lastArgs(backend, "start_analysis").verify).toEqual(expected.verify);
+    },
+  );
+
+  it("applies presets, marks changes and resets them", async () => {
+    queue(PATH, OTHER);
+    renderInspector();
+    await screen.findByText("Manual boxes");
+    const maxPrivacy = BUILTIN_PRESETS[1] as PresetData;
+    await pick("Preset", "Max privacy");
+    expect(settingsFor(PATH)).toEqual(withPreset(DEFAULT_JOB_SETTINGS, maxPrivacy));
+    expect(settingsFor(OTHER)).toBe(DEFAULT_JOB_SETTINGS);
+    expect(fileSettingsOf(useJobSettingsStore.getState(), pathKey(PATH)).presetId).toBe(
+      "max-privacy",
+    );
+    expect(screen.queryByTestId("preset-modified")).toBeNull();
+
+    toggle("Noise");
+    expect(screen.getByTestId("preset-modified")).toBeDefined();
+    await menu("Reset to Max privacy");
+    expect(settingsFor(PATH)).toEqual(withPreset(DEFAULT_JOB_SETTINGS, maxPrivacy));
+    expect(screen.queryByTestId("preset-modified")).toBeNull();
+  });
+
+  it(
+    "saves, exports without kept names, imports and deletes presets",
+    { timeout: 30_000 },
+    async () => {
+      queue(PATH);
+      renderInspector();
+      await screen.findByText("Manual boxes");
+      toggle("Keep my own row readable");
+      const names = screen.getByRole("textbox", { name: "Names to keep readable" });
+      fireEvent.change(names, { target: { value: "Ally" } });
+      fireEvent.keyDown(names, { key: "Enter" });
+
+      await menu("Save as preset…");
+      fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), {
+        target: { value: "Scrims" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: "Preset" }).textContent).toBe("Scrims"),
+      );
+      const saved = backend.presets.list().find((preset) => preset.name === "Scrims");
+      expect(saved?.regions.keep_names).toEqual({ own_row: true, names: ["Ally"] });
+
+      // Export: the kept names stay out unless ticked.
+      backend.dialogResult = ["D:\\Presets\\scrims.blurrd-preset.json"];
+      await menu("Export Scrims…");
+      fireEvent.click(await screen.findByRole("button", { name: "Export…" }));
+      await waitFor(() => expect(backend.presets.files.size).toBe(1));
+      const plain = JSON.parse(
+        backend.presets.files.get("D:\\Presets\\scrims.blurrd-preset.json") ?? "{}",
+      ) as {
+        presets: PresetData[];
+      };
+      expect(plain.presets[0]?.regions.keep_names).toEqual({ own_row: true, names: [] });
+
+      backend.dialogResult = ["D:\\Presets\\scrims-names.blurrd-preset.json"];
+      await menu("Export Scrims…");
+      fireEvent.click(
+        await screen.findByRole("checkbox", { name: /Include the names kept readable/ }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+      await waitFor(() => expect(backend.presets.files.size).toBe(2));
+      const withNames = JSON.parse(
+        backend.presets.files.get("D:\\Presets\\scrims-names.blurrd-preset.json") ?? "{}",
+      ) as { presets: PresetData[] };
+      expect(withNames.presets[0]?.regions.keep_names.names).toEqual(["Ally"]);
+
+      // Import: the taken id gets a new one.
+      backend.dialogResult = ["D:\\Presets\\scrims.blurrd-preset.json"];
+      await menu("Import presets…");
+      await waitFor(() =>
+        expect(backend.presets.list().filter((p) => p.name === "Scrims")).toHaveLength(2),
+      );
+      const ids = backend.presets
+        .list()
+        .filter((p) => p.name === "Scrims")
+        .map((p) => p.id);
+      expect(ids[1]).toBe(`${ids[0]}-2`);
+
+      await menu("Delete Scrims");
+      await waitFor(() =>
+        expect(backend.presets.list().filter((p) => p.name === "Scrims")).toHaveLength(1),
+      );
+      expect(lastArgs(backend, "export_preset")).toEqual({
+        id: saved?.id,
+        path: "D:\\Presets\\scrims-names.blurrd-preset.json",
+        includeKeptNames: true,
+      });
+    },
+  );
 });

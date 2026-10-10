@@ -1,7 +1,9 @@
 import { ChevronRight } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
+import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import { parseWordList } from "@/lib/job-settings";
 import { cn } from "@/lib/utils";
 
 export interface InspectorSectionProps {
@@ -222,5 +224,45 @@ export function Disclosure({ label, children, defaultOpen = false }: DisclosureP
         {children}
       </div>
     </div>
+  );
+}
+
+export interface WordListInputProps {
+  readonly id: string;
+  readonly words: readonly string[];
+  readonly onChange: (words: string[]) => void;
+}
+
+/**
+ * A comma-separated word list (names kept readable, ignore words): the
+ * text is committed as distinct trimmed words on blur or Enter; Escape
+ * drops the typed text.
+ */
+export function WordListInput({ id, words, onChange }: WordListInputProps) {
+  // The text being typed, or null while the field shows `words`.
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    setDraft(null);
+    onChange(parseWordList(draft));
+  };
+  return (
+    <Input
+      id={id}
+      size="sm"
+      spellCheck={false}
+      autoComplete="off"
+      placeholder="None"
+      value={draft ?? words.join(", ")}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") commit();
+        if (event.key === "Escape" && draft !== null) {
+          event.preventDefault();
+          setDraft(null);
+        }
+      }}
+    />
   );
 }

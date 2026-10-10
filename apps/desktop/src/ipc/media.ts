@@ -77,3 +77,12 @@ export async function fetchExact(
 export function thumbnailUrl(projectId: string, index: number): string {
   return schemeUrl(`thumb/${projectId}/${index}.jpg`);
 }
+
+/**
+ * URL of the image of leak `index` of a project's report: `blurred` is
+ * the crop as the backend blurs it (shown by default, it never carries
+ * readable text), `clear` re-decodes the frame for the user's "reveal".
+ */
+export function leakCropUrl(projectId: string, index: number, view: "blurred" | "clear"): string {
+  return `${schemeUrl(`crop/${projectId}/${index}.jpg`)}?view=${view}`;
+}

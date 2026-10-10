@@ -196,3 +196,12 @@ export function getOutputPreview(
 ): Promise<OutputPreview> {
   return invoke<OutputPreview>("get_output_preview", { projectId, settings });
 }
+
+/**
+ * Accepts the verification report `reportId` of a project (its open leaks
+ * become accepted) and renames the `_UNVERIFIED` output; answers the new
+ * output path (plan 7.2).
+ */
+export function acceptReport(projectId: string, reportId: string): Promise<string> {
+  return invoke<string>("accept_report", { projectId, reportId });
+}

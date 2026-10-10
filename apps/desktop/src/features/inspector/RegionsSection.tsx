@@ -1,20 +1,18 @@
-import { Fragment, useId, useState } from "react";
+import { Fragment, useId } from "react";
 
 import type { TrackSet } from "@/ipc/commands";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import { RegionIcon } from "@/components/ui/region-chip";
 import { Switch } from "@/components/ui/switch";
 import {
   ALL_REGIONS,
   orderedRegions,
-  parseWordList,
   type DetectedRegion,
   type RegionChoice,
 } from "@/lib/job-settings";
 import { REGIONS, type AnyRegion } from "@/lib/regions";
 
-import { InspectorRow, InspectorSection } from "./parts";
+import { InspectorRow, InspectorSection, WordListInput } from "./parts";
 
 /** What each region blurs (design 8.1 REGIONS). */
 const DESCRIPTIONS: Readonly<Record<DetectedRegion, string>> = {
@@ -169,15 +167,6 @@ interface RegionOptionsProps {
 function KeepNames({ regions, onChange }: RegionOptionsProps) {
   const ownId = useId();
   const namesId = useId();
-  const saved = regions.keep_names.names.join(", ");
-  // The text being typed; committed on blur or Enter.
-  const [draft, setDraft] = useState<string | null>(null);
-  const commit = () => {
-    if (draft === null) return;
-    const names = parseWordList(draft);
-    setDraft(null);
-    onChange((current) => ({ ...current, keep_names: { ...current.keep_names, names } }));
-  };
   return (
     <>
       <InspectorRow
@@ -203,22 +192,12 @@ function KeepNames({ regions, onChange }: RegionOptionsProps) {
         label={<label htmlFor={namesId}>Names to keep readable</label>}
         description="Comma separated. A name stays readable only where every read of it matches."
       >
-        <Input
+        <WordListInput
           id={namesId}
-          size="sm"
-          spellCheck={false}
-          autoComplete="off"
-          placeholder="None"
-          value={draft ?? saved}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") commit();
-            if (event.key === "Escape" && draft !== null) {
-              event.preventDefault();
-              setDraft(null);
-            }
-          }}
+          words={regions.keep_names.names}
+          onChange={(names) =>
+            onChange((current) => ({ ...current, keep_names: { ...current.keep_names, names } }))
+          }
         />
       </InspectorRow>
     </>

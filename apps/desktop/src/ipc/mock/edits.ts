@@ -12,11 +12,14 @@ import type { FrameRange } from "@/bindings/FrameRange";
 import type { Override } from "@/bindings/Override";
 import type { RectI } from "@/bindings/RectI";
 import type { Region } from "@/bindings/Region";
+import type { Leak } from "@/bindings/Leak";
 import type { VerifyReport } from "@/bindings/VerifyReport";
+import type { VerifySummary } from "@/bindings/VerifySummary";
 import type { OverridesSaved, TrackSet } from "@/ipc/commands";
 import { overrideBindings } from "@/lib/interval-index";
 
 import { FIXTURE } from "./fixture-media";
+import { UNVERIFIED_SUFFIX } from "./output";
 import {
   frameCount,
   initiallyAnalyzed,
@@ -35,11 +38,35 @@ export interface MockProjectState {
   analyzed: boolean;
   /** The last verification report, `null` before the first one. */
   report: VerifyReport | null;
+  /** The file the last export wrote, if any. */
+  lastOutput: string | null;
 }
 
 /** An `AppError` without details. */
 function failure(kind: AppError["kind"], message: string): AppError {
   return { kind, message, detail: null };
+}
+
+/** `VerifySummary::compute`: the counts and result of a report's leaks and regions. */
+export function summarize(
+  leaks: readonly Leak[],
+  perRegion: VerifyReport["per_region"],
+): VerifySummary {
+  const count = (status: Leak["status"]) =>
+    leaks.filter((leak) => leak.kind !== "OutOfScope" && leak.status === status).length;
+  const open = count("Open");
+  const unverifiable = Object.values(perRegion).reduce(
+    (sum, region) => sum + (region?.unverifiable_items ?? 0),
+    0,
+  );
+  return {
+    state: open > 0 ? "LeaksRemain" : unverifiable > 0 ? "Unverified" : "Clean",
+    open,
+    fixed: count("Fixed"),
+    accepted: count("Accepted"),
+    out_of_scope: leaks.filter((leak) => leak.kind === "OutOfScope").length,
+    unverifiable_items: unverifiable,
+  };
 }
 
 /** Whether two edits are the same (field by field). */
@@ -117,6 +144,7 @@ export class MockProjects {
         unverified: mergeRanges(mockProject(path).verify.unverified_ranges),
         analyzed: initiallyAnalyzed(path),
         report: mockVerifyReport(path),
+        lastOutput: null,
       };
       this.states.set(path, state);
     }
@@ -177,6 +205,28 @@ export class MockProjects {
       state.unverified = [];
       state.report = mockVerifyReport(path, state.set.revision);
     }
+  }
+
+  /**
+   * `accept_report`: the open leaks of report `reportId` become accepted
+   * and the last output loses its `_UNVERIFIED` suffix; answers the new
+   * path.
+   */
+  accept(path: string, reportId: string, reportName: string | null): string {
+    const state = this.state(path);
+    const { report, lastOutput } = state;
+    if (!report || reportId !== reportName) throw failure("NotFound", "The report does not exist.");
+    const at = lastOutput?.lastIndexOf(UNVERIFIED_SUFFIX) ?? -1;
+    if (!lastOutput || at === -1) {
+      throw failure("InvalidProject", "There is no unverified output to rename.");
+    }
+    const leaks = report.leaks.map((leak) =>
+      leak.status === "Open" ? { ...leak, status: "Accepted" as const } : leak,
+    );
+    state.report = { ...report, leaks, summary: summarize(leaks, report.per_region) };
+    const renamed = lastOutput.slice(0, at) + lastOutput.slice(at + UNVERIFIED_SUFFIX.length);
+    state.lastOutput = renamed;
+    return renamed;
   }
 
   /**

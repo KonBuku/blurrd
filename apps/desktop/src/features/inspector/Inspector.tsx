@@ -8,28 +8,18 @@ import { useUiStore, type InspectorTab } from "@/store/ui";
 import { BlurInspector } from "./BlurInspector";
 import { ExportFooter } from "./ExportFooter";
 import { ExportInspector } from "./ExportInspector";
+import { PresetBar } from "./PresetBar";
+import { VerifyInspector } from "./VerifyInspector";
 import { useInspectorTarget } from "./useInspector";
 
 /** Id of the inspector frame, referenced by its toggle and resize handle. */
 export const INSPECTOR_ID = "inspector";
 
-/** The inspector tabs and what each one is for. */
-const TABS: readonly { value: InspectorTab; label: string; hint: string }[] = [
-  {
-    value: "blur",
-    label: "Blur",
-    hint: "Choose the regions to blur and the blur style.",
-  },
-  {
-    value: "export",
-    label: "Export",
-    hint: "Codec, quality, audio and file name settings for the selected recording.",
-  },
-  {
-    value: "verify",
-    label: "Verify",
-    hint: "OCR verification settings and the last result for the selected recording.",
-  },
+/** The inspector tabs. */
+const TABS: readonly { value: InspectorTab; label: string }[] = [
+  { value: "blur", label: "Blur" },
+  { value: "export", label: "Export" },
+  { value: "verify", label: "Verify" },
 ];
 
 function isInspectorTab(value: string): value is InspectorTab {
@@ -42,9 +32,10 @@ export interface InspectorTabsProps {
 }
 
 /**
- * The inspector content: a segmented Blur | Export | Verify tab list and
- * the selected tab. The same content fills the inspector frame and, in
- * narrow windows, the inspector sheet; the selected tab is shared.
+ * The inspector content: a segmented Blur | Export | Verify tab list, the
+ * preset and "Apply to" rows, the selected tab and the export footer.
+ * The same content fills the inspector frame and, in narrow windows, the
+ * inspector sheet; the selected tab is shared.
  */
 export function InspectorTabs({ header }: InspectorTabsProps) {
   const tab = useUiStore((state) => state.inspectorTab);
@@ -68,19 +59,13 @@ export function InspectorTabs({ header }: InspectorTabsProps) {
           ))}
         </TabsList>
       </div>
+      <PresetBar />
       <ApplyScopeBar />
-      {TABS.map(({ value, hint }) => (
+      {TABS.map(({ value }) => (
         <TabsContent key={value} value={value} className="overflow-y-auto p-3">
-          {value === "blur" ? (
-            <BlurInspector />
-          ) : value === "export" ? (
-            <ExportInspector />
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-1 p-3 text-center">
-              <p className="text-ui-base font-medium">No recording selected</p>
-              <p className="max-w-64 text-ui-sm text-foreground-subtle">{hint}</p>
-            </div>
-          )}
+          {value === "blur" && <BlurInspector />}
+          {value === "export" && <ExportInspector />}
+          {value === "verify" && <VerifyInspector />}
         </TabsContent>
       ))}
       <ExportFooter />

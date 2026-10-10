@@ -14,6 +14,7 @@ import type { SessionEntry } from "@/ipc/commands";
 import type { AnalysisRequest, RenderRequest } from "@/ipc/jobs";
 import type { ExportSettings } from "@/bindings/ExportSettings";
 import { pathKey } from "@/lib/media";
+import type { PresetData } from "@/lib/presets";
 import { isEngineRegion } from "@/lib/regions";
 
 import { MOCK_CAPABILITIES } from "./capabilities";
@@ -22,6 +23,7 @@ import { MockProjects } from "./edits";
 import { createEventBus } from "./events";
 import { MockJobs, type MockChannel } from "./jobs";
 import { mockOutput } from "./output";
+import { MockPresets } from "./presets";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
 import { frameCount, mockDensity, mockProject, mockPts, projectId } from "./project";
 import { installSchemeFetch, type SchemeRequest } from "./scheme";
@@ -83,6 +85,8 @@ export interface MockBackend {
   readonly jobs: MockJobs;
   /** Files written by exports (`pathKey`s), for the conflict policy. */
   readonly outputs: Set<string>;
+  /** Presets and the preset files of the fake file system. */
+  readonly presets: MockPresets;
 }
 
 /** Name of the settings file, as opened by the real shell. */
@@ -162,6 +166,7 @@ export function installMockBackend(): MockBackend {
     saveDelayMs: 0,
     jobs: new MockJobs(),
     outputs: new Set(),
+    presets: new MockPresets(),
   };
   const installedAt = performance.now();
   const store = (cmd: string, args: StoreArgs) => {
@@ -194,7 +199,15 @@ export function installMockBackend(): MockBackend {
     return path;
   };
   mockConvertFileSrc("windows");
-  installSchemeFetch(backend.schemeRequests, (id) => frameCount(projects.get(id) ?? ""));
+  installSchemeFetch(backend.schemeRequests, {
+    frames: (id) => frameCount(projects.get(id) ?? ""),
+    leak: (id, index) => {
+      const path = projects.get(id);
+      const leak =
+        path === undefined ? undefined : backend.projects.state(path).report?.leaks[index];
+      return leak ? { frame: leak.frame_range[0], rect: leak.rect } : null;
+    },
+  });
 
   mockIPC(async (cmd, args) => {
     if (events.handles(cmd)) return events.invoke(cmd, args as Parameters<typeof events.invoke>[1]);
@@ -300,6 +313,7 @@ export function installMockBackend(): MockBackend {
             unverified.length > 0 ? "Unverified" : (report?.summary.state ?? "Unverified");
           const written = mockOutput(path, media, output, backend.outputs, state === "Clean").path;
           backend.outputs.add(pathKey(written));
+          backend.projects.state(path).lastOutput = written;
           return {
             frames: frameCount(path),
             elapsed_ms: backend.jobs.durationMs,
@@ -309,6 +323,32 @@ export function installMockBackend(): MockBackend {
           };
         });
       }
+      case "accept_report": {
+        const path = pathOf(args);
+        const { reportId } = args as { reportId: string };
+        const renamed = backend.projects.accept(path, reportId, mockProject(path).verify.report);
+        backend.outputs.add(pathKey(renamed));
+        return renamed;
+      }
+      case "list_presets":
+        return backend.presets.list();
+      case "save_preset":
+        return backend.presets.save((args as { preset: PresetData }).preset);
+      case "delete_preset":
+        return backend.presets.delete((args as { id: string }).id);
+      case "import_preset":
+        return backend.presets.import((args as { path: string }).path);
+      case "export_preset": {
+        const { id, path, includeKeptNames } = args as {
+          id: string;
+          path: string;
+          includeKeptNames: boolean;
+        };
+        backend.presets.export(id, path, includeKeptNames);
+        return null;
+      }
+      case "plugin:dialog|save":
+        return backend.dialogResult?.[0] ?? null;
       case "cancel_job":
         backend.jobs.cancel((args as { job: string }).job);
         return null;

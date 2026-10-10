@@ -492,6 +492,60 @@ and invalid edits, stores a new revision and marks the frames of changed
 edits unverified; `window.blurrdMock.projects.touch(path)` and
 `.reanalyze(path, dy)` simulate another writer and a re-analysis. Without FFmpeg the preview tests skip locally and fail in CI.
 
+### Inspector
+
+The inspector (`src/features/inspector`) edits the job settings of the
+queued files (`src/store/job-settings.ts`, `src/lib/job-settings.ts`):
+regions and detector options for `start_analysis`, blur and export
+settings for `start_render`, and the verification settings. Every file
+has its own settings once it is changed; files without own settings, and
+files added later, use the defaults for new files. "Apply to" switches
+between the selected files (or the defaults when nothing is selected) and
+every file; a change writes only the field that changed, so files with
+different values keep theirs. The preview takes its blur and its enabled
+regions from the shown file's settings.
+
+- **Preset row:** the preset the shown values started from, "Modified"
+  when they differ, and a menu to reset, update a user preset, save as a
+  new preset, import, export and delete. Built-ins (_Default_, _Max
+  privacy_, _Kill feed only_) mirror `Preset::builtins`. Exported files
+  leave out the names kept readable unless the box is ticked.
+- **Blur:** "All regions" and one switch per region in the HUD and
+  Screens groups (world-space name tags are out of scope and say so), the
+  kill feed's keep-my-name options, the chat options, the manual boxes of
+  the shown file, the style, and the advanced detection options with
+  Re-analyze.
+- **Export:** codec (disabled with the reason when this PC has no
+  working encoder for it, read from `get_capabilities`), encoder, rate
+  control, preset, 10-bit, NVENC sessions, audio, container, metadata,
+  output folder, file name template and conflict policy; the output name
+  and the size and time estimate come from `get_output_preview`.
+- **Verify:** OCR on or off, mode, coverage, audit, ignore words,
+  confidence and the full-frame interval, and the last result of the shown
+  file. The report dialog shows stat tiles, the positive control per
+  region, the leaks, the items OCR could not read and the names outside
+  every region. Leak crops are the backend's blurred crops; "Reveal" asks
+  the backend for the clear crop of that one leak and the image is
+  dropped when the row closes. "Accept and rename" (outputs named
+  `_UNVERIFIED`) calls `accept_report`.
+- **Footer:** Analyze, Export, Export again or Cancel for the shown file,
+  and the export summary. Job events update the queue status
+  (`src/features/jobs/jobs.ts`).
+
+The request builders (`src/lib/job-request.ts`) put every inspector
+value into the request unchanged; `inspector.test.tsx` changes every
+control and compares the arguments the mock backend received with the
+expected settings. The mock backend runs analysis and render jobs over
+the job channel (`window.blurrdMock.jobs`: `durationMs`, `failNext`),
+names outputs from the template (`_UNVERIFIED` until the project is
+verified clean), keeps user presets in session storage and preset files
+in `window.blurrdMock.presets.files`, and serves leak crops at
+`blurrd://crop/<project>/<leak>.jpg?view=blurred|clear`.
+
+Manual checks in the real window (not automated: no visible windows in
+agent runs): the native folder dialog of "Choose folder", the open
+dialog of "Import presets…" and the save dialog of "Export preset".
+
 ### Design tokens and typography
 
 `src/styles/globals.css` defines every colour, text size and easing of the
