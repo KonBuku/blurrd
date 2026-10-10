@@ -81,7 +81,7 @@ export function mockProject(path: string): ProjectSummary {
       noise: true,
     },
     enabled: ["KillFeed", "Banner", "VoiceChat", "TextChat"],
-    analyzed: !path.toLowerCase().includes("fresh"),
+    analyzed: initiallyAnalyzed(path),
     verify: {
       plan_revision: 3,
       state: "LeaksRemain",
@@ -156,10 +156,18 @@ function mockOverrides(frames: number): Override[] {
   ];
 }
 
-/** The initial `get_tracks` answer of the mock for `path` (before any edit). */
-export function mockTracks(path: string): TrackSet {
+/** Whether the mock opens `path` analysed (paths with "fresh" are not). */
+export function initiallyAnalyzed(path: string): boolean {
+  return !path.toLowerCase().includes("fresh");
+}
+
+/**
+ * The initial `get_tracks` answer of the mock for `path` (before any
+ * edit), or the tracks of its first analysis when `analyzed` is set.
+ */
+export function mockTracks(path: string, analyzed = initiallyAnalyzed(path)): TrackSet {
   const frames = frameCount(path);
-  if (path.toLowerCase().includes("fresh")) {
+  if (!analyzed) {
     return { revision: 0, tracks: [], overrides: [], bindings: [], health: [] };
   }
   const tracks = plateTracks(frames);
@@ -208,15 +216,19 @@ export function mockDensity(
   };
 }
 
-/** `get_verify_report`: one open leak, one fixed leak and an out-of-scope name. */
-export function mockVerifyReport(path: string): VerifyReport | null {
-  if (path.toLowerCase().includes("fresh")) return null;
+/**
+ * `get_verify_report`: one open leak, one fixed leak and an out-of-scope
+ * name; `null` for a file that was never analysed unless `revision` (the
+ * revision an analysis verified) is given.
+ */
+export function mockVerifyReport(path: string, revision?: number): VerifyReport | null {
+  if (revision === undefined && !initiallyAnalyzed(path)) return null;
   const frames = frameCount(path);
   const clamp = (f: number) => Math.min(f, frames - 1);
   return {
     schema: "blurrd-verify/1",
     version: 1,
-    plan_revision: 3,
+    plan_revision: revision ?? 3,
     source_fingerprint: { size: 1, mtime: 0, blake3_head_tail: "0".repeat(64) },
     output_sha256: null,
     coverage: "Structure",

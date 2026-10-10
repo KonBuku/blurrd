@@ -44,3 +44,11 @@ export const REGIONS: Readonly<Record<AnyRegion, RegionInfo>> = {
 
 /** All regions in inspector order. */
 export const REGION_ORDER = Object.keys(REGIONS) as readonly AnyRegion[];
+
+/**
+ * Whether the generated `Region` type has this region: the HUD regions and
+ * Manual, not yet the screen surfaces (M13b).
+ */
+export function isEngineRegion(region: AnyRegion): region is Region {
+  return REGIONS[region].group !== "screens";
+}

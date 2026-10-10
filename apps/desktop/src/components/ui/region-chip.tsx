@@ -38,6 +38,36 @@ const FAMILY_CLASSES: Readonly<Record<RegionFamily, string>> = {
   screens: "bg-region-screens-surface text-region-screens",
 };
 
+// Full class names of the region colour per family, for icons on their own.
+const FAMILY_TEXT: Readonly<Record<RegionFamily, string>> = {
+  killfeed: "text-region-killfeed",
+  banner: "text-region-banner",
+  voice: "text-region-voice",
+  chat: "text-region-chat",
+  manual: "text-region-manual",
+  screens: "text-region-screens",
+};
+
+export type RegionIconProps = {
+  readonly region: AnyRegion;
+  readonly className?: string;
+};
+
+/**
+ * A region's icon in its colour, for rows that name the region in text
+ * next to it (the inspector's region switches). Decorative.
+ */
+export function RegionIcon({ region, className }: RegionIconProps) {
+  const Glyph = REGION_ICONS[region];
+  return (
+    <Glyph
+      aria-hidden
+      data-region={region}
+      className={cn("size-4 shrink-0", FAMILY_TEXT[REGIONS[region].family], className)}
+    />
+  );
+}
+
 export type RegionChipProps = Omit<ComponentProps<"span">, "children"> & {
   readonly region: AnyRegion;
 };
@@ -48,7 +78,7 @@ export type RegionChipProps = Omit<ComponentProps<"span">, "children"> & {
  */
 export function RegionChip({ region, className, ...props }: RegionChipProps) {
   const { label, family } = REGIONS[region];
-  const RegionIcon = REGION_ICONS[region];
+  const Glyph = REGION_ICONS[region];
   return (
     <span
       data-slot="region-chip"
@@ -60,7 +90,7 @@ export function RegionChip({ region, className, ...props }: RegionChipProps) {
       )}
       {...props}
     >
-      <RegionIcon className="-ml-0.5 size-3" />
+      <Glyph className="-ml-0.5 size-3" />
       {label}
     </span>
   );

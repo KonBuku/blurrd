@@ -11,20 +11,16 @@ import type { AppError } from "@/bindings/AppError";
 import type { Capabilities } from "@/bindings/Capabilities";
 import type { Override } from "@/bindings/Override";
 import type { SessionEntry } from "@/ipc/commands";
+import type { AnalysisRequest } from "@/ipc/jobs";
+import { isEngineRegion } from "@/lib/regions";
 
 import { MOCK_CAPABILITIES } from "./capabilities";
 
 import { MockProjects } from "./edits";
 import { createEventBus } from "./events";
+import { MockJobs, type MockChannel } from "./jobs";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
-import {
-  frameCount,
-  mockDensity,
-  mockProject,
-  mockPts,
-  mockVerifyReport,
-  projectId,
-} from "./project";
+import { frameCount, mockDensity, mockProject, mockPts, projectId } from "./project";
 import { installSchemeFetch, type SchemeRequest } from "./scheme";
 
 /** One IPC call received by the mock backend. */
@@ -77,6 +73,8 @@ export interface MockBackend {
   readonly projects: MockProjects;
   /** How long `set_overrides` takes, in milliseconds. */
   saveDelayMs: number;
+  /** The jobs (analysis), their duration and a failure to inject. */
+  readonly jobs: MockJobs;
 }
 
 /** Name of the settings file, as opened by the real shell. */
@@ -154,6 +152,7 @@ export function installMockBackend(): MockBackend {
     schemeRequests: [],
     projects: new MockProjects(),
     saveDelayMs: 0,
+    jobs: new MockJobs(),
   };
   const installedAt = performance.now();
   const store = (cmd: string, args: StoreArgs) => {
@@ -218,8 +217,17 @@ export function installMockBackend(): MockBackend {
         const { path } = args as { path: string };
         projects.set(projectId(path), path);
         const project = mockProject(path);
-        const { unverified } = backend.projects.state(path);
-        return { ...project, verify: { ...project.verify, unverified_ranges: unverified } };
+        const { unverified, analyzed, report } = backend.projects.state(path);
+        return {
+          ...project,
+          analyzed,
+          verify: {
+            plan_revision: report?.plan_revision ?? 0,
+            state: report?.summary.state ?? "Unverified",
+            unverified_ranges: unverified,
+            report: report ? project.verify.report : null,
+          },
+        };
       }
       case "get_tracks":
         return backend.projects.state(pathOf(args)).set;
@@ -237,7 +245,29 @@ export function installMockBackend(): MockBackend {
         return mockDensity(path, buckets, backend.projects.state(path).set);
       }
       case "get_verify_report":
-        return mockVerifyReport(pathOf(args));
+        return backend.projects.state(pathOf(args)).report;
+      case "start_analysis": {
+        const path = pathOf(args);
+        const { regions, verify, onEvent } = args as unknown as AnalysisRequest & {
+          onEvent: MockChannel;
+        };
+        const frames = frameCount(path);
+        return backend.jobs.start("Analyze", frames, onEvent, () => {
+          backend.projects.analyze(
+            path,
+            new Set(regions.enabled.filter(isEngineRegion)),
+            verify.enabled,
+          );
+          const { report } = backend.projects.state(path);
+          return {
+            frames,
+            elapsed_ms: backend.jobs.durationMs,
+            output: null,
+            verify: verify.enabled ? (report?.summary.state ?? null) : null,
+            warnings: 0,
+          };
+        });
+      }
       case "save_session":
         sessionStorage.setItem(SESSION_KEY, JSON.stringify((args as { entries: unknown }).entries));
         return null;

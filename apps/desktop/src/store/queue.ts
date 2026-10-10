@@ -83,6 +83,8 @@ export interface QueueState {
    * that can no longer be read is marked failed with the reason.
    */
   readonly refresh: (outcomes: readonly ProbeOutcome[]) => void;
+  /** Changes the status of an item (a job started, progressed or ended). */
+  readonly setStatus: (id: string, status: QueueStatus) => void;
   readonly remove: (ids: Iterable<string>) => void;
   readonly removeSelected: () => void;
   /** Removes every item in an end state (done, failed, canceled, …). */
@@ -259,6 +261,11 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
     );
   },
 
+  setStatus: (id, status) =>
+    set((state) => ({
+      items: state.items.map((item) => (item.id === id ? { ...item, status } : item)),
+    })),
+
   removeSelected: () => get().remove(get().selected),
 
   removeFinished: () =>
@@ -323,3 +330,14 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
       return { filter, selected: new Set([...state.selected].filter((id) => shown.has(id))) };
     }),
 }));
+
+/**
+ * The queue item the preview and the inspector show: the focused item when
+ * it is selected, otherwise the first selected one; `null` when nothing
+ * is selected.
+ */
+export function shownItemId(queue: QueueState): string | null {
+  const { focused, selected } = queue;
+  if (focused !== null && selected.has(focused)) return focused;
+  return selected.values().next().value ?? null;
+}

@@ -38,10 +38,7 @@ function commitWith(change: (list: readonly Override[]) => readonly Override[]):
 export function toggleManualTool(frame: number, data: LoadedProject): void {
   const preview = usePreviewStore.getState();
   if (preview.tool) preview.endTool();
-  else {
-    const { clock } = data;
-    preview.setTool(defaultRange(frame, 1 / clock.frameDuration, clock.count));
-  }
+  else startManualTool(frame, 1 / data.clock.frameDuration, data.clock.count);
 }
 
 /** Overlay key of an edit. */
@@ -130,4 +127,19 @@ export function resolveSelection(
     };
   }
   return null;
+}
+
+/** Removes the edit `uid` (the manual box list's delete button). */
+export function removeEditByUid(uid: string): void {
+  commitWith((list) => removeEdit(list, uid));
+  const preview = usePreviewStore.getState();
+  if (preview.selected === editKey(uid)) preview.select(null);
+}
+
+/**
+ * Starts the manual box tool around `frame` (one second either side) for a
+ * video with `fps` frames per second and `count` frames.
+ */
+export function startManualTool(frame: number, fps: number, count: number): void {
+  usePreviewStore.getState().setTool(defaultRange(frame, fps, count));
 }

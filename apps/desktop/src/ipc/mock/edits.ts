@@ -4,16 +4,26 @@
  * `set_overrides` behaves like the engine's command (plan 9.1, 6.1): it
  * rejects a stale `base_rev`, checks every edit, stores the full list as
  * a new revision and marks the frames of every changed edit unverified.
+ * An analysis replaces the tracks with those of the enabled regions and
+ * verifies the whole video again.
  */
 import type { AppError } from "@/bindings/AppError";
 import type { FrameRange } from "@/bindings/FrameRange";
 import type { Override } from "@/bindings/Override";
 import type { RectI } from "@/bindings/RectI";
+import type { Region } from "@/bindings/Region";
+import type { VerifyReport } from "@/bindings/VerifyReport";
 import type { OverridesSaved, TrackSet } from "@/ipc/commands";
 import { overrideBindings } from "@/lib/interval-index";
 
 import { FIXTURE } from "./fixture-media";
-import { frameCount, mockProject, mockTracks } from "./project";
+import {
+  frameCount,
+  initiallyAnalyzed,
+  mockProject,
+  mockTracks,
+  mockVerifyReport,
+} from "./project";
 
 /** What the mock stores per project. */
 export interface MockProjectState {
@@ -21,6 +31,10 @@ export interface MockProjectState {
   set: TrackSet;
   /** Frame ranges changed by edits since the last verification. */
   unverified: FrameRange[];
+  /** Whether an analysis has produced the tracks. */
+  analyzed: boolean;
+  /** The last verification report, `null` before the first one. */
+  report: VerifyReport | null;
 }
 
 /** An `AppError` without details. */
@@ -101,6 +115,8 @@ export class MockProjects {
       state = {
         set: mockTracks(path),
         unverified: mergeRanges(mockProject(path).verify.unverified_ranges),
+        analyzed: initiallyAnalyzed(path),
+        report: mockVerifyReport(path),
       };
       this.states.set(path, state);
     }
@@ -139,6 +155,28 @@ export class MockProjects {
   touch(path: string): void {
     const state = this.state(path);
     state.set = { ...state.set, revision: state.set.revision + 1 };
+  }
+
+  /**
+   * A finished analysis of the `enabled` regions: the fixture's tracks of
+   * those regions replace the stored ones, the edits are kept and rebound,
+   * the revision moves on. With `verified`, the whole video counts as
+   * verified again (no unverified ranges) and the report is renewed.
+   */
+  analyze(path: string, enabled: ReadonlySet<Region>, verified: boolean): void {
+    const state = this.state(path);
+    const tracks = mockTracks(path, true).tracks.filter((track) => enabled.has(track.region));
+    state.analyzed = true;
+    state.set = {
+      ...state.set,
+      revision: state.set.revision + 1,
+      tracks,
+      bindings: overrideBindings(tracks, state.set.overrides),
+    };
+    if (verified) {
+      state.unverified = [];
+      state.report = mockVerifyReport(path, state.set.revision);
+    }
   }
 
   /**

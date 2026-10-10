@@ -8,6 +8,9 @@ import { toAppError } from "@/ipc/errors";
 import { colourModel, pixelParams, type ColourModel, type PixelParams } from "@/lib/blur-geometry";
 import { FrameClock } from "@/lib/frames";
 import { IntervalIndex } from "@/lib/interval-index";
+import { pathKey } from "@/lib/media";
+import { isEngineRegion } from "@/lib/regions";
+import { settingsOf, useJobSettingsStore } from "@/store/job-settings";
 
 import { useProjectEdits } from "@/features/editing/useProjectEdits";
 
@@ -20,6 +23,7 @@ export interface LoadedProject {
   /** Blur sizes in source pixels; `null` for parameters the engine rejects. */
   readonly params: PixelParams | null;
   readonly colour: ColourModel;
+  /** Detector regions the blur applies to (Manual boxes always apply). */
   readonly enabled: ReadonlySet<Region>;
 }
 
@@ -33,7 +37,8 @@ export type ProjectState =
  * Opens the project of `path` and reads its tracks and timestamps (cached
  * per project for the session). The edits come from the edit store, which
  * loads and saves them (`useProjectEdits`), so the index follows every
- * edit, undo and redo at once.
+ * edit, undo and redo at once. The blur and the enabled regions come from
+ * the file's job settings, so the preview follows the inspector at once.
  */
 export function useProject(path: string): ProjectState {
   const project = useQuery({ queryKey: ["project", path], queryFn: () => openProject(path) });
@@ -49,6 +54,9 @@ export function useProject(path: string): ProjectState {
     enabled: id !== undefined,
   });
   const overrides = useProjectEdits(path, id, tracks.data);
+  const settings = useJobSettingsStore((state) => settingsOf(state, pathKey(path)));
+  const { blur } = settings;
+  const regions = settings.regions.enabled;
   // The clock only depends on the timestamps: a saved edit updates the
   // project's verify state, which must not restart the playback.
   const [fpsNum, fpsDen] = project.data?.media.fps ?? [0, 0];
@@ -65,11 +73,11 @@ export function useProject(path: string): ProjectState {
       tracks: { ...tracks.data, overrides },
       clock,
       index: new IntervalIndex(clock.count, tracks.data.tracks, overrides),
-      params: pixelParams(project.data.blur, project.data.sy),
+      params: pixelParams(blur, project.data.sy),
       colour: colourModel(media.color.matrix, media.color.range),
-      enabled: new Set(project.data.enabled),
+      enabled: new Set(regions.filter(isEngineRegion)),
     };
-  }, [project.data, tracks.data, clock, overrides]);
+  }, [project.data, tracks.data, clock, overrides, blur, regions]);
   const failure = project.error ?? tracks.error ?? pts.error;
   if (failure) return { status: "error", error: toAppError(failure) };
   return data ? { status: "ready", data } : { status: "loading" };

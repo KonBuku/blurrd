@@ -13,7 +13,7 @@ import { Frame, FrameHeader, FrameTitle } from "@/features/shell/Frame";
 import { baseName, previewSummary } from "@/lib/media";
 import { SHORTCUTS } from "@/lib/shortcuts";
 import { usePreviewStore } from "@/store/preview";
-import { useQueueStore } from "@/store/queue";
+import { shownItemId, useQueueStore } from "@/store/queue";
 
 import { ManualBoxTool } from "@/features/editing/ManualBoxTool";
 import { useVerifyReport } from "@/features/timeline/useTimelineData";
@@ -41,9 +41,8 @@ export interface PreviewFrameProps {
  */
 function useShownPath(): string | null {
   return useQueueStore((state) => {
-    const { focused, selected, items } = state;
-    const id = focused !== null && selected.has(focused) ? focused : selected.values().next().value;
-    const item = items.find((candidate) => candidate.id === id);
+    const id = shownItemId(state);
+    const item = state.items.find((candidate) => candidate.id === id);
     return item?.media ? item.path : null;
   });
 }
