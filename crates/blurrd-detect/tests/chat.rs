@@ -11,7 +11,9 @@
 mod support;
 
 use blurrd_core::{NameKind, Region};
-use blurrd_detect::chat::{ChatDetector, LEFT_PANEL_ROI, NameEnd, NameStart};
+use blurrd_detect::chat::{
+    BACKFILL_MAX, ChatDetector, ChatTracker, LEFT_PANEL_ROI, NameEnd, NameStart, POST_ROLL,
+};
 use blurrd_detect::{DetectError, Detection, RgbView};
 use blurrd_testkit::hud::chat::{Channel, ChatMessage, ChatSpec, Language};
 use blurrd_testkit::hud::killfeed::Team;
@@ -21,7 +23,7 @@ use blurrd_testkit::{
     synth_name,
 };
 
-use support::prepared;
+use support::{Filter, prepared};
 
 /// Backgrounds behind the chat: textured, dark and bright.
 const BACKGROUNDS: [Background; 3] = [
@@ -182,6 +184,7 @@ fn check_frame(fx: &Fixture) -> Check {
 fn finds_the_sender_of_every_line() {
     let channels = [Channel::All, Channel::Team, Channel::Party];
     let mut names = 0;
+    let mut totals = OverBlurTotals::default();
     for seed in 0..30u64 {
         let mut rng = Rng::new(seed);
         let lines = 1 + (seed % 3) as u32;
@@ -192,20 +195,23 @@ fn finds_the_sender_of_every_line() {
                 message(&mut rng, channel, style, i)
             })
             .collect();
-        let background = BACKGROUNDS[(seed % 2) as usize];
+        let background = BACKGROUNDS[(seed / 3 % 3) as usize];
         let fx = chat_fixture(Language::English, messages, background, Palette::DEFAULT);
         let check = check_frame(&fx);
         let context = format!("seed {seed}, {lines} lines");
         check.assert_clean(&context);
         assert_eq!(check.items, lines as usize, "{context}");
-        assert!(!check.safe, "{context}: {:?}", check.detections);
+        // On the bright sky the space after the prefix can close up and
+        // faint names lose their colour: Safe geometry is allowed there.
         assert!(
-            check.over_blur.ratio() <= 0.35,
-            "{context}: over-blur {:?}",
-            check.over_blur
+            !check.safe || background == Background::white_sky(),
+            "{context}: {:?}",
+            check.detections
         );
+        totals.add(&check);
         names += check.items;
     }
+    totals.assert_within_gates("single-word names");
     assert!(names >= 55, "{names} names checked");
 }
 
@@ -271,7 +277,7 @@ fn check_mixed_chats(
             })
             .collect();
         let system = messages.iter().any(|m| m.channel == Channel::System);
-        let background = BACKGROUNDS[(seed % 2) as usize];
+        let background = BACKGROUNDS[(seed / 3 % 3) as usize];
         let fx = chat_fixture(language, messages, background, palette);
         let check = check_frame(&fx);
         let context = format!("{language:?}, {}, seed {seed}, {lines} lines", palette.name);
@@ -324,7 +330,7 @@ fn skips_the_continuation_of_wrapped_messages() {
         let fx = chat_fixture(
             Language::English,
             messages,
-            BACKGROUNDS[(seed % 2) as usize],
+            BACKGROUNDS[(seed % 3) as usize],
             Palette::DEFAULT,
         );
         let check = check_frame(&fx);
@@ -394,4 +400,237 @@ fn rejects_crops_of_another_size() {
             actual_height: 100,
         })
     );
+}
+
+/// The tracked detections of a chat sequence, checked frame by frame.
+#[derive(Debug, Default)]
+struct SequenceCheck {
+    /// Frames and names in them.
+    frames: usize,
+    names: usize,
+    /// Name-frames with glyph pixels no box covers.
+    leaks: Vec<String>,
+    /// Boxes that overlap no name.
+    false_positives: usize,
+    over_blur: OverBlur,
+}
+
+/// Runs the detector and the tracker over every frame of a scene with
+/// `spec`, with the left panel filtered by `filter` if given, and checks
+/// the tracked boxes against each frame's truth.
+fn check_sequence(
+    spec: ChatSpec,
+    background: Background,
+    frames: u32,
+    filter: Option<Filter>,
+) -> SequenceCheck {
+    let fonts = FontSet::latin();
+    let scene = Scene::new(Layout::reference(), background, Palette::DEFAULT, frames)
+        .with_chat(&fonts, spec);
+    let mut detector = ChatDetector::new();
+    let mut tracker = ChatTracker::new();
+    let mut detections = vec![];
+    let mut ready = vec![];
+    let mut truths = std::collections::VecDeque::new();
+    let mut check = SequenceCheck::default();
+    let mut last_frame = None;
+    let mut evaluate =
+        |ready: &mut Vec<(u32, Vec<Detection>)>,
+         truths: &mut std::collections::VecDeque<(u32, blurrd_testkit::FrameTruth)>,
+         frame: &RgbFrame| {
+            for (index, boxes) in ready.drain(..) {
+                let (truth_index, truth) = truths.pop_front().unwrap();
+                assert_eq!(index, truth_index);
+                let prepared = prepared(frame, &boxes);
+                let items: Vec<_> = truth.in_region(Region::TextChat).collect();
+                check.frames += 1;
+                check.names += items.len();
+                for coverage in item_coverage(&truth, &prepared) {
+                    if coverage.is_leak() {
+                        let item = items.iter().find(|i| i.id == coverage.id).unwrap();
+                        check.leaks.push(format!(
+                            "frame {index} {:?} opacity {:.2} ({} of {} px)",
+                            item.id, item.opacity, coverage.leaked_pixels, coverage.glyph_pixels
+                        ));
+                    }
+                }
+                check.false_positives += boxes
+                    .iter()
+                    .filter(|d| !items.iter().any(|i| i.text.intersection(&d.rect).is_some()))
+                    .count();
+                let blur = over_blur(&truth, &prepared);
+                check.over_blur.blurred += blur.blurred;
+                check.over_blur.outside += blur.outside;
+            }
+        };
+    for index in 0..frames {
+        let fx = scene.render(index);
+        let frame = match filter {
+            Some(filter) => filter.region(&fx.frame, LEFT_PANEL_ROI),
+            None => fx.frame,
+        };
+        detector
+            .detect(&left_view(&frame), &mut detections)
+            .unwrap();
+        tracker.push(index, &detector);
+        tracker.drain_ready(&mut ready);
+        truths.push_back((index, fx.truth));
+        evaluate(&mut ready, &mut truths, &frame);
+        last_frame = Some(frame);
+    }
+    tracker.finish(&mut ready);
+    evaluate(&mut ready, &mut truths, &last_frame.unwrap());
+    assert!(truths.is_empty(), "every frame comes out of the tracker");
+    check
+}
+
+/// Runs `check` on every input on its own thread (each run renders and
+/// tracks a whole sequence) and returns the results in input order.
+fn in_parallel<T: Sync, R: Send>(inputs: &[T], check: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = inputs
+            .iter()
+            .map(|input| scope.spawn(|| check(input)))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    })
+}
+
+/// Frames of [`sequence`]: the last line fades out before its end.
+const SEQUENCE_FRAMES: u32 = 260;
+
+/// A chat sequence: single arrivals that push older lines up, two
+/// messages in consecutive frames, a wrapped message and a system line,
+/// with lines fading out in between.
+fn sequence(rng: &mut Rng, language: Language) -> ChatSpec {
+    let mut messages = vec![
+        message(rng, Channel::All, NameStyle::Latin(8), 2),
+        message(rng, Channel::Team, NameStyle::Latin(12), 30),
+        message(rng, Channel::Party, NameStyle::Latin(5), 31),
+        message(rng, Channel::All, NameStyle::TwoWord, 95),
+        message(rng, Channel::Broadcast, NameStyle::Latin(10), 110),
+        message(rng, Channel::System, NameStyle::Latin(9), 150),
+        message(rng, Channel::All, NameStyle::Digits(6), 165),
+    ];
+    "watch the flank and save the ult for the retake".clone_into(&mut messages[3].text);
+    messages[3].wrap = true;
+    ChatSpec {
+        life: 60,
+        ..ChatSpec::new(language, messages)
+    }
+}
+
+#[test]
+fn tracker_covers_lines_through_pushes_and_fades() {
+    // Every frame of every line is covered: the first frames after a line
+    // pops in, the frames in which older lines move up, the whole fade-out
+    // (text and box fade together), on dark, textured and bright
+    // backgrounds and in every language.
+    let mut over_blur = OverBlur::default();
+    let mut names = 0;
+    // Every language and every background, the bright sky twice.
+    let runs = [(0, 0), (1, 1), (2, 2), (0, 2)];
+    let checks = in_parallel(&runs, |&(k, b)| {
+        let mut rng = Rng::new(500 + 3 * k as u64 + b as u64);
+        check_sequence(
+            sequence(&mut rng, Language::ALL[k]),
+            BACKGROUNDS[b],
+            SEQUENCE_FRAMES,
+            None,
+        )
+    });
+    for ((k, b), check) in runs.into_iter().zip(checks) {
+        let context = format!("{:?}, background {b}", Language::ALL[k]);
+        assert!(check.leaks.is_empty(), "{context}: {:?}", check.leaks);
+        // Boxes outlive their line by at most the post-roll (seven lines),
+        // and a line pops in at most two frames early.
+        assert!(
+            check.false_positives <= 7 * POST_ROLL as usize + 2,
+            "{context}: {} false-positive boxes",
+            check.false_positives
+        );
+        assert_eq!(check.frames, SEQUENCE_FRAMES as usize, "{context}");
+        over_blur.blurred += check.over_blur.blurred;
+        over_blur.outside += check.over_blur.outside;
+        names += check.names;
+    }
+    // Safe geometry is part of the mix (system lines, bright backgrounds).
+    assert!(
+        over_blur.ratio() <= 0.6,
+        "over-blur {over_blur:?} ({:.3})",
+        over_blur.ratio()
+    );
+    assert!(names >= 4 * 7 * 70, "{names} name-frames checked");
+}
+
+#[test]
+fn tracker_covers_lines_in_filtered_video() {
+    // GPU-driver and editing filters change the box contrast and the name
+    // colours: greyscale and vivid video, and lifted or crushed levels (a
+    // lifted box looks faded by a fixed threshold, so its darkness is
+    // learned per video). Hue shifts and gamma are covered by the
+    // augmented recordings (plan 11.6).
+    let filters = [
+        Filter::Saturation(0.0),
+        Filter::Saturation(1.8),
+        Filter::Levels {
+            brightness: 0.06,
+            contrast: 0.85,
+        },
+        Filter::Levels {
+            brightness: -0.12,
+            contrast: 0.85,
+        },
+    ];
+    let mut over_blur = OverBlur::default();
+    let runs: Vec<(usize, Filter)> = filters.into_iter().enumerate().collect();
+    let checks = in_parallel(&runs, |&(k, filter)| {
+        let mut rng = Rng::new(700 + k as u64);
+        check_sequence(
+            sequence(&mut rng, Language::ALL[k % Language::ALL.len()]),
+            BACKGROUNDS[k % 2],
+            SEQUENCE_FRAMES,
+            Some(filter),
+        )
+    });
+    for ((k, filter), check) in runs.into_iter().zip(checks) {
+        let language = Language::ALL[k % Language::ALL.len()];
+        let context = format!("{filter:?}, {language:?}, background {}", k % 2);
+        assert!(check.leaks.is_empty(), "{context}: {:?}", check.leaks);
+        assert!(
+            check.false_positives <= 7 * POST_ROLL as usize + 2,
+            "{context}: {} false-positive boxes",
+            check.false_positives
+        );
+        over_blur.blurred += check.over_blur.blurred;
+        over_blur.outside += check.over_blur.outside;
+    }
+    assert!(
+        over_blur.ratio() <= 0.6,
+        "over-blur {over_blur:?} ({:.3})",
+        over_blur.ratio()
+    );
+}
+
+#[test]
+fn tracker_returns_every_frame_once() {
+    let mut detector = ChatDetector::new();
+    let mut tracker = ChatTracker::new();
+    let fx = Scene::new(Layout::reference(), Background::dusk(), Palette::DEFAULT, 1).render(0);
+    let mut out = vec![];
+    let mut ready = vec![];
+    let frames = BACKFILL_MAX as u32 + 40;
+    for frame in 0..frames {
+        detector.detect(&left_view(&fx.frame), &mut out).unwrap();
+        tracker.push(frame, &detector);
+        tracker.drain_ready(&mut ready);
+        assert_eq!(
+            ready.len(),
+            (frame + 1).saturating_sub(BACKFILL_MAX as u32) as usize
+        );
+    }
+    tracker.finish(&mut ready);
+    let returned: Vec<u32> = ready.iter().map(|(f, _)| *f).collect();
+    assert_eq!(returned, (0..frames).collect::<Vec<_>>());
+    assert!(ready.iter().all(|(_, d)| d.is_empty()));
 }

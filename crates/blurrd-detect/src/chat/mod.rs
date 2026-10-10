@@ -15,8 +15,9 @@
 //! the box. [`ChatDetector`] finds the box from its vertical edges, the
 //! text lines inside it from their ink, and the name in each line from its
 //! layout. It works on the left-panel crop of plan 5.4
-//! ([`LEFT_PANEL_ROI`]) and reports reference-pixel boxes; following lines
-//! across frames is the temporal model's job.
+//! ([`LEFT_PANEL_ROI`]) and reports reference-pixel boxes. [`ChatTracker`]
+//! follows the lines across frames and covers them in the frames the
+//! detector misses: pop-ins, faint lines and fade-outs.
 //!
 //! Nothing depends on the client language (plan 7.3). The prefix is the
 //! line's first word, recognised by the parentheses it starts and ends
@@ -36,8 +37,10 @@
 mod band;
 mod ink;
 mod line;
+mod track;
 
 pub use line::{NameEnd, NameStart};
+pub use track::{BACKFILL_MAX, ChatTracker, FADE_MAX, HOLD_MAX, POST_ROLL};
 
 use blurrd_core::{NameKind, RectI, Region};
 
@@ -106,7 +109,6 @@ pub struct ChatLine {
 /// Reusable buffers.
 #[derive(Debug, Clone, Default)]
 struct Scratch {
-    bands: band::BandScratch,
     lines: line::LineScratch,
 }
 
@@ -115,6 +117,11 @@ struct Scratch {
 /// Reuse one detector for all frames of a video: it keeps its buffers.
 #[derive(Debug, Clone, Default)]
 pub struct ChatDetector {
+    edges: Vec<f32>,
+    /// Frames since the box was last found.
+    frames_without_box: u32,
+    /// Whether the ink was measured in the last frame.
+    ink_measured: bool,
     bands: Vec<BoxBand>,
     lines: Vec<ChatLine>,
     scratch: Scratch,
@@ -133,9 +140,26 @@ impl ChatDetector {
         &self.bands
     }
 
+    /// How visible the chat box was in each searched row of the last frame
+    /// (`SEARCH_Y.0 + i` for entry `i`): the brightness inside the box
+    /// relative to outside, at its left and right edges, whichever is
+    /// closer to 1. About 0.66 inside a fully visible box, rising to 1
+    /// while it fades out, around 1 without a box.
+    pub fn edge_ratios(&self) -> &[f32] {
+        &self.edges
+    }
+
     /// The lines whose names were found in the last frame, top to bottom.
     pub fn lines(&self) -> &[ChatLine] {
         &self.lines
+    }
+
+    /// The text stroke pixels inside `rect` (reference pixels) in the last
+    /// frame, or `None` if the ink was not measured: it is measured while
+    /// the box is visible and for [`FADE_MAX`] frames after.
+    pub fn strokes_in(&self, rect: RectI) -> Option<u32> {
+        self.ink_measured
+            .then(|| self.scratch.lines.strokes_in(rect))
     }
 
     /// Detects the sender names in `crop`, the [`LEFT_PANEL_ROI`] of a
@@ -163,7 +187,19 @@ impl ChatDetector {
             });
         }
         let origin = (LEFT_PANEL_ROI.x0, LEFT_PANEL_ROI.y0);
-        band::find_bands(crop, origin.1, &mut self.scratch.bands, &mut self.bands);
+        band::find_bands(crop, origin.1, &mut self.edges, &mut self.bands);
+        // The ink is measured while the box is visible and through the
+        // fade after it, where text can outlast the box edge.
+        self.frames_without_box = if self.bands.is_empty() {
+            self.frames_without_box.saturating_add(1)
+        } else {
+            0
+        };
+        self.ink_measured = self.frames_without_box <= track::FADE_MAX;
+        if !self.ink_measured {
+            return Ok(());
+        }
+        self.scratch.lines.compute_ink(crop, origin);
         if self.bands.is_empty() {
             return Ok(());
         }

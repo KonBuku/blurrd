@@ -1,5 +1,5 @@
-//! Bright text strokes of an RGB area: pixels whose white top-hat is high
-//! in any channel.
+//! Bright text strokes of an RGB area: the white top-hat of each pixel,
+//! the largest over its channels.
 //!
 //! The result equals a per-channel [`crate::morph::white_tophat`] of the
 //! area as a crop of its own (pixels outside it ignored), but the three
@@ -73,22 +73,21 @@ pub(super) struct InkScratch {
     src: Vec<u8>,
     eroded: Vec<u8>,
     opened: Vec<u8>,
-    /// 1 where a channel's top-hat exceeds the threshold.
-    hot: Vec<u8>,
+    /// The top-hat of every byte.
+    tophat: Vec<u8>,
     rows: RowBuffers,
 }
 
 impl InkScratch {
-    /// Sets `out` (one byte per pixel of `area`, row after row) to 1 where
-    /// the white top-hat of some channel exceeds `threshold`, else to 0.
-    /// `area` is in reference pixels, `origin` is the reference position of
-    /// the crop's top-left pixel; the area must lie inside the crop.
-    pub(super) fn stroke_mask(
+    /// Sets `out` (one byte per pixel of `area`, row after row) to the
+    /// largest white top-hat of the pixel's channels. `area` is in
+    /// reference pixels, `origin` is the reference position of the crop's
+    /// top-left pixel; the area must lie inside the crop.
+    pub(super) fn stroke_levels(
         &mut self,
         crop: &RgbView<'_>,
         origin: (i32, i32),
         area: RectI,
-        threshold: u8,
         out: &mut Vec<u8>,
     ) {
         let stride = CHANNELS * area.width() as usize;
@@ -107,21 +106,21 @@ impl InkScratch {
             &mut self.rows,
             &mut self.opened,
         );
-        // Compare every byte first (vectorises), then join the channels.
-        self.hot.clear();
-        self.hot.extend(
+        // Subtract every byte first (vectorises), then join the channels.
+        self.tophat.clear();
+        self.tophat.extend(
             self.src
                 .iter()
                 .zip(&self.opened)
-                .map(|(&s, &o)| u8::from(s.saturating_sub(o) > threshold)),
+                .map(|(&s, &o)| s.saturating_sub(o)),
         );
         out.clear();
         out.extend(
-            self.hot
+            self.tophat
                 .as_chunks::<CHANNELS>()
                 .0
                 .iter()
-                .map(|[r, g, b]| r | g | b),
+                .map(|&[r, g, b]| r.max(g).max(b)),
         );
     }
 }
@@ -192,8 +191,8 @@ mod tests {
         let crop = RgbView::new(&data, w, h, 3 * w as usize).unwrap();
         let area = RectI::new(10, 107, 61, 137).unwrap();
         let origin = (0, 100);
-        let mut mask = vec![];
-        InkScratch::default().stroke_mask(&crop, origin, area, 40, &mut mask);
+        let mut levels = vec![];
+        InkScratch::default().stroke_levels(&crop, origin, area, &mut levels);
 
         let (aw, ah) = (area.width(), area.height());
         let mut expected = vec![0u8; (aw * ah) as usize];
@@ -209,10 +208,10 @@ mod tests {
             }
             white_tophat(&channel, 5, 5, &mut tophat, &mut scratch);
             for (e, &t) in expected.iter_mut().zip(tophat.data()) {
-                *e |= u8::from(t > 40);
+                *e = (*e).max(t);
             }
         }
-        assert_eq!(mask, expected);
-        assert!(mask.contains(&1) && mask.contains(&0));
+        assert_eq!(levels, expected);
+        assert!(levels.iter().any(|&v| v > 40) && levels.contains(&0));
     }
 }

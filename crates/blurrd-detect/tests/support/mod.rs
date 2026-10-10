@@ -176,10 +176,16 @@ impl Filter {
     /// A copy of a reference-size frame with the kill-feed crop
     /// ([`FEED_ROI`], all the detector reads) filtered.
     pub(crate) fn frame(self, frame: &RgbFrame) -> RgbFrame {
+        self.region(frame, FEED_ROI)
+    }
+
+    /// A copy of a reference-size frame with `roi` (the crop a detector
+    /// reads) filtered.
+    pub(crate) fn region(self, frame: &RgbFrame, roi: RectI) -> RgbFrame {
         let mut data = frame.data().to_vec();
         let stride = 3 * frame.width() as usize;
-        let (x0, x1) = (FEED_ROI.x0 as usize, FEED_ROI.x1 as usize);
-        for y in FEED_ROI.y0 as usize..(FEED_ROI.y1 as usize).min(frame.height() as usize) {
+        let (x0, x1) = (roi.x0 as usize, roi.x1 as usize);
+        for y in roi.y0 as usize..(roi.y1 as usize).min(frame.height() as usize) {
             let row = &mut data[y * stride + 3 * x0..y * stride + 3 * x1];
             for pixel in row.as_chunks_mut::<3>().0 {
                 *pixel = self.apply(*pixel);

@@ -16,7 +16,7 @@
 //! - [`VoiceDetector`] ([`voice`]): speaker names in the voice-chat entries
 //!   of one frame.
 //! - [`ChatDetector`] ([`chat`]): sender names in the text-chat lines of
-//!   one frame.
+//!   one frame; [`ChatTracker`] follows the lines across frames.
 //!
 //! Temporal models ([`temporal`]):
 //!
@@ -59,7 +59,7 @@ pub mod track;
 pub mod voice;
 
 pub use banner::{BannerDetector, BannerTracker};
-pub use chat::ChatDetector;
+pub use chat::{ChatDetector, ChatTracker};
 pub use classes::{Class, ClassParams, PixelClasses, hsv};
 pub use detection::{DetectError, Detection};
 pub use image::{BitMask, GrayImage, ImageError, RgbView};

@@ -25,14 +25,6 @@ const MIN_ROWS: usize = 10;
 /// without edge contrast splits it).
 const MERGE_GAP: i32 = 24;
 
-/// Reusable buffers of the band finder.
-#[derive(Debug, Clone, Default)]
-pub(super) struct BandScratch {
-    /// Per searched row: the larger of the two edge ratios, or `None` if
-    /// the row is outside the box.
-    ratios: Vec<Option<f32>>,
-}
-
 /// Mean of the BT.601 grey (OpenCV's `COLOR_RGB2GRAY`, fixed point) of
 /// reference columns `x0..x0 + STRIP` in one row of the crop.
 fn strip_mean(row: &[[u8; 3]], x0: i32) -> f32 {
@@ -45,17 +37,18 @@ fn strip_mean(row: &[[u8; 3]], x0: i32) -> f32 {
     sum as f32 / STRIP as f32
 }
 
-/// Finds the box bands of one frame in `crop` (the left panel; reference
-/// row `y` is crop row `y - origin_y`) and replaces `out` with them.
+/// Measures the box edges of one frame in `crop` (the left panel;
+/// reference row `y` is crop row `y - origin_y`): replaces `edges` with
+/// the larger of the two edge ratios of every searched row (below
+/// [`MAX_RATIO`] inside the box) and `out` with the box bands.
 pub(super) fn find_bands(
     crop: &RgbView<'_>,
     origin_y: i32,
-    scratch: &mut BandScratch,
+    edges: &mut Vec<f32>,
     out: &mut Vec<BoxBand>,
 ) {
     out.clear();
-    let ratios = &mut scratch.ratios;
-    ratios.clear();
+    edges.clear();
     for y in SEARCH_Y.0..SEARCH_Y.1 {
         let row = crop.row((y - origin_y) as u32).as_chunks::<3>().0;
         let inside_left = strip_mean(row, BOX_X.0 + EDGE_GAP);
@@ -64,16 +57,17 @@ pub(super) fn find_bands(
         let outside_right = strip_mean(row, BOX_X.1 + EDGE_GAP + 1);
         let left = (inside_left + RATIO_BIAS) / (outside_left + RATIO_BIAS);
         let right = (inside_right + RATIO_BIAS) / (outside_right + RATIO_BIAS);
-        ratios.push((left < MAX_RATIO && right < MAX_RATIO).then_some(left.max(right)));
+        edges.push(left.max(right));
     }
     let mut start = None;
-    for i in 0..=ratios.len() {
-        match (ratios.get(i).copied().flatten(), start) {
-            (Some(_), None) => start = Some(i),
-            (None, Some(s)) => {
+    for i in 0..=edges.len() {
+        let inside = edges.get(i).is_some_and(|&e| e < MAX_RATIO);
+        match (inside, start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
                 if i - s >= MIN_ROWS {
-                    let run = &ratios[s..i];
-                    let ratio = run.iter().flatten().sum::<f32>() / run.len() as f32;
+                    let run = &edges[s..i];
+                    let ratio = run.iter().sum::<f32>() / run.len() as f32;
                     push_merged(
                         out,
                         BoxBand {
