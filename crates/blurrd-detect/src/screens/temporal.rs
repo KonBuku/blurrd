@@ -9,12 +9,14 @@
 //! surface's gate made every frame of it a candidate: the panel was
 //! still on screen and only its native read failed (a filter or an
 //! effect over the panel); such a gap gets boxes only once a confirmed
-//! frame ends it. The
-//! surface is on from [`PRE_ROLL`] frames before a run's first confirmed
-//! frame to [`POST_ROLL`] frames after its last one. The pre-roll covers
-//! the first frames of a fade-in, while the panel is still too faint for
-//! its structure to be found; the post-roll covers the end of a fade-out
-//! and the encoder's ghosting of the last frame.
+//! frame ends it. In the same way, up to [`LEAD`] frames right before a
+//! run's first confirmed frame join the run if the gate made each of
+//! them a candidate (a panel that opened while its native read still
+//! failed). The surface is on from [`PRE_ROLL`] frames before a run's
+//! first frame to [`POST_ROLL`] frames after its last confirmed one. The
+//! pre-roll covers the first frames of a fade-in, while the panel is
+//! still too faint for its structure to be found; the post-roll covers
+//! the end of a fade-out and the encoder's ghosting of the last frame.
 //!
 //! While a surface is on, every name slot that showed ink in at least
 //! [`MIN_CONFIRMED`] confirmed frames of the run (seen so far within the
@@ -22,8 +24,9 @@
 //! faint to show ink while fading is still covered, an empty row (fewer
 //! players) stays unblurred, and a slot found in a single read (a
 //! marginal structure, such as a killer's strip read into gameplay above
-//! a combat report) blurs nothing. Slots are followed from frame to frame by position (the
-//! same kind, overlapping columns, centres at most [`MATCH_DY`] apart),
+//! a combat report) blurs nothing. Slots are followed from frame to frame
+//! by position (the same kind, overlapping columns, centres at most
+//! [`MATCH_DY`] apart),
 //! so a reader may miss a faint row or card without confusing the
 //! others. Positions are trusted only from reads in which the slot shows
 //! ink: a frame whose own read has the slot with ink uses that position;
@@ -69,6 +72,13 @@ pub const BRIDGE: u32 = PRE_ROLL + POST_ROLL;
 /// below [`LOOKAHEAD`], so that a held run is always closed or extended
 /// before a frame of its gap is decided.
 pub const HOLD: u32 = 30;
+/// Most frames right before a run's first confirmed frame that join the
+/// run while the gate holds each of them (measured: the native read of a
+/// death recap failed for the first 5 frames after it opened in a native
+/// 4:3 copy of a real recording). Kept short because the gate also fires
+/// on menus that can precede a surface. `LEAD + PRE_ROLL` is the longest
+/// a frame without a run waits for its decision.
+pub const LEAD: u32 = 12;
 /// Vertical growth, in reference pixels, of the boxes of frames without
 /// their own read (at least the largest slide the surfaces allow).
 pub const UNREAD_MARGIN: i32 = 20;
@@ -101,7 +111,9 @@ pub struct SurfaceFrame {
 
 #[derive(Debug, Clone)]
 struct Run {
-    first: u32,
+    /// The first frame of the run: its first confirmed frame, or the
+    /// first frame of the gate-held lead before it.
+    start: u32,
     last: u32,
     closed: bool,
     /// Whether the gate held every frame since `last`.
@@ -127,7 +139,7 @@ impl Slot {
 impl Run {
     /// Whether frame `f` gets boxes from this run (as far as it is known).
     fn covers(&self, f: u32) -> bool {
-        f + PRE_ROLL >= self.first && (!self.closed || f <= self.last + POST_ROLL)
+        f + PRE_ROLL >= self.start && (!self.closed || f <= self.last + POST_ROLL)
     }
 }
 
@@ -141,6 +153,9 @@ pub struct SurfaceTrack {
     runs: VecDeque<Run>,
     /// The newest frame pushed.
     newest: Option<u32>,
+    /// The first frame of the current streak of frames that the gate made
+    /// candidates (up to the newest frame), if the newest frame is one.
+    held_since: Option<u32>,
 }
 
 impl SurfaceTrack {
@@ -151,6 +166,7 @@ impl SurfaceTrack {
             pending: VecDeque::new(),
             runs: VecDeque::new(),
             newest: None,
+            held_since: None,
         }
     }
 
@@ -159,6 +175,11 @@ impl SurfaceTrack {
     /// `(frame, boxes)`.
     pub fn push(&mut self, frame: u32, data: SurfaceFrame, out: &mut Vec<(u32, Vec<Detection>)>) {
         self.newest = Some(frame);
+        if data.candidate || data.slots.is_some() {
+            self.held_since.get_or_insert(frame);
+        } else {
+            self.held_since = None;
+        }
         if let Some(run) = self.runs.back_mut()
             && !run.closed
         {
@@ -171,8 +192,16 @@ impl SurfaceTrack {
         if let Some(slots) = &data.slots {
             let joins = self.runs.back().is_some_and(|r| !r.closed);
             if !joins {
+                // The gate-held lead, but no frame a previous run covers.
+                let mut start = self
+                    .held_since
+                    .unwrap_or(frame)
+                    .max(frame.saturating_sub(LEAD));
+                if let Some(previous) = self.runs.back() {
+                    start = start.max(previous.last + POST_ROLL + 1);
+                }
                 self.runs.push_back(Run {
-                    first: frame,
+                    start,
                     last: frame,
                     closed: false,
                     held: true,
@@ -219,8 +248,14 @@ impl SurfaceTrack {
                 || match run {
                     // On: wait for the run's end or the lookahead.
                     Some(i) => self.runs[i].closed || newest >= f + LOOKAHEAD,
-                    // Off: unless a run starts within the pre-roll.
-                    None => newest >= f + PRE_ROLL,
+                    // Off: unless a run starts within the pre-roll, or a
+                    // run that starts later can still reach back to `f`
+                    // through a gate-held lead.
+                    None => {
+                        newest >= f + PRE_ROLL
+                            && (newest >= f + LEAD + PRE_ROLL
+                                || self.held_since.is_none_or(|h| f + PRE_ROLL < h))
+                    }
                 };
             if !ready {
                 break;
@@ -294,7 +329,7 @@ mod tests {
     use blurrd_core::{NameKind, RectI, Region};
 
     use super::{
-        BRIDGE, HOLD, LOOKAHEAD, POST_ROLL, PRE_ROLL, Slot, SurfaceFrame, SurfaceTrack,
+        BRIDGE, HOLD, LEAD, LOOKAHEAD, POST_ROLL, PRE_ROLL, Slot, SurfaceFrame, SurfaceTrack,
         UNREAD_MARGIN,
     };
 
@@ -348,6 +383,42 @@ mod tests {
             assert_eq!(out[f as usize].2, 110 - UNREAD_MARGIN);
         }
         assert_eq!(out[last as usize].2, 111 - UNREAD_MARGIN);
+    }
+
+    #[test]
+    fn covers_the_gate_held_lead_before_the_first_read() {
+        let roll = |c: &str, n: u32| c.repeat(n as usize);
+        // Five held frames before the first confirmed one, after gameplay.
+        let p = format!("{}{}CCCC{}", roll(".", 20), roll("h", 5), roll(".", 10));
+        let boxes = held_run(&p);
+        let first = 20 - PRE_ROLL as usize;
+        assert!(
+            boxes[first..29 + POST_ROLL as usize]
+                .iter()
+                .all(|&b| b == 1)
+        );
+        assert_eq!(boxes.iter().sum::<usize>(), 29 + POST_ROLL as usize - first);
+        // A longer held streak reaches back `LEAD` frames only.
+        let p = format!("{}{}CCCC{}", roll(".", 10), roll("h", 40), roll(".", 10));
+        let boxes = held_run(&p);
+        let start = 50 - (LEAD + PRE_ROLL) as usize;
+        assert_eq!(boxes[start - 1], 0);
+        assert!(boxes[start..54].iter().all(|&b| b == 1));
+        // A frame the gate did not hold ends the lead.
+        let p = format!(
+            "{}{}.{}CCCC{}",
+            roll(".", 20),
+            roll("h", 6),
+            roll("h", 3),
+            roll(".", 10)
+        );
+        let boxes = held_run(&p);
+        let start = 27 - PRE_ROLL as usize;
+        assert_eq!(boxes[start - 1], 0);
+        assert_eq!(boxes[start], 1);
+        // Held frames that no confirmed frame follows get no box.
+        let p = format!("{}{}", roll("h", 20), roll(".", 10));
+        assert_eq!(held_run(&p).iter().sum::<usize>(), 0);
     }
 
     #[test]
@@ -411,6 +482,17 @@ mod tests {
             track.push(i, frame(false, false, 0), &mut decided);
             assert!(i - decided.len() as u32 <= PRE_ROLL);
         }
+        // Frames the gate holds without a read may still join a run's lead.
+        let mut track = SurfaceTrack::new(Region::Scoreboard);
+        let mut decided = vec![];
+        let held = SurfaceFrame {
+            candidate: true,
+            slots: None,
+        };
+        for i in 0..50 {
+            track.push(i, held.clone(), &mut decided);
+            assert!(i - decided.len() as u32 <= LEAD + PRE_ROLL);
+        }
     }
 
     #[test]
@@ -462,11 +544,13 @@ mod tests {
         let p = format!("CCC{}{}", gap("h", 20), gap(".", 10));
         let boxes = held_run(&p);
         assert_eq!(boxes.iter().sum::<usize>(), 3 + POST_ROLL as usize);
-        // A held gap longer than `HOLD` is not bridged.
+        // A held gap longer than `HOLD` is not bridged: only the first
+        // run's post-roll and the second run's lead and pre-roll reach
+        // into it.
         let p = format!("CCC{}CCC", gap("h", HOLD + 1));
         assert_eq!(
             held_run(&p).iter().filter(|&&b| b == 0).count(),
-            (HOLD + 1 - PRE_ROLL - POST_ROLL) as usize
+            (HOLD + 1 - POST_ROLL - LEAD - PRE_ROLL) as usize
         );
     }
 }
