@@ -111,25 +111,34 @@ const MIN_STRIP_TOP_LEFT: f32 = 0.8;
 const STRIP_MARGIN: i32 = 3;
 /// Most cards read.
 const MAX_CARDS: usize = 8;
-/// Half the height of the rows the gate reads around the centre (every
-/// recap covers at least y 389..691).
+/// Half the height of the rows the gate reads of the panel's edges around
+/// the centre (every recap covers at least y 389..691).
 const GATE_HALF: i32 = 90;
+/// The rows in which the gate looks for the cards' outlines. Measured on
+/// real recaps: the cards span y 340..630 in a five-card report shown
+/// while alive and y 460..692 under the "killed by" part with four cards
+/// (a fifth card would end near 715). The weapon list below (from y 730)
+/// has vertical edges near the outlines' columns in every frame.
+const GATE_CARDS: (i32, i32) = (320, 720);
 /// Half the width of the strips sampled around each card outline.
 const OUTLINE_HALF: i32 = 6;
 
-/// The gate of the death recap: the panel's left and right edges and the
-/// cards' outlines around the panel's vertical centre, which every recap
-/// covers whatever its height (overlays such as the spectator's outline
-/// effect can hide some of them).
+/// The gate of the death recap: the panel's left and right edges around
+/// the panel's vertical centre, which every recap covers whatever its
+/// height, and the cards' outlines wherever a card lies (a combat report
+/// with one card covers only 50 rows; overlays such as the spectator's
+/// outline effect can hide some edges, and the translucent panel's edges
+/// fade over a dark background).
 pub const GATE: GateSpec = GateSpec {
     region: Region::DeathRecap,
     anchor: Anchor::Right,
     vertical: &[
         (PANEL_X0, PANEL_CY - GATE_HALF, PANEL_CY + GATE_HALF),
         (PANEL_X1, PANEL_CY - GATE_HALF, PANEL_CY + GATE_HALF),
-        (CARD_X.0, PANEL_CY - GATE_HALF, PANEL_CY + GATE_HALF),
-        (CARD_X.1, PANEL_CY - GATE_HALF, PANEL_CY + GATE_HALF),
     ],
+    outlines: &[CARD_X.0, CARD_X.1],
+    outline_span: GATE_CARDS,
+    outline_rows: CARD_H.0,
     horizontal: &[],
     slide: 0,
     threshold: GATE_THRESHOLD,
@@ -479,8 +488,9 @@ mod tests {
     use blurrd_testkit::hud::screen::ScreenTiming;
     use blurrd_testkit::{Background, FontSet, Layout, Palette, Scene};
 
-    use super::{CARD_PITCH, CARD_X, FILL_H, RecapReader, STRIP_X, split_run};
+    use super::{CARD_PITCH, CARD_X, FILL_H, GATE, RecapReader, STRIP_X, split_run};
     use crate::image::RgbView;
+    use crate::screens::gate::Gates;
     use crate::screens::sample::{FrameView, ScreenMap};
 
     #[test]
@@ -528,6 +538,69 @@ mod tests {
             .expect("the killer's name slot");
         assert!(killer.ink);
         assert!(killer.rect.y0 <= strip_top && killer.rect.y1 >= strip_top + SECTIONS[2]);
+    }
+
+    #[test]
+    fn the_gate_holds_a_one_card_report_over_dark_changing_scenes() {
+        // A combat report with one card, without the "killed by" part (the
+        // report shown while alive), over dark scenes that change between
+        // frames, at full brightness and darkened like a gamma filter.
+        let spec = RecapSpec {
+            killer: "Killer Name".to_owned(),
+            killer_team: Team::Enemy,
+            agent: "Agent".to_owned(),
+            report: vec!["Opponent".to_owned()],
+            timeline: 4,
+            timing: ScreenTiming::instant(0, 4),
+        };
+        let report_top = spec.top() + SECTIONS[0] + SECTIONS[1] + SECTIONS[2];
+        let mut gates = Gates::new();
+        let mut reader = RecapReader::new();
+        for seed in 0..6 {
+            let background = Background::Noise {
+                seed,
+                base: [44, 46, 50],
+                amp: 30.0,
+                cell: 16,
+            };
+            let scene = |recap: bool| {
+                let s = Scene::new(Layout::reference(), background, Palette::DEFAULT, 2);
+                let s = if recap {
+                    s.with_recap(&FontSet::latin(), spec.clone())
+                } else {
+                    s
+                };
+                s.render(1).frame
+            };
+            let plain = scene(false);
+            for dark in [1.0, 0.5] {
+                let mut frame = scene(true);
+                for y in 0..report_top {
+                    for x in 1500..1920 {
+                        frame.set(x, y, plain.pixel(x, y).unwrap());
+                    }
+                }
+                frame.multiply_rect(frame.bounds(), dark);
+                let view = FrameView::native(
+                    RgbView::new(
+                        frame.data(),
+                        frame.width(),
+                        frame.height(),
+                        3 * frame.width() as usize,
+                    )
+                    .unwrap(),
+                );
+                // At the gate's step the native view samples the same cell
+                // means as the quarter-scale frame.
+                let signal = gates.evaluate(&GATE, &view, &ScreenMap::REFERENCE);
+                assert!(signal.candidate, "seed {seed} x{dark}: {}", signal.score);
+                let slots = reader.read(&view, &ScreenMap::REFERENCE).unwrap();
+                assert!(
+                    slots.iter().any(|s| s.rect.x0 > CARD_X.0 && s.ink),
+                    "seed {seed} x{dark}: {slots:?}"
+                );
+            }
+        }
     }
 
     #[test]

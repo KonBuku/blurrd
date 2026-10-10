@@ -97,6 +97,80 @@ pub fn vertical(plane: &RefPlane, x: i32, y0: i32, y1: i32, search: i32) -> (f32
     best
 }
 
+/// Running counts of thin vertical line cells (an edge into the cell and
+/// one out of it within two cells) of the column at reference x `x` over
+/// reference rows `y0..y1`, for pairs of neighbouring offsets up to
+/// `search` cells off: `out[k][i]` is the number of the first `i` rows
+/// with a line at offset `k - search` or `k - search + 1`. A pair, not a
+/// single cell, because an outline one pixel wide falls on either side of
+/// a cell border depending on the column's phase in the grid. Input of
+/// [`window_score`].
+pub fn line_prefixes(
+    plane: &RefPlane,
+    x: i32,
+    y0: i32,
+    y1: i32,
+    search: i32,
+    out: &mut Vec<Vec<u32>>,
+) {
+    let (cx, cy0) = plane.cell(x, y0);
+    let (_, cy1) = plane.cell(x, y1);
+    out.resize_with((2 * search).max(1) as usize, Vec::new);
+    for (counts, d) in out.iter_mut().zip(-search..) {
+        counts.clear();
+        counts.push(0);
+        let mut sum = 0;
+        for cy in cy0..cy1 {
+            let edge_at = |c: i32| {
+                is_edge(
+                    plane.at(c - 2, cy),
+                    plane.at(c - 1, cy),
+                    plane.at(c, cy),
+                    plane.at(c + 1, cy),
+                )
+            };
+            let line_at = |c: i32| edge_at(c) && (edge_at(c + 1) || edge_at(c + 2));
+            sum += u32::from(line_at(cx + d) || line_at(cx + d + 1));
+            counts.push(sum);
+        }
+    }
+}
+
+/// Joint score of thin vertical lines that lie side by side anywhere in
+/// a range of rows (the left and right outlines of a card in a list of
+/// any length). `columns` holds the [`line_prefixes`] of every column,
+/// over the same rows and offsets. Over all windows of `n` consecutive
+/// cells, the largest share of line cells of the weakest column in that
+/// window, the best over the offset pairs (common to all columns). An
+/// element whose position changes scores as high as one that fills the
+/// whole range, while the border of a wide shape, a line next to only
+/// one of the columns or a row of lines at another spacing scores low.
+pub fn window_score(columns: &[Vec<Vec<u32>>], n: usize) -> f32 {
+    let Some(first) = columns.first() else {
+        return 0.0;
+    };
+    let len = first.first().map_or(0, |p| p.len().saturating_sub(1));
+    let n = n.min(len);
+    if n == 0 {
+        return 0.0;
+    }
+    let mut best = 0;
+    for k in 0..first.len() {
+        let most = (n..=len)
+            .map(|end| {
+                columns
+                    .iter()
+                    .filter_map(|c| c.get(k).map(|p| p[end] - p[end - n]))
+                    .min()
+                    .unwrap_or(0)
+            })
+            .max()
+            .unwrap_or(0);
+        best = best.max(most);
+    }
+    best as f32 / n as f32
+}
+
 /// Edge cells of the horizontal line between cell rows `cy - 1` and `cy`
 /// in columns `cx0..cx1` (cells outside the plane are black).
 fn horizontal_at(plane: &RefPlane, cy: i32, cx0: i32, cx1: i32) -> f32 {
@@ -181,7 +255,7 @@ pub fn horizontal_set(plane: &RefPlane, edges: &[(i32, i32, i32)], search: i32) 
 mod tests {
     use blurrd_core::RectI;
 
-    use super::{horizontal_set, vertical};
+    use super::{horizontal_set, line_prefixes, vertical, window_score};
     use crate::image::RgbView;
     use crate::screens::sample::{Anchor, FrameView, RefPlane, ScreenMap};
 
@@ -224,6 +298,27 @@ mod tests {
         assert_eq!(horizontal_set(&p, &[(12, 18, 62)], 0), (1.0, 0));
         assert_eq!(horizontal_set(&p, &[(8, 18, 62)], 6), (1.0, 3));
         assert!(vertical(&p, 40, 14, 46, 2).0 < 0.01);
+    }
+
+    #[test]
+    fn lines_side_by_side_score_together_and_alone_not_at_all() {
+        // Two thin bright lines at x 20 and 40 in rows 10..30 of a flat
+        // 64 x 48 frame, at one-pixel cells.
+        let mut data = vec![60u8; 64 * 48 * 3];
+        for y in 10..30 {
+            for x in [20usize, 40] {
+                data[3 * (y * 64 + x)..3 * (y * 64 + x) + 3].fill(200);
+            }
+        }
+        let p = plane(&data);
+        let mut left = vec![];
+        let mut right = vec![];
+        let mut empty = vec![];
+        line_prefixes(&p, 20, 0, 48, 1, &mut left);
+        line_prefixes(&p, 40, 0, 48, 1, &mut right);
+        line_prefixes(&p, 50, 0, 48, 1, &mut empty);
+        assert!((window_score(&[left.clone(), right], 20) - 1.0).abs() < f32::EPSILON);
+        assert!(window_score(&[left, empty], 10) < f32::EPSILON);
     }
 
     #[test]

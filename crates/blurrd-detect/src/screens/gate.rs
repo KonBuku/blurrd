@@ -3,8 +3,9 @@
 //! The gate reads the quarter-scale frame only (plan 5.4,
 //! `HudRoi::Screen`), so it runs on every frame of normal gameplay at a
 //! small cost. Each surface is described by the straight edges of its
-//! panel ([`GateSpec`]): vertical edges that stay in place and horizontal
-//! edges that move together when the panel slides. The gate samples the
+//! panel ([`GateSpec`]): vertical edges that stay in place, outlines of
+//! cards that may sit anywhere in a range of rows, and horizontal edges
+//! that move together when the panel slides. The gate samples the
 //! surface's bounding box on a grid of [`GATE_STEP`] reference pixels
 //! (one quarter-scale pixel at 1080p) and scores every edge
 //! ([`super::edges`]). A frame whose score reaches the surface's
@@ -33,6 +34,16 @@ pub struct GateSpec {
     pub anchor: Anchor,
     /// Vertical edges `(x, y0, y1)` that do not move.
     pub vertical: &'static [(i32, i32, i32)],
+    /// Columns of thin vertical lines that run side by side anywhere
+    /// within [`GateSpec::outline_span`] (the left and right outlines of
+    /// a list of cards of any length). They count as one edge each, all
+    /// with the score of the weakest of them in their best window of
+    /// [`GateSpec::outline_rows`] rows ([`edges::window_score`]).
+    pub outlines: &'static [i32],
+    /// The rows `(y0, y1)` in which [`GateSpec::outlines`] may lie.
+    pub outline_span: (i32, i32),
+    /// Reference rows over which [`GateSpec::outlines`] are scored.
+    pub outline_rows: i32,
     /// Horizontal edges `(y, x0, x1)` that move together vertically.
     pub horizontal: &'static [(i32, i32, i32)],
     /// How far the panel may be off its place (calibration error or a
@@ -45,27 +56,44 @@ pub struct GateSpec {
 impl GateSpec {
     /// The score of the structure in `view`: the mean over all edges, the
     /// horizontal ones at their best common offset. Returns the score and
-    /// the vertical offset of the panel in reference pixels. `vertical`
-    /// and `horizontal` are reused sampling buffers.
+    /// the vertical offset of the panel in reference pixels. `vertical`,
+    /// `horizontal` and `counts` are reused buffers.
     fn score(
         &self,
         view: &FrameView<'_>,
         map: &ScreenMap,
         vertical: &mut RefPlane,
         horizontal: &mut RefPlane,
+        counts: &mut Vec<Vec<Vec<u32>>>,
     ) -> (f32, i32) {
         let mut total = 0.0;
+        // The edge functions read two cells left and one right of the
+        // line, at up to one cell off.
+        let strip = |x: i32, y0: i32, y1: i32| RectI {
+            x0: x - 4 * GATE_STEP,
+            y0,
+            x1: x + 3 * GATE_STEP,
+            y1,
+        };
         for &(x, y0, y1) in self.vertical {
-            // `edges::vertical` reads two cells left and one right of the
-            // line, at up to one cell off.
-            let strip = RectI {
-                x0: x - 4 * GATE_STEP,
-                y0,
-                x1: x + 3 * GATE_STEP,
-                y1,
-            };
-            vertical.sample(view, map, self.anchor, strip, GATE_STEP);
+            vertical.sample(view, map, self.anchor, strip(x, y0, y1), GATE_STEP);
             total += edges::vertical(vertical, x, y0, y1, 1).0;
+        }
+        if !self.outlines.is_empty() {
+            let (y0, y1) = self.outline_span;
+            counts.resize_with(self.outlines.len(), Vec::new);
+            for (&x, column) in self.outlines.iter().zip(counts.iter_mut()) {
+                // A thin line's test reads up to three cells right of it.
+                let rect = RectI {
+                    x1: x + 5 * GATE_STEP,
+                    ..strip(x, y0, y1)
+                };
+                vertical.sample(view, map, self.anchor, rect, GATE_STEP);
+                edges::line_prefixes(vertical, x, y0, y1, 1, column);
+            }
+            let n = (self.outline_rows / GATE_STEP).max(1) as usize;
+            let score = edges::window_score(&counts[..self.outlines.len()], n);
+            total += score * self.outlines.len() as f32;
         }
         let mut dy = 0;
         if let Some(rows) = self.horizontal_rows() {
@@ -75,7 +103,7 @@ impl GateSpec {
             total += h * self.horizontal.len() as f32;
             dy = offset;
         }
-        let n = (self.vertical.len() + self.horizontal.len()).max(1);
+        let n = (self.vertical.len() + self.outlines.len() + self.horizontal.len()).max(1);
         (total / n as f32, dy)
     }
 
@@ -121,6 +149,8 @@ pub struct GateSignal {
 pub struct Gates {
     vertical: RefPlane,
     horizontal: RefPlane,
+    /// Line counts of the outline columns ([`edges::line_prefixes`]).
+    counts: Vec<Vec<Vec<u32>>>,
 }
 
 impl Gates {
@@ -136,7 +166,13 @@ impl Gates {
         view: &FrameView<'_>,
         map: &ScreenMap,
     ) -> GateSignal {
-        let (score, offset) = spec.score(view, map, &mut self.vertical, &mut self.horizontal);
+        let (score, offset) = spec.score(
+            view,
+            map,
+            &mut self.vertical,
+            &mut self.horizontal,
+            &mut self.counts,
+        );
         GateSignal {
             score,
             candidate: score >= spec.threshold,
