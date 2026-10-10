@@ -4,6 +4,7 @@
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
     "THIRD-PARTY-NOTICES.md",
+    "apps/desktop/src/features/about/licenses.json",
     "pnpm-lock.yaml",
     "**/src-tauri/gen/**",
     "apps/desktop/src/bindings/**",

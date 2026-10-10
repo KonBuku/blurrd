@@ -26,6 +26,7 @@ Cargo.lock             linguist-generated=true
 pnpm-lock.yaml         linguist-generated=true
 CHANGELOG.md           linguist-generated=true
 THIRD-PARTY-NOTICES.md linguist-generated=true
+apps/desktop/src/features/about/licenses.json linguist-generated=true
 docs/schema/**         linguist-generated=true
 apps/desktop/src/bindings/**  linguist-generated=true
 apps/desktop/src-tauri/gen/** linguist-generated=true
