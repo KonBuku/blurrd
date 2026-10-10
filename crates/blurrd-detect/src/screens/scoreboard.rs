@@ -72,6 +72,16 @@ const MIN_LEFT_EDGE: f32 = 0.6;
 const MIN_WIDE_LINES: f32 = 0.6;
 /// The x range of those lines.
 const WIDE_X: (i32, i32) = (CELL_X.1 + 4, PANEL_X1 - 8);
+/// The one-block (deathmatch) layout needs at least this score of its own
+/// row boundaries after the first five rows ...
+const MIN_BLOCK: f32 = 0.5;
+/// ... and must beat the 5v5 layout's boundaries by this margin. On real
+/// 5v5 boards the block's boundaries score 0.20 to 0.35 (the edges of the
+/// round-history strip and its icons); at 720p the enemy rows' 1 px
+/// separators fade and the 5v5 boundaries fell to 0.26 to 0.28 in single
+/// frames, so a plain comparison picked the block layout. The 5v5 layout
+/// is the verified one and wins every close call.
+const BLOCK_MARGIN: f32 = 0.2;
 /// The structure lines every board has: the header band's edges and the
 /// boundaries of the first five rows, `(y, x0, x1)` inside the native
 /// zone. Measured edge scores on a real board: 0.73, 1.0, 0.72, 0.67,
@@ -185,10 +195,10 @@ impl ScoreboardReader {
                 .collect();
             edges::horizontal_set(&self.plane, &lines, 0).0
         };
-        let tops = if boundaries(&teams) >= boundaries(&block) {
-            teams
-        } else {
+        let tops = if is_block(boundaries(&teams), boundaries(&block)) {
             block
+        } else {
+            teams
         };
         let slots = tops
             .iter()
@@ -233,9 +243,23 @@ impl ScoreboardReader {
     }
 }
 
+/// Whether the row boundaries after the first five rows show the
+/// one-block layout: `teams` and `block` are the scores of the two
+/// layouts' boundaries.
+fn is_block(teams: f32, block: f32) -> bool {
+    block >= MIN_BLOCK && block >= teams + BLOCK_MARGIN
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{FIRST_ROW, HEADER_TOP, PANEL_X0, PANEL_X1, PITCH, ScoreboardReader, TEAM_ROWS};
+    use super::{
+        FIRST_ROW, HEADER_TOP, PANEL_X0, PANEL_X1, PITCH, ScoreboardReader, TEAM_ROWS, is_block,
+    };
+    use blurrd_testkit::hud::killfeed::Team;
+    use blurrd_testkit::hud::scoreboard::{ScoreRow, ScoreboardMode, ScoreboardSpec};
+    use blurrd_testkit::hud::screen::ScreenTiming;
+    use blurrd_testkit::{Background, FontSet, Layout, NameStyle, Palette, Rng, Scene, synth_name};
+
     use crate::image::RgbView;
     use crate::screens::gate::GateSignal;
     use crate::screens::sample::{FrameView, ScreenMap};
@@ -273,5 +297,58 @@ mod tests {
         assert!(read(&board(PANEL_X1)));
         // The same lines only over the name columns are not a board.
         assert!(!read(&board(super::CELL_X.1 + 4)));
+    }
+
+    #[test]
+    fn close_calls_keep_the_five_versus_five_layout() {
+        // Measured on a real 5v5 board at 720p.
+        assert!(!is_block(0.26, 0.29));
+        assert!(!is_block(0.9, 0.3));
+        // A one-block board shows its own boundaries only.
+        assert!(is_block(0.3, 0.9));
+        assert!(!is_block(0.1, 0.4));
+    }
+
+    /// The number of name slots read from a synthetic board in `mode` at
+    /// 1280 x 720.
+    fn slots_at_720p(mode: ScoreboardMode, rows: usize) -> usize {
+        let mut rng = Rng::new(5);
+        let rows = (0..rows)
+            .map(|i| ScoreRow {
+                name: synth_name(&mut rng, NameStyle::Latin(10)),
+                team: if i < 5 { Team::Ally } else { Team::Enemy },
+                own: i == 0,
+                dead: i == 3,
+            })
+            .collect();
+        let layout = Layout::wide(1280, 720);
+        let scene = Scene::new(layout, Background::noise(5), Palette::DEFAULT, 2).with_scoreboard(
+            &FontSet::latin(),
+            ScoreboardSpec {
+                rows,
+                mode,
+                timing: ScreenTiming::instant(0, 4),
+            },
+        );
+        let frame = scene.render(1).frame;
+        let view = FrameView::native(
+            RgbView::new(
+                frame.data(),
+                frame.width(),
+                frame.height(),
+                3 * frame.width() as usize,
+            )
+            .unwrap(),
+        );
+        let map = ScreenMap::from(&layout.geometry());
+        ScoreboardReader::new()
+            .read(&view, &map, &GateSignal::default())
+            .map_or(0, |slots| slots.len())
+    }
+
+    #[test]
+    fn picks_the_layout_at_720p() {
+        assert_eq!(slots_at_720p(ScoreboardMode::Teams, 10), 10);
+        assert_eq!(slots_at_720p(ScoreboardMode::Deathmatch, 14), 14);
     }
 }
