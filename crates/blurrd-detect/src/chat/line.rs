@@ -84,12 +84,6 @@ const PAREN_COLUMNS: u32 = 3;
 /// above and below: trimming a line drops its sparse descender rows, and
 /// parentheses reach into them.
 const SHAPE_MARGIN: (u32, u32) = (2, 3);
-/// A line without a colon whose name has no colour of its own (system
-/// lines: "(System) Name has abandoned the match"; black-and-white video)
-/// is covered from the name start for this many pixels, or to the end of
-/// the line: the widest name (16 characters, about 140 px) plus a margin
-/// for wide glyphs.
-pub(super) const SAFE_NAME_WIDTH: u32 = 160;
 /// A colour is chromatic if `(max - min) / max` of its channels reaches
 /// this.
 const MIN_SATURATION: f32 = 0.18;
@@ -119,9 +113,12 @@ pub enum NameEnd {
     /// found, and the text after the name is white.
     Colour,
     /// Not found: the line has no colon and the name has no colour of its
-    /// own (system lines, black-and-white video). The name is covered from
-    /// its start for the widest name or to the end of the line, which
-    /// covers names of several words (Safe geometry).
+    /// own (system and broadcast phrases, black-and-white video). The line
+    /// is covered from the name start to its end, and so is a wrapped
+    /// continuation of it (Safe geometry): names of several words stay
+    /// covered, and so does a second name in the phrase, as in
+    /// "(Broadcast) Name bought the Vandal for Other!", whatever the
+    /// client language puts where.
     Safe,
 }
 
@@ -151,8 +148,8 @@ pub(super) struct NameLine {
     pub(super) start: NameStart,
     /// How the name's end was found.
     pub(super) end: NameEnd,
-    /// The columns of the text after the name (the message or the system
-    /// phrase), if there is any.
+    /// The columns of the text after the name (the message), if there is
+    /// any.
     pub(super) message: Option<(i32, i32)>,
 }
 
@@ -251,6 +248,14 @@ pub(super) fn find_names<F>(
             .map(|row| row.iter().map(|&v| u32::from(v > INK_MIN)).sum::<u32>()),
     );
     let mut prev_top = i32::MIN / 2;
+    // The name found in the last line, with the index of its band: emitted
+    // once the next line shows whether it continues that line.
+    let mut pending: Option<(NameLine, usize)> = None;
+    let mut flush = |pending: &mut Option<(NameLine, usize)>| {
+        if let Some((name, band)) = pending.take() {
+            emit(name, &bands[band]);
+        }
+    };
     let mut parts = Vec::new();
     let candidates = runs(profile.iter().map(|&p| p >= ROW_MIN_INK));
     for run in candidates.into_iter().filter(|r| r.len() >= MIN_RUN) {
@@ -276,15 +281,38 @@ pub(super) fn find_names<F>(
                 continue;
             }
             let top = area.y0 + a as i32;
+            let x = |c: u32| area.x0 + c as i32;
             if !joined {
                 let wrapped = top - prev_top <= WRAP_MAX;
                 prev_top = top;
                 if wrapped {
+                    // The continuation of a line covered to its end is
+                    // covered with it: a phrase can carry a second name
+                    // onto it. One box over both lines, so the line is
+                    // followed as one.
+                    if let Some((name, _)) =
+                        pending.as_mut().filter(|(n, _)| n.end == NameEnd::Safe)
+                    {
+                        let line = LineInk::new(scratch, crop, origin, a, b);
+                        if let (Some(first), Some(last)) =
+                            (line.segments.first(), line.segments.last())
+                        {
+                            let (_, nb) = line
+                                .extent(first.start, last.end - 1)
+                                .map_or((a, b), |(na, nb)| (na, nb.max(b)));
+                            name.rows.1 = name.rows.1.max(area.y0 + nb as i32 + 1);
+                            name.cols = (
+                                name.cols.0.min(x(first.start)),
+                                name.cols.1.max(x(last.end - 1) + 1),
+                            );
+                        }
+                    }
                     continue;
                 }
             }
+            flush(&mut pending);
             let centre = area.y0 as f32 + (a + b) as f32 / 2.0;
-            let Some(band) = bands.iter().find(|band| {
+            let Some(band) = bands.iter().position(|band| {
                 band.y0 as f32 - BAND_TOLERANCE <= centre
                     && centre <= (band.y1 - 1) as f32 + BAND_TOLERANCE
             }) else {
@@ -292,26 +320,24 @@ pub(super) fn find_names<F>(
             };
             let line = LineInk::new(scratch, crop, origin, a, b);
             if let Some(read) = read_name(&line) {
-                let x = |c: u32| area.x0 + c as i32;
                 // The name's own strokes may reach beyond the line's rows,
                 // which were trimmed where the line has little ink (faint
                 // capitals at the top, descenders at the bottom).
                 let (na, nb) = line
                     .extent(read.name.0, read.name.1)
                     .map_or((a, b), |(na, nb)| (na.min(a), nb.max(b)));
-                emit(
-                    NameLine {
-                        rows: (area.y0 + na as i32, area.y0 + nb as i32 + 1),
-                        cols: (x(read.name.0), x(read.name.1) + 1),
-                        start: read.start,
-                        end: read.end,
-                        message: read.message.map(|(m0, m1)| (x(m0), x(m1) + 1)),
-                    },
-                    band,
-                );
+                let name = NameLine {
+                    rows: (area.y0 + na as i32, area.y0 + nb as i32 + 1),
+                    cols: (x(read.name.0), x(read.name.1) + 1),
+                    start: read.start,
+                    end: read.end,
+                    message: read.message.map(|(m0, m1)| (x(m0), x(m1) + 1)),
+                };
+                pending = Some((name, band));
             }
         }
     }
+    flush(&mut pending);
     scratch.profile = profile;
 }
 
@@ -586,16 +612,12 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
             // may be too faint to be seen.
             (nx1, next.map_or(nx1, |n| n - 1), NameEnd::Colour)
         } else {
-            // Where the prefix runs into the name, the name may start as
-            // far as the widest prefix allows, and the colour run includes
-            // the rest of the prefix, so it says nothing about the name's
-            // end.
-            let reach = match start {
-                NameStart::Shortest => PREFIX_MAX_WIDTH - MIN_PREFIX_WIDTH + SAFE_NAME_WIDTH,
-                NameStart::Parenthesis | NameStart::Word => SAFE_NAME_WIDTH,
-            };
-            let nx1 = (nx0 + reach - 1).min(last_ink);
-            (nx1, nx1, NameEnd::Safe)
+            // To the end of the line: a system or broadcast phrase can
+            // name a second player anywhere in it ("bought the Vandal for
+            // Other!"), and where the prefix runs into the name, the colour
+            // run includes the rest of the prefix, so it says nothing about
+            // the name's end.
+            (last_ink, last_ink, NameEnd::Safe)
         }
     };
     let (mut nx1, mut cover_end, mut end) = name_end(start, nx0);

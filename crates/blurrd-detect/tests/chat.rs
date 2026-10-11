@@ -912,3 +912,123 @@ fn tracker_covers_the_open_chat() {
         );
     }
 }
+
+/// A purchase broadcast: `buyer` bought a weapon for `recipient`, both
+/// names in white, the recipient on a continuation line if `wrap`.
+fn purchase(
+    rng: &mut Rng,
+    buyer: NameStyle,
+    recipient: NameStyle,
+    wrap: bool,
+    time: u32,
+) -> ChatMessage {
+    ChatMessage {
+        name: synth_name(rng, buyer),
+        text: synth_name(rng, recipient),
+        role: None,
+        wrap,
+        ..message(rng, Channel::Purchase, buyer, time)
+    }
+}
+
+#[test]
+fn covers_both_names_of_a_purchase_broadcast() {
+    // "(Broadcast) Buyer bought the Vandal for Recipient!": no colon and
+    // white names, so the line is covered to its end (Safe geometry),
+    // which covers the second name wherever the language puts it, on a
+    // continuation line too.
+    let mut totals = OverBlurTotals::default();
+    let mut names = 0;
+    for (k, language) in Language::ALL.into_iter().enumerate() {
+        for (b, background) in BACKGROUNDS.into_iter().enumerate() {
+            for (p, palette) in [Palette::DEFAULT, Palette::ALL[1]].into_iter().enumerate() {
+                let seed = (9 * k + 3 * b + p) as u64;
+                let mut rng = Rng::new(1100 + seed);
+                let buyer = NameStyle::LATIN_MIX[(seed % 7) as usize];
+                let recipient = NameStyle::LATIN_MIX[((seed + 3) % 7) as usize];
+                let messages = vec![
+                    message(&mut rng, Channel::Team, NameStyle::Latin(7), 0),
+                    purchase(&mut rng, buyer, recipient, seed.is_multiple_of(3), 1),
+                ];
+                let fx = chat_fixture(language, messages, background, palette);
+                let check = check_frame(&fx);
+                let context = format!("{language:?}, background {b}, {}", palette.name);
+                check.assert_clean(&context);
+                assert_eq!(check.items, 3, "{context}");
+                assert!(check.safe, "{context}: {:?}", check.detections);
+                totals.add(&check);
+                names += check.items;
+            }
+        }
+    }
+    totals.assert_within_gates("purchase broadcasts");
+    assert_eq!(names, 3 * 3 * 2 * 3);
+}
+
+/// Frames of [`purchases`].
+const PURCHASE_FRAMES: u32 = 200;
+
+/// A chat sequence with purchase broadcasts, one of them wrapped, pushed
+/// up by later messages and fading out.
+fn purchases(rng: &mut Rng, language: Language) -> ChatSpec {
+    let messages = vec![
+        message(rng, Channel::All, NameStyle::Latin(8), 2),
+        purchase(rng, NameStyle::Latin(12), NameStyle::Latin(16), false, 30),
+        purchase(rng, NameStyle::TwoWord, NameStyle::Latin(5), true, 70),
+        message(rng, Channel::Team, NameStyle::Latin(6), 100),
+    ];
+    ChatSpec {
+        life: 60,
+        ..ChatSpec::new(language, messages)
+    }
+}
+
+#[test]
+fn tracker_covers_both_names_of_a_purchase_broadcast() {
+    let runs = [
+        (0, 0, None),
+        (1, 1, None),
+        (2, 2, None),
+        (0, 2, Some(Filter::Saturation(0.0))),
+        (
+            1,
+            0,
+            Some(Filter::Levels {
+                brightness: -0.12,
+                contrast: 0.85,
+            }),
+        ),
+    ];
+    let checks = in_parallel(&runs, |&(k, b, filter)| {
+        let mut rng = Rng::new(1200 + 3 * k as u64 + b as u64);
+        check_sequence(
+            purchases(&mut rng, Language::ALL[k]),
+            BACKGROUNDS[b],
+            PURCHASE_FRAMES,
+            filter,
+            None,
+        )
+    });
+    for ((k, b, filter), check) in runs.into_iter().zip(checks) {
+        let context = format!("{:?}, background {b}, {filter:?}", Language::ALL[k]);
+        assert!(check.leaks.is_empty(), "{context}: {:?}", check.leaks);
+        // Boxes outlive their line by at most the post-roll (four lines),
+        // and a line pops in at most two frames early. The wrapped
+        // broadcast puts the oldest lines above the grid of three, where
+        // gameplay texture can keep a faded box part below 0.97 and hold
+        // a line until FADE_MAX frames after its band (two lines fade out
+        // there on their own), as in the fourth-line test. With crushed
+        // levels, a push above the grid can be taken one step too far,
+        // which keeps a box one step above the line until it fades out.
+        assert!(
+            check.false_positives <= 4 * POST_ROLL as usize + 3 * FADE_MAX as usize + 2,
+            "{context}: {} false-positive boxes",
+            check.false_positives
+        );
+        assert!(
+            check.names >= 6 * 60,
+            "{context}: {} name-frames",
+            check.names
+        );
+    }
+}

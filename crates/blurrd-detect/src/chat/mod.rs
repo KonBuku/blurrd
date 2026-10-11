@@ -9,6 +9,7 @@
 //! (All) SenderName: message text
 //! (Team) Sender Name: message text
 //! (System) PlayerName has abandoned the match
+//! (Broadcast) PlayerName bought the Vandal for Other!
 //! ```
 //!
 //! A new message appears at the bottom line within one frame and pushes
@@ -35,10 +36,12 @@
 //! message are white). Where either end stays uncertain, the box takes
 //! Safe geometry: a prefix that runs into the name covers the name from the
 //! end of the shortest prefix ([`NameStart::Shortest`]), and a line without
-//! colon and name colour, such as a system line ("(System) Name has
-//! abandoned the match", white name and phrase), is covered from the name
-//! start for the widest name ([`NameEnd::Safe`]), so names of several words
-//! stay covered in every language.
+//! colon and name colour, such as a system or broadcast phrase (white
+//! names and phrase), is covered from the name start to the end of the
+//! line, a wrapped continuation included ([`NameEnd::Safe`]): names of
+//! several words stay covered, and so does a second name in the phrase
+//! ("bought the Vandal for Other!"), wherever the client language
+//! puts it.
 
 mod band;
 mod ink;
@@ -118,14 +121,17 @@ pub struct ChatLine {
     pub bottom: i32,
     /// The box band the line lies in.
     pub band: BoxBand,
-    /// The sender name's text bounds.
+    /// The sender name's text bounds; with [`NameEnd::Safe`], those of the
+    /// rest of the line and of its wrapped continuation too.
     pub name: RectI,
     /// How the start of the name was found.
     pub start: NameStart,
     /// How the end of the name was found.
     pub end: NameEnd,
     /// The text after the name on the same line: the message (from the
-    /// colon) or the system phrase. Used when messages are blurred too.
+    /// colon), or the text after a name end found from its colour. `None`
+    /// for a line covered to its end ([`NameEnd::Safe`]). Used when
+    /// messages are blurred too.
     pub message: Option<RectI>,
 }
 

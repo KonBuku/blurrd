@@ -64,9 +64,12 @@ use blurrd_core::RectI;
 
 use crate::detection::Detection;
 
-use super::line::SAFE_NAME_WIDTH;
 use super::{ChatDetector, ChatLine, INK_X, NameEnd, NameStart, SEARCH_Y, name_detection};
 
+/// A line not read for more than [`HOLD_MAX`] frames is covered for at
+/// least this many pixels from its start: the widest name (16 characters,
+/// about 140 px) plus a margin for wide glyphs.
+const SAFE_NAME_WIDTH: u32 = 160;
 /// The chat box is visible at a line while the median edge ratio over the
 /// line's rows is below this (plan 7.3: the chat ends when the band ratio
 /// is 0.97 or more again).
