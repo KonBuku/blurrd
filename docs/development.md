@@ -28,7 +28,9 @@ policy and the commit conventions.
 | `crates/blurrd-core`    | Shared types: regions, box tracks, blur plans, schemas, errors. No I/O, no `unsafe`.     |
 | `crates/blurrd-blur`    | Soft-edged box blur on YUV 4:2:0 planes (I420, NV12, P010) and its quality metrics.      |
 | `crates/blurrd-video`   | FFmpeg probing, decoding, seeking and the render (encode, mux); the only `unsafe` crate. |
-| `crates/blurrd-detect`  | HUD and screen detectors (kill feed and text chat so far), pixel classes, morphology.    |
+| `crates/blurrd-detect`  | HUD and screen detectors with their temporal models, pixel classes, morphology.          |
+| `crates/blurrd-ocr`     | OCR for the verification: PP-OCRv5 detection and recognition on ONNX Runtime.            |
+| `crates/blurrd-engine`  | The jobs shared by the CLI and the desktop app (so far: the OCR name dictionary).        |
 | `crates/blurrd-cli`     | The `blurrd` command-line tool (see [cli.md](cli.md)).                                   |
 | `crates/blurrd-testkit` | Development only: synthetic HUD fixtures with ground truth, quality metrics, proposals.  |
 | `xtask`                 | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).          |

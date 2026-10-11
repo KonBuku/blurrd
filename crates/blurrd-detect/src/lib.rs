@@ -16,12 +16,20 @@
 //! - [`VoiceDetector`] ([`voice`]): speaker names in the voice-chat entries
 //!   of one frame.
 //! - [`ChatDetector`] ([`chat`]): sender names in the text-chat lines of
-//!   one frame; [`ChatTracker`] follows the lines across frames.
+//!   one frame.
+//! - [`ScreenDetector`] ([`screens`]): names on the scoreboard, the death
+//!   recap, the spectating widget and the match-end screens, from a
+//!   quarter-scale gate, native reads and its own temporal stage.
 //!
-//! Temporal models ([`temporal`]):
+//! Temporal models:
 //!
 //! - [`KillFeedTracker`] ([`temporal::killfeed`]): follows the kill-feed
 //!   names through row animations, flashes and fades.
+//! - [`VoiceTracker`] ([`voice`]): bidirectional hysteresis over the
+//!   voice-chat slots.
+//! - [`ChatTracker`] ([`chat`]): follows the text-chat lines through
+//!   pushes and fades.
+//! - [`scene_cut`]: the HUD-aware scene cuts that end holds and backfills.
 //!
 //! The building blocks every detector shares:
 //!
