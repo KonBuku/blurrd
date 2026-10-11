@@ -120,6 +120,10 @@ pub(super) enum How {
     /// screen: the union of the last match and the place the fading row
     /// slid to ([`super::end`]).
     Hold,
+    /// Before the name's first match: the detector read the name, or a
+    /// part of it, at its place or one row lower (see
+    /// [`super::Part::lead_in`]).
+    Lead,
 }
 
 /// Template positions of one frame: the top-left corners span

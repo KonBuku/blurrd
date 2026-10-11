@@ -48,12 +48,12 @@ use blurrd_core::{Confidence, NameKind, RectI, Region};
 
 use crate::detection::Detection;
 use crate::image::RgbView;
-use crate::killfeed::FEED_ROI;
+use crate::killfeed::{FEED_ROI, ROW_PITCH};
 use crate::track::ncc::{Searcher, Template, score_at};
 
 use compose::{Companion, PreRoll};
 use end::Look;
-use follow::{Follower, How, MAX_GAP, Pos, SAME_EXTENT};
+use follow::{Follower, How, MAX_GAP, MAX_GAP_BACKWARD, Pos, SAME_EXTENT};
 use link::{Linker, Reference, Replaced};
 use ring::Ring;
 
@@ -89,6 +89,11 @@ pub const POST_ROLL: u32 = 5;
 /// Frames before a name's first frame that can get the pre-roll box at a
 /// row's birth (`PRE`; see the `compose` module).
 pub const PRE_ROLL: u32 = 3;
+
+/// Frames before a name's first match that can lead in on the detector's
+/// readings ([`Part::lead_in`]); as many as a backward gap may span
+/// before the name counts as not yet there.
+const LEAD_FRAMES: u32 = MAX_GAP_BACKWARD;
 
 /// While a fading row is held, it may have slid up this far since the
 /// last match (measured: at most 9 px while visible; the window leaves
@@ -294,6 +299,39 @@ impl Part {
         self.end = Some(end);
     }
 
+    /// Extends the name's positions to the frames right before its first
+    /// one (down to frame `lo`, at most [`LEAD_FRAMES`]) where the template
+    /// does not match yet but the detector reads the name: a row that is
+    /// still fading in, or one born a row lower and moved up by a stack
+    /// jump in the next frame. Neither the backward pass nor the slide-in
+    /// search finds such a frame, and the pre-roll leaves frames with
+    /// readings alone (they look like a stack jump).
+    ///
+    /// The frames lead in on [`lead_reading`]; the position moves with the
+    /// reading's baseline.
+    fn lead_in(&mut self, ring: &Ring, lo: u32) {
+        let Some((&first, &start)) = self.positions.first_key_value() else {
+            return;
+        };
+        let t = self.forward.text();
+        let mut pos = start;
+        for g in (lo..first).rev().take(LEAD_FRAMES as usize) {
+            let Some(dy) = ring
+                .get(g)
+                .and_then(|slot| lead_reading(compose::place(pos, t), &slot.names))
+            else {
+                break;
+            };
+            pos = Pos {
+                y0: pos.y0 + dy,
+                y1: pos.y1 + dy,
+                how: How::Lead,
+                ..pos
+            };
+            self.positions.insert(g, pos);
+        }
+    }
+
     /// Whether the part can no longer contribute to frame `f` or later.
     fn finished_before(&self, f: u32) -> bool {
         self.forward.is_done()
@@ -323,7 +361,7 @@ impl Part {
             let confidence = match p.how {
                 How::Matched | How::Slide => Confidence::Tracked,
                 How::Weak | How::Hold => Confidence::WeakHold,
-                How::Gap => Confidence::GapFill,
+                How::Gap | How::Lead => Confidence::GapFill,
             };
             return Some((*p, confidence));
         }
@@ -581,6 +619,7 @@ impl KillFeedTracker {
             |g| ring.frame(g),
             &mut insert,
         );
+        part.lead_in(&self.ring, lo);
         part.pre_roll = compose::pre_roll(&part, &self.ring, lo);
         // Forward up to the newest frame.
         for g in r.frame + 1..=newest {
@@ -775,14 +814,7 @@ impl KillFeedTracker {
     /// Hands out frame `f` and forgets what only earlier frames needed.
     fn emit(&mut self, f: u32) {
         let mut boxes = Vec::new();
-        let detections = self.ring.get(f).map_or(&[][..], |s| &s.detections);
-        compose::compose(
-            f,
-            &mut self.parts,
-            self.ring.frame(f).as_ref(),
-            detections,
-            &mut boxes,
-        );
+        compose::compose(f, &mut self.parts, &self.ring, &mut boxes);
         self.ready.push(FrameBoxes { frame: f, boxes });
         let keep = f.saturating_sub(POST_ROLL);
         self.parts.retain_mut(|p| {
@@ -809,6 +841,29 @@ fn template_area(text: RectI, top: i32) -> RectI {
     }
 }
 
+/// How far below `text` (a name's text bounds where it is followed next)
+/// the detector read the name in `names` (the text bounds of a frame
+/// before), if it did: text inside the name's extent (a fading row is
+/// often read short), with the name's baseline or one [`ROW_PITCH`] lower
+/// (a stack jump right after the row's birth), all within
+/// [`SAME_EXTENT`]. Of several such readings the one closest to the
+/// name's extent wins; a wider reading is another name. A shorter name
+/// one row lower inside the extent (victims are right-aligned) can lead
+/// the box a row down for up to [`LEAD_FRAMES`] frames: over-blur, which
+/// is safer than telling it from the name's own stack jump.
+fn lead_reading(text: RectI, names: &[RectI]) -> Option<i32> {
+    names
+        .iter()
+        .filter(|n| n.x0 >= text.x0 - SAME_EXTENT && n.x1 <= text.x1 + SAME_EXTENT)
+        .filter_map(|n| {
+            let dy = n.y1 - text.y1;
+            (dy.abs() <= SAME_EXTENT || (dy - ROW_PITCH).abs() <= SAME_EXTENT)
+                .then_some((dy, (n.x0 - text.x0).abs() + (n.x1 - text.x1).abs()))
+        })
+        .min_by_key(|&(_, error)| error)
+        .map(|(dy, _)| dy)
+}
+
 /// Whether `d` is the roman numeral of a multikill badge. In a one-colour
 /// row (no killer detection) the badge passes as a name: a short one,
 /// left of the killer portrait, with both names of the row to its right.
@@ -831,4 +886,75 @@ fn is_badge(d: &Detection, all: &[Detection]) -> bool {
             .map(|o| o.text.x0 - d.text.x1)
             .min()
             .is_some_and(|gap| gap >= BADGE_MIN_GAP)
+}
+
+#[cfg(test)]
+mod tests {
+    use blurrd_core::RectI;
+
+    use super::{ROW_PITCH, lead_reading};
+
+    /// A name's text bounds from `x0` to `x1` with its baseline at `y1`.
+    fn text(x0: i32, x1: i32, y1: i32) -> RectI {
+        RectI {
+            x0,
+            y0: y1 - 14,
+            x1,
+            y1,
+        }
+    }
+
+    #[test]
+    fn leads_in_on_a_short_reading_at_the_place_of_the_name() {
+        let name = text(1731, 1830, 199);
+        // A fading-in victim read without its first glyphs, a little lower.
+        assert_eq!(lead_reading(name, &[text(1765, 1830, 196)]), Some(-3));
+        // The whole name.
+        assert_eq!(lead_reading(name, &[text(1730, 1831, 199)]), Some(0));
+    }
+
+    #[test]
+    fn leads_in_on_a_reading_one_row_lower() {
+        // Born a row lower, moved up by a stack jump in the next frame.
+        let name = text(1786, 1830, 157);
+        assert_eq!(
+            lead_reading(name, &[text(1787, 1823, 157 + ROW_PITCH)]),
+            Some(ROW_PITCH)
+        );
+    }
+
+    #[test]
+    fn leads_in_on_a_shorter_victim_one_row_lower() {
+        // Documented over-blur: a shorter victim in the row below lies
+        // inside the name's extent (victims are right-aligned) and passes
+        // for the name born a row lower.
+        let name = text(1731, 1830, 157);
+        let below = text(1770, 1830, 157 + ROW_PITCH);
+        assert_eq!(lead_reading(name, &[below]), Some(ROW_PITCH));
+        // The name's own reading at its place wins over it.
+        let own = text(1765, 1830, 157);
+        assert_eq!(lead_reading(name, &[below, own]), Some(0));
+    }
+
+    #[test]
+    fn does_not_lead_in_on_other_names() {
+        let name = text(1786, 1830, 157);
+        // A longer name at the place (the row that sat there before).
+        assert_eq!(lead_reading(name, &[text(1731, 1830, 160)]), None);
+        // A name in another row.
+        assert_eq!(
+            lead_reading(name, &[text(1786, 1830, 157 - ROW_PITCH)]),
+            None
+        );
+        assert_eq!(lead_reading(name, &[text(1786, 1830, 177)]), None);
+        assert_eq!(lead_reading(name, &[]), None);
+    }
+
+    #[test]
+    fn leads_in_on_the_reading_closest_to_the_name() {
+        let name = text(1700, 1830, 160);
+        let short = text(1760, 1830, 160);
+        let lower = text(1701, 1830, 160 + ROW_PITCH);
+        assert_eq!(lead_reading(name, &[short, lower]), Some(ROW_PITCH));
+    }
 }

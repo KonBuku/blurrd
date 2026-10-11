@@ -21,7 +21,11 @@
 //!   that does not hold them; a companion whose own template does not
 //!   match there, in a row where the detector read other names, is left
 //!   out, and after [`LATCHED`] such frames in a row the part keeps no
-//!   companions at all (the row may later fade without detections).
+//!   companions at all (the row may later fade without detections). A
+//!   latched template stays latched: a companion away in a single frame
+//!   only, between frames that do not show it away, is a mismatch of that
+//!   frame (a flash on the name, a reading that took the portrait for
+//!   text) and keeps its box.
 //! - **Followed names win:** a companion's extent was read once, in its
 //!   part's reference frame, and a misreading there (a cover bar edge
 //!   while the row wipes in) would last the part's whole life; an
@@ -402,18 +406,12 @@ struct Candidate {
     own: bool,
 }
 
-/// Composes the boxes of frame `f` from `parts` into `out`; `frame` is the
-/// frame's strip and `detections` its kill-feed detections.
-pub(super) fn compose(
-    f: u32,
-    parts: &mut [Part],
-    frame: Option<&Frame<'_>>,
-    detections: &[Detection],
-    out: &mut Vec<FeedBox>,
-) {
+/// Composes the boxes of frame `f` from `parts` into `out`, reading the
+/// frame (and the next one) from `ring`.
+pub(super) fn compose(f: u32, parts: &mut [Part], ring: &Ring, out: &mut Vec<FeedBox>) {
     let mut candidates = Vec::new();
     for (owner, part) in parts.iter_mut().enumerate() {
-        part_candidates(f, owner, part, frame, detections, &mut candidates);
+        part_candidates(f, owner, part, ring, &mut candidates);
     }
     // A companion's extent was read once, in its part's reference frame,
     // and an uncertain position is a guess: a part that follows the name
@@ -488,14 +486,10 @@ pub(super) fn compose(
 }
 
 /// The candidates of one part (index `owner`) in frame `f`.
-fn part_candidates(
-    f: u32,
-    owner: usize,
-    part: &mut Part,
-    frame: Option<&Frame<'_>>,
-    detections: &[Detection],
-    out: &mut Vec<Candidate>,
-) {
+fn part_candidates(f: u32, owner: usize, part: &mut Part, ring: &Ring, out: &mut Vec<Candidate>) {
+    let frame = ring.frame(f);
+    let frame = frame.as_ref();
+    let detections = ring.get(f).map_or(&[][..], |s| &s.detections);
     let (pos, confidence) = match part.position(f) {
         Some(found) => found,
         None => match part.pre_roll.and_then(|p| p.position(part, f)) {
@@ -512,13 +506,7 @@ fn part_candidates(
     } else {
         rise_union(part, f, pos)
     };
-    let seen = companions_seen(part, pos, confidence, frame, detections);
-    if seen.contains(&Seen::Away) {
-        part.misplaced += 1;
-    } else if seen.contains(&Seen::Here) {
-        part.misplaced = 0;
-    }
-    let latched = part.misplaced >= LATCHED;
+    let left_out = companions_left_out(f, part, pos, confidence, ring);
     let offset = (
         (pos.x0 - part.origin.0) as i16,
         (pos.y0 - part.origin.1) as i16,
@@ -568,7 +556,7 @@ fn part_candidates(
     let after_last_match = matches!(confidence, Confidence::PostRoll)
         || part.positions.get(&f).is_some_and(|p| p.how == How::Hold);
     for (i, b) in part.boxes.iter().enumerate() {
-        if i > 0 && (latched || seen[i] == Seen::Away) {
+        if left_out[i] {
             continue;
         }
         if after_last_match && taken(place(pos, b.text), detections) {
@@ -694,6 +682,42 @@ enum Seen {
     Unknown,
 }
 
+/// Which names of `part` (followed name at `pos`, found as `confidence`)
+/// frame `f` leaves out: companions away from their place
+/// ([`is_away`]), all of them once the part latched onto another row.
+/// Counts the part's frames with a companion away.
+fn companions_left_out(
+    f: u32,
+    part: &mut Part,
+    pos: Pos,
+    confidence: Confidence,
+    ring: &Ring,
+) -> Vec<bool> {
+    let seen_in = |part: &Part, g: u32, pos: Pos, confidence: Confidence| {
+        let detections = ring.get(g).map_or(&[][..], |s| &s.detections);
+        companions_seen(part, pos, confidence, ring.frame(g).as_ref(), detections)
+    };
+    let seen = seen_in(part, f, pos, confidence);
+    let away_before = part.misplaced > 0;
+    let away_next = if seen.contains(&Seen::Away) && !away_before {
+        part.position(f + 1)
+            .map(|(p, c)| seen_in(part, f + 1, p, c))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    if seen.contains(&Seen::Away) {
+        part.misplaced += 1;
+    } else if seen.contains(&Seen::Here) {
+        part.misplaced = 0;
+    }
+    let latched = part.misplaced >= LATCHED;
+    seen.iter()
+        .enumerate()
+        .map(|(i, &s)| i > 0 && (latched || is_away(s, away_before, away_next.get(i).copied())))
+        .collect()
+}
+
 /// What the frame shows of each name of `part` with the followed name at
 /// `pos` (found as `confidence`).
 fn companions_seen(
@@ -745,6 +769,14 @@ fn companion_seen(
         (d.text.x0 - text.x0).abs() <= SAME_EXTENT && (d.text.x1 - text.x1).abs() <= SAME_EXTENT
     });
     if read { Seen::Unknown } else { Seen::Away }
+}
+
+/// Whether a companion seen as `now` in a frame is away from its place:
+/// only if the frame before (`before`: its part saw a companion away) or
+/// the next one (`next`, `None` if unknown) shows it away as well. A
+/// latched template stays latched, a single frame is a mismatch.
+fn is_away(now: Seen, before: bool, next: Option<Seen>) -> bool {
+    now == Seen::Away && (before || next == Some(Seen::Away))
 }
 
 /// The template of a companion name, cut in the reference frame.
@@ -844,7 +876,23 @@ mod tests {
 
     use crate::image::GrayImage;
 
-    use super::{PORTRAIT_CLEARANCE, SLOT_REACH, TEXT_HALO, killer_clearance, slots};
+    use super::{
+        PORTRAIT_CLEARANCE, SLOT_REACH, Seen, TEXT_HALO, is_away, killer_clearance, slots,
+    };
+
+    #[test]
+    fn a_companion_is_away_in_two_frames_in_a_row() {
+        // Away now and before, or now and next.
+        assert!(is_away(Seen::Away, true, None));
+        assert!(is_away(Seen::Away, false, Some(Seen::Away)));
+        // Away in this frame only: a mismatch of the frame.
+        assert!(!is_away(Seen::Away, false, Some(Seen::Here)));
+        assert!(!is_away(Seen::Away, false, Some(Seen::Unknown)));
+        assert!(!is_away(Seen::Away, false, None));
+        // Not away now.
+        assert!(!is_away(Seen::Here, true, Some(Seen::Away)));
+        assert!(!is_away(Seen::Unknown, true, Some(Seen::Away)));
+    }
 
     /// A feed row at the top of a 200 × 40 plane: flat bar, portrait art in
     /// the columns `art` over the full row height, and a glyph stroke (rows
