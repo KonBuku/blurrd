@@ -491,7 +491,7 @@ mod tests {
     use super::{CARD_PITCH, CARD_X, FILL_H, GATE, RecapReader, STRIP_X, split_run};
     use crate::image::RgbView;
     use crate::screens::gate::Gates;
-    use crate::screens::sample::{FrameView, ScreenMap};
+    use crate::screens::sample::{Anchor, FrameView, ScreenMap};
 
     #[test]
     fn finds_the_strip_when_its_top_edge_fades_over_the_card_art() {
@@ -600,6 +600,34 @@ mod tests {
                     "seed {seed} x{dark}: {slots:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn the_gate_finds_outlines_spread_over_two_view_pixels() {
+        // The quarter-scale frame of an open combat report over a screen
+        // of the panel's tone (the panel's edges vanish): four cards whose
+        // one-pixel outlines a downscaled recording spreads over two view
+        // pixels at half contrast.
+        for (w, h) in [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440)] {
+            let map = ScreenMap::wide(w, h);
+            let (qw, qh) = (w / 4, h / 4);
+            let mut data = vec![26u8; (3 * qw * qh) as usize];
+            let column = |x: i32| (map.x(x as f32, Anchor::Right) * 0.25) as usize;
+            let row = |y: i32| (map.y(y as f32) * 0.25) as usize;
+            for k in 0..4 {
+                let top = 470 + CARD_PITCH * k;
+                for y in row(top)..row(top + FILL_H) {
+                    for x in [column(CARD_X.0), column(CARD_X.1)] {
+                        let i = 3 * (y * qw as usize + x);
+                        data[i..i + 6].fill(88);
+                    }
+                }
+            }
+            let view =
+                FrameView::scaled(RgbView::new(&data, qw, qh, 3 * qw as usize).unwrap(), 0.25);
+            let signal = Gates::new().evaluate(&GATE, &view, &map);
+            assert!(signal.candidate, "{w}x{h}: {}", signal.score);
         }
     }
 

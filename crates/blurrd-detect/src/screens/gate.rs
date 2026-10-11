@@ -7,7 +7,8 @@
 //! cards that may sit anywhere in a range of rows, and horizontal edges
 //! that move together when the panel slides. The gate samples the
 //! surface's bounding box on a grid of [`GATE_STEP`] reference pixels
-//! (one quarter-scale pixel at 1080p) and scores every edge
+//! (one quarter-scale pixel at 1080p; card outlines on a grid of at
+//! least one view pixel, [`outline_step`]) and scores every edge
 //! ([`super::edges`]). A frame whose score reaches the surface's
 //! threshold is a *candidate*: only then is the surface's native name
 //! zone cropped and read, and only a read that finds the panel's
@@ -19,8 +20,37 @@ use blurrd_core::{RectI, Region};
 use super::edges;
 use super::sample::{Anchor, FrameView, RefPlane, ScreenMap};
 
-/// Reference pixels per gate cell.
+/// Reference pixels per gate cell (one quarter-scale pixel of a 1080p
+/// recording).
 pub const GATE_STEP: i32 = 4;
+
+/// Most reference pixels per cell of the card outlines (one
+/// quarter-scale pixel of a 540p recording).
+pub const MAX_OUTLINE_STEP: i32 = 8;
+
+/// The cell of the card outlines ([`GateSpec::outlines`]) for `view`
+/// mapped by `map`: [`GATE_STEP`], or one view pixel if that spans more
+/// reference pixels (a recording below 1080p, a horizontally squeezed
+/// one), up to [`MAX_OUTLINE_STEP`].
+///
+/// A finer grid than the view repeats view pixels unevenly, so a thin
+/// outline one view pixel wide fills one cell in some columns and two in
+/// others, and the line tests miss it in some rows (measured on a real
+/// death recap scaled to 720p: the right card outline scored 0.10 on
+/// 4-pixel cells and 1.0 on cells of one view pixel). Panel edges keep
+/// the fine grid: they are steps, not lines, and the "switch player"
+/// bar, a line that the gate scores as an edge, lost frames at 720p on
+/// cells of one view pixel.
+pub fn outline_step(view: &FrameView<'_>, map: &ScreenMap) -> i32 {
+    let scale = view.scale * map.sx().min(map.sy());
+    if scale <= 0.0 {
+        return GATE_STEP;
+    }
+    // A small tolerance keeps exact 1080p (four reference pixels per view
+    // pixel) on the fine grid despite rounding.
+    let pixel = (1.0 / scale - 0.05).ceil() as i32;
+    pixel.clamp(GATE_STEP, MAX_OUTLINE_STEP)
+}
 
 /// The candidate threshold of every surface's gate.
 pub const GATE_THRESHOLD: f32 = 0.35;
@@ -69,29 +99,36 @@ impl GateSpec {
         let mut total = 0.0;
         // The edge functions read two cells left and one right of the
         // line, at up to one cell off.
-        let strip = |x: i32, y0: i32, y1: i32| RectI {
-            x0: x - 4 * GATE_STEP,
+        let strip = |x: i32, y0: i32, y1: i32, step: i32| RectI {
+            x0: x - 4 * step,
             y0,
-            x1: x + 3 * GATE_STEP,
+            x1: x + 3 * step,
             y1,
         };
         for &(x, y0, y1) in self.vertical {
-            vertical.sample(view, map, self.anchor, strip(x, y0, y1), GATE_STEP);
+            vertical.sample(
+                view,
+                map,
+                self.anchor,
+                strip(x, y0, y1, GATE_STEP),
+                GATE_STEP,
+            );
             total += edges::vertical(vertical, x, y0, y1, 1).0;
         }
         if !self.outlines.is_empty() {
+            let step = outline_step(view, map);
             let (y0, y1) = self.outline_span;
             counts.resize_with(self.outlines.len(), Vec::new);
             for (&x, column) in self.outlines.iter().zip(counts.iter_mut()) {
                 // A thin line's test reads up to three cells right of it.
                 let rect = RectI {
-                    x1: x + 5 * GATE_STEP,
-                    ..strip(x, y0, y1)
+                    x1: x + 5 * step,
+                    ..strip(x, y0, y1, step)
                 };
-                vertical.sample(view, map, self.anchor, rect, GATE_STEP);
+                vertical.sample(view, map, self.anchor, rect, step);
                 edges::line_prefixes(vertical, x, y0, y1, 1, column);
             }
-            let n = (self.outline_rows / GATE_STEP).max(1) as usize;
+            let n = (self.outline_rows / step).max(1) as usize;
             let score = edges::window_score(&counts[..self.outlines.len()], n);
             total += score * self.outlines.len() as f32;
         }

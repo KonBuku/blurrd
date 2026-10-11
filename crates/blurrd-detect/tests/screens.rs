@@ -406,6 +406,45 @@ fn gpu_colour_filters_change_nothing() {
 }
 
 #[test]
+fn recaps_over_dark_screens_are_covered() {
+    // An open death recap over the dark spectator screen: near black, or
+    // of the translucent panel's own tone. The panel's edges almost
+    // vanish, so the gate rests on the one-pixel card outlines, which a
+    // quarter-scale frame below 1080p shows in less than one view pixel.
+    let fonts = FontSet::latin();
+    let backgrounds = [[10, 11, 13], [22, 24, 28]].map(|base| Background::Noise {
+        seed: 5,
+        base,
+        amp: 4.0,
+        cell: 24,
+    });
+    for layout in [Layout::wide(1280, 720), Layout::reference()] {
+        for background in backgrounds {
+            for surface in [Surface::Recap(1), Surface::Recap(4)] {
+                for timing in TIMINGS {
+                    let s = scene(
+                        &fonts,
+                        layout,
+                        Palette::DEFAULT,
+                        background,
+                        surface,
+                        timing,
+                        5,
+                    );
+                    assert_clean(
+                        &run(&s, None),
+                        &format!(
+                            "{}x{} {background:?} {surface:?} {timing:?}",
+                            layout.width, layout.height
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn names_in_other_scripts_are_covered() {
     let fonts = match FontSet::with_fetched() {
         Ok(fonts) => fonts,

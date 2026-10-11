@@ -98,13 +98,18 @@ pub fn vertical(plane: &RefPlane, x: i32, y0: i32, y1: i32, search: i32) -> (f32
 }
 
 /// Running counts of thin vertical line cells (an edge into the cell and
-/// one out of it within two cells) of the column at reference x `x` over
-/// reference rows `y0..y1`, for pairs of neighbouring offsets up to
-/// `search` cells off: `out[k][i]` is the number of the first `i` rows
-/// with a line at offset `k - search` or `k - search + 1`. A pair, not a
-/// single cell, because an outline one pixel wide falls on either side of
-/// a cell border depending on the column's phase in the grid. Input of
-/// [`window_score`].
+/// one out of it within [`LINE_W`] cells) of the column at reference x
+/// `x` over reference rows `y0..y1`, for pairs of neighbouring offsets
+/// up to `search` cells off: `out[k][i]` is the number of the first `i`
+/// rows with a line at offset `k - search` or `k - search + 1`. A pair,
+/// not a single cell, because an outline one pixel wide falls on either
+/// side of a cell border depending on the column's phase in the grid.
+/// The exit edge may lie up to [`LINE_W`] cells on because the cell an
+/// outline shares with the card art next to it can carry the step out of
+/// the line one cell further (measured on a synthetic recap over a
+/// background of the panel's tone: the left outline counted in 6 of 10
+/// cells with the exit edge within two cells, in 8 of 10 within three).
+/// Input of [`window_score`].
 pub fn line_prefixes(
     plane: &RefPlane,
     x: i32,
@@ -129,7 +134,7 @@ pub fn line_prefixes(
                     plane.at(c + 1, cy),
                 )
             };
-            let line_at = |c: i32| edge_at(c) && (edge_at(c + 1) || edge_at(c + 2));
+            let line_at = |c: i32| edge_at(c) && (1..=LINE_W).any(|w| edge_at(c + w));
             sum += u32::from(line_at(cx + d) || line_at(cx + d + 1));
             counts.push(sum);
         }
