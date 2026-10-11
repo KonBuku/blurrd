@@ -17,7 +17,9 @@
 //!
 //! A line reads `(Prefix) Name: message`: prefix and name in the channel's
 //! colour, colon and message in white. System lines read
-//! `(System) Name <phrase>` without a colon.
+//! `(System) Name <phrase>` without a colon, and so do purchase broadcasts,
+//! which name a second player: `(Broadcast) Name bought the Vandal for
+//! Other!` (prefix in the broadcast colour, names and phrase in white).
 //!
 //! The German and Spanish prefixes and system phrases are plausible
 //! translations, not verified against the game's localisation (no
@@ -69,6 +71,8 @@ const THUMB: RectI = RectI {
 };
 /// Item ids of chat names start here.
 const ID_BASE: u32 = 4000;
+/// Item ids of the recipients of purchase broadcasts start here.
+const RECIPIENT_ID_BASE: u32 = ID_BASE + 500;
 
 /// A chat channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,6 +88,9 @@ pub enum Channel {
     Broadcast,
     /// Game messages about a player.
     System,
+    /// A broadcast that a player bought a weapon for another player (the
+    /// message's [`text`](ChatMessage::text) is the recipient's name).
+    Purchase,
 }
 
 /// The client language, which changes prefixes and system phrases.
@@ -108,15 +115,15 @@ impl Language {
             (Self::English, Channel::All) => "(All)",
             (Self::English | Self::German, Channel::Team) => "(Team)",
             (Self::English, Channel::Party) => "(Party)",
-            (Self::English, Channel::Broadcast) => "(Broadcast)",
+            (Self::English, Channel::Broadcast | Channel::Purchase) => "(Broadcast)",
             (Self::English | Self::German, Channel::System) => "(System)",
             (Self::German, Channel::All) => "(Alle)",
             (Self::German, Channel::Party) => "(Gruppe)",
-            (Self::German, Channel::Broadcast) => "(Übertragung)",
+            (Self::German, Channel::Broadcast | Channel::Purchase) => "(Übertragung)",
             (Self::Spanish, Channel::All) => "(Todos)",
             (Self::Spanish, Channel::Team) => "(Equipo)",
             (Self::Spanish, Channel::Party) => "(Grupo)",
-            (Self::Spanish, Channel::Broadcast) => "(Transmisión)",
+            (Self::Spanish, Channel::Broadcast | Channel::Purchase) => "(Transmisión)",
             (Self::Spanish, Channel::System) => "(Sistema)",
         }
     }
@@ -127,6 +134,17 @@ impl Language {
             Self::English => "has abandoned the match",
             Self::German => "hat das Match verlassen",
             Self::Spanish => "ha abandonado la partida",
+        }
+    }
+
+    /// The phrase of a purchase broadcast: the words between the buyer and
+    /// the recipient, and the end after the recipient (glued to it when it
+    /// is a punctuation mark). The German recipient sits inside the phrase.
+    pub const fn purchase_phrase(self) -> (&'static str, &'static str) {
+        match self {
+            Self::English => ("bought the Vandal for", "!"),
+            Self::German => ("hat die Vandal für", "gekauft!"),
+            Self::Spanish => ("compró la Vandal para", "!"),
         }
     }
 }
@@ -140,7 +158,8 @@ pub struct ChatMessage {
     pub name: String,
     /// The sender's team (colours the name in the all channel).
     pub team: Team,
-    /// The message (ignored for system lines).
+    /// The message (ignored for system lines; the recipient's name for
+    /// purchase broadcasts).
     pub text: String,
     /// For broadcast lines, the role shown in parentheses after the name.
     pub role: Option<String>,
@@ -204,6 +223,21 @@ struct Line {
     /// after the name on the first line.
     tail: Vec<(Label, [u8; 3], ContentKind)>,
     continuation: Option<Label>,
+    /// The recipient of a purchase broadcast, the end of its phrase and
+    /// whether a space separates them, on the continuation line if the
+    /// message wraps.
+    recipient: Option<(Label, Label, bool)>,
+}
+
+impl Line {
+    /// Text rows of the message: one, or two if it wraps.
+    fn rows(&self) -> i32 {
+        if self.continuation.is_some() || (self.message.wrap && self.recipient.is_some()) {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 /// The text chat rendered for one layout.
@@ -227,7 +261,13 @@ impl Chat {
             .map(|(index, message)| {
                 let mut tail = Vec::new();
                 let mut continuation = None;
-                if message.channel == Channel::System {
+                let mut recipient = None;
+                if message.channel == Channel::Purchase {
+                    let (between, end) = spec.language.purchase_phrase();
+                    tail.push((label(between), TEXT_WHITE, ContentKind::SystemPhrase));
+                    let spaced = !end.starts_with(|c: char| c.is_ascii_punctuation());
+                    recipient = Some((label(&message.text), label(end), spaced));
+                } else if message.channel == Channel::System {
                     tail.push((
                         label(spec.language.system_phrase()),
                         TEXT_WHITE,
@@ -256,6 +296,7 @@ impl Chat {
                     name: label(&message.name),
                     tail,
                     continuation,
+                    recipient,
                     message,
                     index,
                 }
@@ -293,7 +334,7 @@ impl Chat {
         let start = visible.len().saturating_sub(self.spec.shown);
         let mut last_top = LAST_LINE_TOP;
         for line in visible[start..].iter().rev() {
-            let rows = if line.continuation.is_some() { 2 } else { 1 };
+            let rows = line.rows();
             let first_top = last_top - WRAP_PITCH * (rows - 1);
             let age = frame - line.message.time;
             let alpha = if age < self.spec.life {
@@ -362,7 +403,7 @@ impl Chat {
         }
         let mut last_top = LAST_LINE_TOP;
         for line in self.lines.iter().rev().filter(|l| l.message.time <= frame) {
-            let rows = if line.continuation.is_some() { 2 } else { 1 };
+            let rows = line.rows();
             let first_top = last_top - WRAP_PITCH * (rows - 1);
             if first_top < PANEL_TEXT_TOP {
                 break;
@@ -398,6 +439,12 @@ impl Chat {
         }
         let alpha = alpha.unwrap_or(1.0);
         let colour = channel_colour(line.message.channel, line.message.team, palette);
+        // Purchase broadcasts name both players in white.
+        let name_colour = if line.message.channel == Channel::Purchase {
+            TEXT_WHITE
+        } else {
+            colour
+        };
         let baseline = (first_top + 13) as f32;
         p.label(
             ContentKind::ChatPrefix,
@@ -409,26 +456,30 @@ impl Chat {
             None,
         );
         let name_x = TEXT_X + line.prefix.width + self.space;
-        let slot = rect_f(
-            name_x - 2.0,
-            (first_top - 2) as f32,
-            name_x + MAX_NAME_WIDTH + 4.0,
-            (first_top + 18) as f32,
-        );
-        p.name(
-            NameDraw {
-                id: ItemId(ID_BASE + line.index),
-                region: Region::TextChat,
-                kind: NameKind::ChatSender,
-                slot,
-            },
-            &line.name,
-            (name_x, baseline),
-            a,
-            colour,
-            alpha,
-            None,
-        );
+        // A name with its slot, pen at `x` on the line whose top is `top`.
+        let name = |p: &mut Painter<'_>, id: u32, label: &Label, (x, top): (f32, i32)| {
+            let slot = rect_f(
+                x - 2.0,
+                (top - 2) as f32,
+                x + MAX_NAME_WIDTH + 4.0,
+                (top + 18) as f32,
+            );
+            p.name(
+                NameDraw {
+                    id: ItemId(id),
+                    region: Region::TextChat,
+                    kind: NameKind::ChatSender,
+                    slot,
+                },
+                label,
+                (x, (top + 13) as f32),
+                a,
+                name_colour,
+                alpha,
+                None,
+            );
+        };
+        name(p, ID_BASE + line.index, &line.name, (name_x, first_top));
         let mut x = name_x + line.name.width;
         for (label, rgb, kind) in &line.tail {
             // Roles keep the channel colour; the system phrase and the
@@ -444,6 +495,28 @@ impl Chat {
             }
             p.label(*kind, label, (x, baseline), a, rgb, alpha, None);
             x += label.width;
+        }
+        if let Some((recipient, end, spaced)) = &line.recipient {
+            let (mut x, top) = if line.message.wrap {
+                (TEXT_X, last_top)
+            } else {
+                (x + self.space, first_top)
+            };
+            name(p, RECIPIENT_ID_BASE + line.index, recipient, (x, top));
+            x += recipient.width;
+            if *spaced {
+                x += self.space;
+            }
+            let pen = (x, (top + 13) as f32);
+            p.label(
+                ContentKind::SystemPhrase,
+                end,
+                pen,
+                a,
+                TEXT_WHITE,
+                alpha,
+                None,
+            );
         }
         if let Some(rest) = &line.continuation {
             p.label(
@@ -465,7 +538,7 @@ fn channel_colour(channel: Channel, team: Team, palette: &Palette) -> [u8; 3] {
     match channel {
         Channel::All => team.colour(palette),
         Channel::Team | Channel::Party => palette.chat_team,
-        Channel::Broadcast => palette.chat_broadcast,
+        Channel::Broadcast | Channel::Purchase => palette.chat_broadcast,
         Channel::System => TEXT_WHITE,
     }
 }
