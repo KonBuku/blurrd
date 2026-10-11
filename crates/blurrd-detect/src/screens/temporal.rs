@@ -5,18 +5,23 @@
 //! structure ([`SurfaceFrame::slots`] is `Some`). Confirmed frames with
 //! gaps of at most [`BRIDGE`] frames between them form a *run*, which
 //! counts only with at least [`MIN_CONFIRMED`] confirmed frames. A
-//! longer gap of at most [`HOLD`] frames joins the run too if the
-//! surface's gate made every frame of it a candidate: the panel was
-//! still on screen and only its native read failed (a filter or an
-//! effect over the panel); such a gap gets boxes only once a confirmed
-//! frame ends it. In the same way, up to [`LEAD`] frames right before a
-//! run's first confirmed frame join the run if the gate made each of
-//! them a candidate (a panel that opened while its native read still
-//! failed). The surface is on from [`PRE_ROLL`] frames before a run's
-//! first frame to [`POST_ROLL`] frames after its last confirmed one. The
-//! pre-roll covers the first frames of a fade-in, while the panel is
-//! still too faint for its structure to be found; the post-roll covers
-//! the end of a fade-out and the encoder's ghosting of the last frame.
+//! frame is *held* when the surface's gate made it a candidate: the panel
+//! may still be on screen while only its native read fails (a filter or
+//! an effect over the panel). A longer gap of at most [`HOLD`] frames
+//! joins the run too if every frame of it is held. In the same way, up
+//! to [`LEAD`] held frames right before a run's first confirmed frame (a
+//! panel that opened while its native read still failed) and up to
+//! [`TAIL`] held frames right after its last confirmed frame (a panel
+//! still open while its native read failed until it closed) join the
+//! run; a frame of the tail must also keep the gate's score at
+//! [`TAIL_LEVEL`] of the last confirmed frame's score, so that a gate
+//! that a closed panel leaves to the background's edges does not extend
+//! the run.
+//! The surface is on from [`PRE_ROLL`] frames before a run's first frame
+//! to [`POST_ROLL`] frames after its last frame. The pre-roll covers the
+//! first frames of a fade-in, while the panel is still too faint for its
+//! structure to be found; the post-roll covers the end of a fade-out and
+//! the encoder's ghosting of the last frame.
 //!
 //! While a surface is on, every name slot that showed ink in at least
 //! [`MIN_CONFIRMED`] confirmed frames of the run (seen so far within the
@@ -79,6 +84,22 @@ pub const HOLD: u32 = 30;
 /// on menus that can precede a surface. `LEAD + PRE_ROLL` is the longest
 /// a frame without a run waits for its decision.
 pub const LEAD: u32 = 12;
+/// Most frames right after a run's last confirmed frame that join the
+/// run while the gate holds each of them (measured: the native read of a
+/// death recap failed for its last 7 frames before it closed in a
+/// sharpened copy of a real recording). As short as [`LEAD`] because the
+/// gate also holds gameplay that resembles a panel (stair lines under the
+/// scoreboard gate at 720p): with a tail of 30 frames, the scoreboard
+/// boxes of such marginal runs in 720p copies of 31 real recordings grew
+/// from 364 to 677 frames. Frames of the tail wait at most `HOLD + 1`
+/// frames for their decision, within [`LOOKAHEAD`].
+pub const TAIL: u32 = LEAD;
+/// Share of the last confirmed frame's gate score a frame of the tail
+/// must keep (measured: the tail frames of the sharpened recap scored
+/// 0.56 to 0.74 after a last confirmed frame at 0.64; the gate of a
+/// synthetic death recap at 720p dropped from 0.98 to the 0.68 of its
+/// background's edges when the panel closed).
+pub const TAIL_LEVEL: f32 = 0.75;
 /// Vertical growth, in reference pixels, of the boxes of frames without
 /// their own read (at least the largest slide the surfaces allow).
 pub const UNREAD_MARGIN: i32 = 20;
@@ -105,6 +126,9 @@ pub struct Slot {
 pub struct SurfaceFrame {
     /// Whether the surface's gate made the frame a candidate.
     pub candidate: bool,
+    /// The gate's score of the frame
+    /// ([`GateSignal::score`](super::GateSignal::score)).
+    pub score: f32,
     /// The name slots of a confirmed frame.
     pub slots: Option<Vec<Slot>>,
 }
@@ -114,7 +138,13 @@ struct Run {
     /// The first frame of the run: its first confirmed frame, or the
     /// first frame of the gate-held lead before it.
     start: u32,
+    /// The run's last confirmed frame.
     last: u32,
+    /// The last frame of the gate-held tail after `last` (`last` if
+    /// there is none).
+    tail: u32,
+    /// The gate's score of the last confirmed frame.
+    level: f32,
     closed: bool,
     /// Whether the gate held every frame since `last`.
     held: bool,
@@ -137,9 +167,14 @@ impl Slot {
 }
 
 impl Run {
+    /// The last frame of a closed run's post-roll.
+    const fn end(&self) -> u32 {
+        self.tail + POST_ROLL
+    }
+
     /// Whether frame `f` gets boxes from this run (as far as it is known).
     fn covers(&self, f: u32) -> bool {
-        f + PRE_ROLL >= self.start && (!self.closed || f <= self.last + POST_ROLL)
+        f + PRE_ROLL >= self.start && (!self.closed || f <= self.end())
     }
 }
 
@@ -153,8 +188,8 @@ pub struct SurfaceTrack {
     runs: VecDeque<Run>,
     /// The newest frame pushed.
     newest: Option<u32>,
-    /// The first frame of the current streak of frames that the gate made
-    /// candidates (up to the newest frame), if the newest frame is one.
+    /// The first frame of the current streak of held frames (up to the
+    /// newest frame), if the newest frame is held.
     held_since: Option<u32>,
 }
 
@@ -175,7 +210,8 @@ impl SurfaceTrack {
     /// `(frame, boxes)`.
     pub fn push(&mut self, frame: u32, data: SurfaceFrame, out: &mut Vec<(u32, Vec<Detection>)>) {
         self.newest = Some(frame);
-        if data.candidate || data.slots.is_some() {
+        let held = data.candidate || data.slots.is_some();
+        if held {
             self.held_since.get_or_insert(frame);
         } else {
             self.held_since = None;
@@ -183,7 +219,14 @@ impl SurfaceTrack {
         if let Some(run) = self.runs.back_mut()
             && !run.closed
         {
-            run.held &= data.candidate || data.slots.is_some();
+            run.held &= held;
+            if run.held
+                && run.tail + 1 == frame
+                && frame <= run.last + TAIL
+                && data.score >= TAIL_LEVEL * run.level
+            {
+                run.tail = frame;
+            }
             let gap = frame - run.last - 1;
             if gap > BRIDGE && (!run.held || gap > HOLD) {
                 run.closed = true;
@@ -198,11 +241,14 @@ impl SurfaceTrack {
                     .unwrap_or(frame)
                     .max(frame.saturating_sub(LEAD));
                 if let Some(previous) = self.runs.back() {
-                    start = start.max(previous.last + POST_ROLL + 1);
+                    // A run whose tail reached this frame overlaps it.
+                    start = start.max(previous.end() + 1).min(frame);
                 }
                 self.runs.push_back(Run {
                     start,
                     last: frame,
+                    tail: frame,
+                    level: data.score,
                     closed: false,
                     held: true,
                     confirmed: 0,
@@ -211,6 +257,8 @@ impl SurfaceTrack {
             }
             if let Some(run) = self.runs.back_mut() {
                 run.last = frame;
+                run.tail = frame;
+                run.level = data.score;
                 run.held = true;
                 run.confirmed += 1;
                 for s in slots.iter().filter(|s| s.ink) {
@@ -267,11 +315,7 @@ impl SurfaceTrack {
             self.pending.pop_front();
             out.push((f, boxes));
             // Runs that end before the next pending frame are done.
-            while self
-                .runs
-                .front()
-                .is_some_and(|r| r.closed && r.last + POST_ROLL <= f)
-            {
+            while self.runs.front().is_some_and(|r| r.closed && r.end() <= f) {
                 self.runs.pop_front();
             }
         }
@@ -329,13 +373,14 @@ mod tests {
     use blurrd_core::{NameKind, RectI, Region};
 
     use super::{
-        BRIDGE, HOLD, LEAD, LOOKAHEAD, POST_ROLL, PRE_ROLL, Slot, SurfaceFrame, SurfaceTrack,
-        UNREAD_MARGIN,
+        BRIDGE, HOLD, LEAD, LOOKAHEAD, POST_ROLL, PRE_ROLL, Slot, SurfaceFrame, SurfaceTrack, TAIL,
+        TAIL_LEVEL, UNREAD_MARGIN,
     };
 
     fn frame(read: bool, ink: bool, y: i32) -> SurfaceFrame {
         SurfaceFrame {
             candidate: read,
+            score: 0.0,
             slots: read.then(|| {
                 vec![Slot {
                     kind: NameKind::ScoreboardRow,
@@ -438,6 +483,7 @@ mod tests {
             }
             let data = SurfaceFrame {
                 candidate: true,
+                score: 0.0,
                 slots: Some(slots),
             };
             track.push(i, data, &mut out);
@@ -487,6 +533,7 @@ mod tests {
         let mut decided = vec![];
         let held = SurfaceFrame {
             candidate: true,
+            score: 0.0,
             slots: None,
         };
         for i in 0..50 {
@@ -517,6 +564,7 @@ mod tests {
                 'C' => frame(true, true, 100),
                 'h' => SurfaceFrame {
                     candidate: true,
+                    score: 0.0,
                     slots: None,
                 },
                 _ => frame(false, false, 100),
@@ -534,23 +582,73 @@ mod tests {
         // A held gap longer than the bridge, ended by a confirmed frame.
         let p = format!("CCC{}CCC", gap("h", HOLD));
         assert!(held_run(&p).iter().all(|&b| b == 1));
-        // The same gap with one frame the gate did not hold is split.
-        let p = format!("CCC{}.{}CCC", gap("h", 10), gap("h", 10));
-        let boxes = held_run(&p);
-        assert_eq!(boxes[2 + POST_ROLL as usize], 1);
-        assert_eq!(boxes[3 + POST_ROLL as usize], 0);
-        // A held gap that no confirmed frame ends gets no boxes after the
-        // post-roll.
-        let p = format!("CCC{}{}", gap("h", 20), gap(".", 10));
-        let boxes = held_run(&p);
-        assert_eq!(boxes.iter().sum::<usize>(), 3 + POST_ROLL as usize);
         // A held gap longer than `HOLD` is not bridged: only the first
-        // run's post-roll and the second run's lead and pre-roll reach
-        // into it.
-        let p = format!("CCC{}CCC", gap("h", HOLD + 1));
+        // run's tail and post-roll and the second run's lead and pre-roll
+        // reach into it.
+        let extra = 5;
+        let n = TAIL + POST_ROLL + LEAD + PRE_ROLL + extra;
+        let p = format!("CCC{}CCC", gap("h", n));
         assert_eq!(
             held_run(&p).iter().filter(|&&b| b == 0).count(),
-            (HOLD + 1 - POST_ROLL - LEAD - PRE_ROLL) as usize
+            extra as usize
         );
+    }
+
+    #[test]
+    fn covers_the_gate_held_tail_after_the_last_read() {
+        let roll = |c: &str, n: u32| c.repeat(n as usize);
+        // Reads fail for the last 7 frames before the panel closes.
+        let p = format!("{}CCCC{}{}", roll(".", 10), roll("h", 7), roll(".", 20));
+        let boxes = held_run(&p);
+        let first = 10 - PRE_ROLL as usize;
+        let last = 20 + POST_ROLL as usize;
+        assert!(boxes[first..=last].iter().all(|&b| b == 1), "{boxes:?}");
+        assert_eq!(boxes.iter().sum::<usize>(), last + 1 - first);
+        // A frame the gate did not hold ends the tail.
+        let p = format!("CCC{}.{}", roll("h", 4), roll(".", 20));
+        let boxes = held_run(&p);
+        assert_eq!(boxes.iter().sum::<usize>(), 7 + POST_ROLL as usize);
+        // A longer held streak is covered for `TAIL` frames only.
+        let p = format!("CCC{}{}", roll("h", 2 * HOLD), roll(".", 10));
+        let boxes = held_run(&p);
+        assert_eq!(boxes.iter().sum::<usize>(), (3 + TAIL + POST_ROLL) as usize);
+        // A gate whose score drops well below that of the last confirmed
+        // frame (the background's edges after the panel closed) gives no
+        // tail.
+        let mut track = SurfaceTrack::new(Region::Scoreboard);
+        let mut out = vec![];
+        for i in 0..20 {
+            let score = match i {
+                0..3 => 1.0,
+                3..6 => TAIL_LEVEL - 0.01,
+                _ => 0.0,
+            };
+            let data = SurfaceFrame {
+                candidate: i < 6,
+                score,
+                slots: frame(i < 3, true, 100).slots,
+            };
+            track.push(i, data, &mut out);
+        }
+        track.finish(&mut out);
+        let lit = out.iter().filter(|(_, b)| !b.is_empty()).count();
+        assert_eq!(lit, (3 + POST_ROLL) as usize);
+        // The decision delay stays within the lookahead.
+        let mut track = SurfaceTrack::new(Region::Scoreboard);
+        let mut decided = vec![];
+        let held = SurfaceFrame {
+            candidate: true,
+            score: 0.0,
+            slots: None,
+        };
+        for i in 0..200 {
+            let data = if i < 3 {
+                frame(true, true, 100)
+            } else {
+                held.clone()
+            };
+            track.push(i, data, &mut decided);
+            assert!(i + 1 - decided.len() as u32 <= LOOKAHEAD);
+        }
     }
 }
