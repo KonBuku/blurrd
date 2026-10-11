@@ -98,6 +98,17 @@ pub(crate) enum Filter {
         /// Contrast factor.
         contrast: f32,
     },
+    /// Shifts red, green and blue separately in the shadows, midtones and
+    /// highlights (−1 to 1 each), like a tint preset of NVIDIA Freestyle
+    /// or FFmpeg's `colorbalance` filter, whose formula this follows.
+    ColourBalance {
+        /// Shifts of the dark tones.
+        shadows: [f32; 3],
+        /// Shifts of the middle tones.
+        midtones: [f32; 3],
+        /// Shifts of the bright tones.
+        highlights: [f32; 3],
+    },
 }
 
 impl Filter {
@@ -139,6 +150,24 @@ impl Filter {
                 brightness,
                 contrast,
             } => c.map(|v| (v + brightness * 255.0 - 128.0) * contrast + 128.0),
+            Self::ColourBalance {
+                shadows,
+                midtones,
+                highlights,
+            } => {
+                // FFmpeg's weights over the sum of the largest and the
+                // smallest channel (0 to 2).
+                const SLOPE: f32 = 4.0;
+                const SPLIT: f32 = 0.333;
+                const SCALE: f32 = 0.7;
+                let l = (c[0].max(c[1]).max(c[2]) + c[0].min(c[1]).min(c[2])) / 255.0;
+                let weight = |v: f32| (v * SLOPE + 0.5).clamp(0.0, 1.0) * SCALE;
+                let (ws, wh) = (weight(SPLIT - l), weight(l + SPLIT - 1.0));
+                let wm = weight(l - SPLIT) * (weight(1.0 - l - SPLIT) / SCALE);
+                std::array::from_fn(|i| {
+                    c[i] + 255.0 * (ws * shadows[i] + wm * midtones[i] + wh * highlights[i])
+                })
+            }
         };
         out.map(|v| v.round().clamp(0.0, 255.0) as u8)
     }

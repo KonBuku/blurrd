@@ -26,12 +26,13 @@ const BACKGROUNDS: [Background; 3] = [
 /// Filters with realistic strengths: hue shifts, desaturated and vivid
 /// colours down to black and white (NVIDIA Freestyle's Black & White
 /// filter, saturation sliders near 0), Digital Vibrance, dark and bright
-/// gamma, washed-out, darkened and punchy levels. The rendered name
+/// gamma, washed-out, darkened and punchy levels, and a warm colour
+/// balance tint of the shadows and highlights. The rendered name
 /// strokes are sharper than recorded ones, so only the darkest levels push
 /// them below the tuned text thresholds (recordings cross them from a
 /// brightness offset of about −0.10); that case fails without the
 /// white-level adjustment.
-const FILTERS: [Filter; 15] = [
+const FILTERS: [Filter; 16] = [
     Filter::Hue(40.0),
     Filter::Hue(120.0),
     Filter::Hue(-90.0),
@@ -58,6 +59,11 @@ const FILTERS: [Filter; 15] = [
     Filter::Levels {
         brightness: -0.3,
         contrast: 0.9,
+    },
+    Filter::ColourBalance {
+        shadows: [0.3, -0.1, -0.3],
+        midtones: [0.0; 3],
+        highlights: [0.2, 0.0, -0.2],
     },
 ];
 
