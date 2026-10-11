@@ -38,7 +38,8 @@ const SLIDE: i32 = 20;
 const REFINE: i32 = GATE_STEP + 2;
 /// Reference pixels per cell of the native plane.
 const STEP: i32 = 2;
-/// The cards' horizontal edges must show at least this mean score.
+/// The cards' top edge and their strip and bottom edges (as one set)
+/// must each show at least this score across all card positions.
 const MIN_LINES: f32 = 0.5;
 /// A card exists where its left and right edges and the top and bottom
 /// edges of its name strip each score at least this (a long line of
@@ -152,8 +153,11 @@ impl MatchEndReader {
         let dy = hint + refine;
         let (y, x0, x1) = TOP_LINE;
         let (top, _) = edges::horizontal_set(&self.top, &[(y + dy, x0, x1)], 0);
-        // The mean over all four edges, as one set.
-        if (3.0 * score + top) / 4.0 < MIN_LINES {
+        // The edges must run across the whole row of cards: lines that a
+        // single card-sized shape in gameplay matches (a door frame over
+        // floor steps under a sharpening filter: 0.25 to 0.29 for the
+        // top edge) are not enough.
+        if score < MIN_LINES || top < MIN_LINES {
             return None;
         }
         let slots: Vec<Slot> = (0..CARDS)
