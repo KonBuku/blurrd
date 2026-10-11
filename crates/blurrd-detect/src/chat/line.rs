@@ -1,6 +1,8 @@
 //! Text lines inside the chat box and the sender name of each line (port
 //! spec section 6, steps 2 to 7).
 
+use std::cell::OnceCell;
+
 use blurrd_core::RectI;
 
 use crate::components::{Run, merge_runs, runs};
@@ -378,6 +380,10 @@ struct LineInk<'a> {
     /// The same for high-contrast ink: faint texture and anti-aliasing do
     /// not join the white colon to its neighbours.
     strong_segments: Vec<Run>,
+    /// High-contrast stroke pixels per column.
+    strong_columns: Vec<u32>,
+    /// [`white_level`](Self::white_level), measured once.
+    white: OnceCell<u8>,
 }
 
 impl<'a> LineInk<'a> {
@@ -401,19 +407,26 @@ impl<'a> LineInk<'a> {
             ),
             segments: Vec::new(),
             strong_segments: Vec::new(),
+            strong_columns: vec![0; scratch.area.width() as usize],
+            white: OnceCell::new(),
         };
-        let text = |segments: Vec<Run>| {
-            segments
+        // Stroke pixels per column, counted row by row.
+        let mut columns = vec![0u32; line.width as usize];
+        for y in 0..line.height {
+            let row = scratch.levels_row(a + y);
+            for ((all, strong), &v) in columns.iter_mut().zip(&mut line.strong_columns).zip(row) {
+                *all += u32::from(v > READ_MIN);
+                *strong += u32::from(v > INK_MIN);
+            }
+        }
+        let text = |columns: &[u32]| {
+            runs(columns.iter().map(|&n| n as usize >= COLUMN_MIN_INK))
                 .into_iter()
                 .filter(|s| s.end > EDGE_COLUMNS)
                 .collect()
         };
-        line.segments = text(runs((0..line.width).map(|x| {
-            (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK
-        })));
-        line.strong_segments = text(runs((0..line.width).map(|x| {
-            (0..line.height).filter(|&y| line.get_strong(x, y)).count() >= COLUMN_MIN_INK
-        })));
+        line.segments = text(&columns);
+        line.strong_segments = text(&line.strong_columns);
         line
     }
 
@@ -498,24 +511,38 @@ impl<'a> LineInk<'a> {
     /// line's stroke pixels stay below: the white of the message where the
     /// line has one.
     fn white_level(&self) -> u8 {
+        *self.white.get_or_init(|| self.measure_white_level())
+    }
+
+    /// Measures [`white_level`](Self::white_level) from a histogram of
+    /// the stroke pixels' brightness.
+    fn measure_white_level(&self) -> u8 {
         let area = self.scratch.area;
-        let mut levels: Vec<u8> = Vec::new();
+        let x0 = 3 * (area.x0 - self.origin.0) as usize;
+        let mut histogram = [0u32; 256];
+        let mut count = 0;
         for y in 0..self.height {
-            for x in 0..self.width {
-                if self.get(x, y) {
-                    let [r, g, b] = self.crop.pixel(
-                        (area.x0 + x as i32 - self.origin.0) as u32,
-                        (area.y0 + (self.a + y) as i32 - self.origin.1) as u32,
-                    );
-                    levels.push(r.max(g).max(b));
+            let row = (area.y0 + (self.a + y) as i32 - self.origin.1) as u32;
+            let pixels = self.crop.row(row)[x0..].as_chunks::<3>().0;
+            for (&level, &[r, g, b]) in self.scratch.levels_row(self.a + y).iter().zip(pixels) {
+                if level > READ_MIN {
+                    histogram[usize::from(r.max(g).max(b))] += 1;
+                    count += 1;
                 }
             }
         }
-        if levels.is_empty() {
+        if count == 0 {
             return 0;
         }
-        let k = ((levels.len() - 1) as f32 * WHITE_PERCENTILE) as usize;
-        *levels.select_nth_unstable(k).1
+        // The k-th smallest brightness (from 0).
+        let k = ((count - 1) as f32 * WHITE_PERCENTILE) as u32;
+        let mut below = 0;
+        (0..=u8::MAX)
+            .find(|&v| {
+                below += histogram[usize::from(v)];
+                below > k
+            })
+            .unwrap_or(u8::MAX)
     }
 }
 
@@ -894,6 +921,10 @@ fn colon_column(
     ends_name: &impl Fn(u32) -> bool,
 ) -> Option<u32> {
     (from..=to.min(line.width - 1)).find(|&c| {
+        // Two dots of at most 3 rows each: cheap to rule out first.
+        if !(2..=6).contains(&line.strong_columns[c as usize]) {
+            return false;
+        }
         let dots = line.column_runs(c);
         let [upper, lower] = dots[..] else {
             return false;
