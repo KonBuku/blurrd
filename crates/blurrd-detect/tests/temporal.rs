@@ -91,6 +91,10 @@ struct Run {
     /// they are settled and opaque: the tracker follows what the detector
     /// finds and cannot cover the rest either.
     detector_limits: BTreeSet<ItemId>,
+    /// The kill-feed name-frames the per-frame detector's boxes cover.
+    detector_covered: BTreeSet<(u32, ItemId)>,
+    /// The per-frame detector's kill-feed boxes of every frame.
+    detector_boxes: Vec<Vec<RectI>>,
 }
 
 /// Runs the detector and the tracker over the whole video.
@@ -101,12 +105,17 @@ fn track(video: &Video) -> Run {
     let mut truths = Vec::new();
     let mut detections = Vec::new();
     let mut per_frame: BTreeMap<ItemId, (u32, u32)> = BTreeMap::new();
+    let mut detector_covered = BTreeSet::new();
+    let mut detector_boxes = Vec::new();
     for f in 0..video.frames() {
         let fx = video.render(f);
         let crop = feed_view(&fx.frame);
         detector.detect(&crop, &mut detections).unwrap();
         for c in item_coverage(&fx.truth, &support::prepared(&fx.frame, &detections)) {
             let item = fx.truth.items.iter().find(|i| i.id == c.id).unwrap();
+            if item.region == Region::KillFeed && !c.is_leak() {
+                detector_covered.insert((f, c.id));
+            }
             if item.region == Region::KillFeed && item.opacity >= 1.0 {
                 let e = per_frame.entry(c.id).or_default();
                 e.0 += 1;
@@ -114,6 +123,13 @@ fn track(video: &Video) -> Run {
             }
         }
         truths.push(fx.truth);
+        detector_boxes.push(
+            detections
+                .iter()
+                .filter(|d| d.region == Region::KillFeed)
+                .map(|d| d.rect)
+                .collect(),
+        );
         tracker
             .push(&KillFeedFrame {
                 frame: f,
@@ -138,7 +154,26 @@ fn track(video: &Video) -> Run {
         boxes: out,
         truths,
         detector_limits,
+        detector_covered,
+        detector_boxes,
     }
+}
+
+/// Name-frames the per-frame detector covers but the tracker leaves
+/// readable, as `frame: id` strings.
+fn worse_than_detector(run: &Run) -> Vec<String> {
+    let mut out = Vec::new();
+    for (entry, truth) in run.boxes.iter().zip(&run.truths) {
+        for c in item_coverage(truth, &prepared(entry)) {
+            if c.is_leak() && run.detector_covered.contains(&(entry.frame, c.id)) {
+                out.push(format!(
+                    "{}: {:?} ({} of {} px)",
+                    entry.frame, c.id, c.leaked_pixels, c.glyph_pixels
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// The boxes the render applies with the default blur parameters.
@@ -254,6 +289,44 @@ fn covers_names_through_wipe_in_and_stack_jumps() {
 }
 
 #[test]
+fn covers_what_the_detector_reads_in_the_last_frames() {
+    // A row born in the last frames of the video: too few readings for a
+    // reference, and no later frame to follow one back from. Rows appear
+    // complete or wipe in.
+    for (seed, wipe_in, end) in [
+        (41, false, 1),
+        (42, false, 2),
+        (43, false, 3),
+        (44, true, 8),
+    ] {
+        let frames = 60 + end;
+        let video = Video::new(
+            seed,
+            &[0, 20, 60],
+            |s| KillFeedSpec {
+                life: 120,
+                wipe_in,
+                ..s
+            },
+            &[Background::noise(3)],
+            Palette::DEFAULT,
+            frames,
+        );
+        let run = track(&video);
+        // The names of the newest row: not on screen before its birth.
+        let before: BTreeSet<ItemId> = run.truths[59].items.iter().map(|i| i.id).collect();
+        let read = run
+            .detector_covered
+            .iter()
+            .filter(|&&(f, id)| f >= 60 && !before.contains(&id))
+            .count();
+        assert!(read > 0, "seed {seed}: the detector reads the newest row");
+        let worse = worse_than_detector(&run);
+        assert!(worse.is_empty(), "seed {seed}: {worse:#?}");
+    }
+}
+
+#[test]
 fn covers_fading_names_until_their_rows_are_gone() {
     // Long fades (the default 18 frames) of rows that are not replaced:
     // the template loses a name long before it is invisible, the row's
@@ -315,15 +388,26 @@ fn keeps_companions_in_their_row_when_a_name_repeats() {
     assert!(leaks.is_empty(), "{} leaks: {leaks:#?}", leaks.len());
     let strays = strays(&run, POST_ROLL);
     assert!(strays.is_empty(), "{strays:#?}");
+    // Boxes on a portrait, except where the per-frame detector boxed a
+    // reading on that portrait as well (a fading row's portrait read as a
+    // name): the tracker never covers less than the detector.
     let on_portraits: Vec<String> = run
         .boxes
         .iter()
         .zip(&run.truths)
-        .flat_map(|(entry, truth)| {
+        .zip(&run.detector_boxes)
+        .flat_map(|((entry, truth), read)| {
             entry
                 .boxes
                 .iter()
-                .filter(|b| truth.portraits().any(|p| p.intersection(&b.rect).is_some()))
+                .filter(|b| {
+                    truth.portraits().any(|p| {
+                        p.intersection(&b.rect).is_some()
+                            && !read.iter().any(|r| {
+                                r.intersection(&p).is_some() && r.intersection(&b.rect).is_some()
+                            })
+                    })
+                })
                 .map(|b| format!("{}: {:?} {}", entry.frame, b.kind, b.rect))
                 .collect::<Vec<_>>()
         })

@@ -28,6 +28,10 @@
 //!    unions, a pre-roll at a row's birth, slot boxes for uncertain
 //!    frames, checked companions, portrait clearance and a merge of
 //!    duplicates (see the `compose` module).
+//! 7. Every reading of the frame that the boxes leave readable gets a box,
+//!    so the tracker never covers less than the per-frame detector, also
+//!    at the end of a video, where no later reference can be followed
+//!    back.
 //!
 //! The prototype kept the strips of the whole clip in memory and tracked
 //! mid-life references backward over the entire life. This tracker is
@@ -394,6 +398,9 @@ pub struct KillFeedTracker {
     next_frame: Option<u32>,
     /// The next frame to hand out.
     next_emit: u32,
+    /// The readings of the last frames handed out (frame index and
+    /// readings), for the frames after them (`compose::cover_readings`).
+    emitted: Vec<(u32, Vec<Detection>)>,
 }
 
 impl Default for KillFeedTracker {
@@ -416,6 +423,7 @@ impl KillFeedTracker {
             next_part: 0,
             next_frame: None,
             next_emit: 0,
+            emitted: Vec::new(),
         }
     }
 
@@ -541,6 +549,13 @@ impl KillFeedTracker {
             + parts
             + self.detections.capacity() * size_of::<Detection>()
             + self.references.capacity() * size_of::<Reference>()
+            + self
+                .emitted
+                .iter()
+                .map(|(_, ds)| {
+                    size_of::<(u32, Vec<Detection>)>() + ds.capacity() * size_of::<Detection>()
+                })
+                .sum::<usize>()
             + self
                 .ready
                 .iter()
@@ -814,7 +829,29 @@ impl KillFeedTracker {
     /// Hands out frame `f` and forgets what only earlier frames needed.
     fn emit(&mut self, f: u32) {
         let mut boxes = Vec::new();
-        compose::compose(f, &mut self.parts, &self.ring, &mut boxes);
+        let mut clearances = Vec::new();
+        compose::compose(f, &mut self.parts, &self.ring, &mut boxes, &mut clearances);
+        compose::cover_readings(
+            f,
+            &self.ring,
+            &self.emitted,
+            &clearances,
+            &mut self.next_part,
+            &mut boxes,
+        );
+        // Keep the readings of the last frames handed out, reusing the
+        // oldest entry's buffer.
+        let mut entry = if self.emitted.len() >= compose::ESCALATE_BRIDGE as usize {
+            self.emitted.remove(0)
+        } else {
+            (f, Vec::new())
+        };
+        entry.0 = f;
+        entry.1.clear();
+        if let Some(slot) = self.ring.get(f) {
+            entry.1.extend_from_slice(&slot.detections);
+        }
+        self.emitted.push(entry);
         self.ready.push(FrameBoxes { frame: f, boxes });
         let keep = f.saturating_sub(POST_ROLL);
         self.parts.retain_mut(|p| {
@@ -890,9 +927,16 @@ fn is_badge(d: &Detection, all: &[Detection]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use blurrd_core::RectI;
+    #![allow(
+        clippy::unwrap_used,
+        reason = "test helpers on small frames: a panic is a failure"
+    )]
 
-    use super::{ROW_PITCH, lead_reading};
+    use blurrd_core::{NameKind, RectI, Region};
+
+    use super::{FEED_ROI, FrameBoxes, KillFeedFrame, KillFeedTracker, ROW_PITCH, lead_reading};
+    use crate::detection::Detection;
+    use crate::image::RgbView;
 
     /// A name's text bounds from `x0` to `x1` with its baseline at `y1`.
     fn text(x0: i32, x1: i32, y1: i32) -> RectI {
@@ -948,6 +992,117 @@ mod tests {
         );
         assert_eq!(lead_reading(name, &[text(1786, 1830, 177)]), None);
         assert_eq!(lead_reading(name, &[]), None);
+    }
+
+    /// A kill-feed reading in the row at `top` (the detector's band rule
+    /// for the box).
+    fn reading(kind: NameKind, x0: i32, x1: i32, top: i32) -> Detection {
+        Detection {
+            region: Region::KillFeed,
+            kind,
+            text: RectI {
+                x0,
+                y0: top + 10,
+                x1,
+                y1: top + 24,
+            },
+            rect: RectI {
+                x0: x0 - 2,
+                y0: top + 3,
+                x1: x1 + 2,
+                y1: top + 31,
+            },
+            row_top: Some(top),
+        }
+    }
+
+    /// Runs the tracker over flat frames (nothing to cut a template from:
+    /// no name becomes a part) with the readings `readings(frame)`.
+    fn track_flat(frames: u32, readings: impl Fn(u32) -> Vec<Detection>) -> Vec<FrameBoxes> {
+        let (w, h) = (FEED_ROI.width(), FEED_ROI.height());
+        let crop = vec![90_u8; (3 * w * h) as usize];
+        let view = RgbView::new(&crop, w, h, 3 * w as usize).unwrap();
+        let mut tracker = KillFeedTracker::new();
+        let mut out = Vec::new();
+        for frame in 0..frames {
+            let detections = readings(frame);
+            tracker
+                .push(&KillFeedFrame {
+                    frame,
+                    crop: view,
+                    detections: &detections,
+                })
+                .unwrap();
+            tracker.drain_ready(&mut out);
+        }
+        tracker.finish(&mut out);
+        assert_eq!(out.len(), frames as usize);
+        out
+    }
+
+    /// Whether a box of `boxes` contains the text of `d`.
+    fn boxed(boxes: &FrameBoxes, d: &Detection) -> bool {
+        boxes.boxes.iter().any(|b| {
+            b.rect.x0 <= d.text.x0
+                && b.rect.x1 >= d.text.x1
+                && b.rect.y0 <= d.text.y0
+                && b.rect.y1 >= d.text.y1
+        })
+    }
+
+    #[test]
+    fn boxes_readings_that_no_part_follows() {
+        // A row born in the last frames of a video: too few readings for
+        // a reference, and no later frame to follow one back from.
+        let killer = reading(NameKind::Killer, 1500, 1600, 120);
+        let victim = reading(NameKind::Victim, 1700, 1820, 120);
+        for born in [1, 2, 3] {
+            let frames = 40;
+            let out = track_flat(frames, |f| {
+                if f + born >= frames {
+                    vec![killer, victim]
+                } else {
+                    Vec::new()
+                }
+            });
+            for entry in &out[(frames - born) as usize..] {
+                assert!(boxed(entry, &killer) && boxed(entry, &victim), "{entry:?}");
+                // Escalated to the slot box: the killer's reaches the
+                // victim.
+                assert!(entry.boxes.iter().any(|b| b.rect.x1 >= victim.rect.x0));
+            }
+            assert!(
+                out[..(frames - born) as usize]
+                    .iter()
+                    .all(|e| e.boxes.is_empty())
+            );
+        }
+    }
+
+    #[test]
+    fn boxes_readings_whose_extent_alternates() {
+        // The name's readings alternate between two widths every frame (and
+        // miss single frames): the linker never sees one extent four times.
+        let wide = reading(NameKind::Victim, 1690, 1820, 160);
+        let narrow = reading(NameKind::Victim, 1722, 1820, 160);
+        let read = |f: u32| match f % 5 {
+            0 | 2 => vec![wide],
+            1 | 3 => vec![narrow],
+            _ => Vec::new(),
+        };
+        let out = track_flat(200, read);
+        for (f, entry) in (0..).zip(&out) {
+            // Frames without a reading between two that read it are bridged
+            // (the last one has no frame after it).
+            let expected = match read(f).first() {
+                Some(d) => Some(*d),
+                None if f + 1 < 200 => Some(narrow),
+                None => None,
+            };
+            if let Some(d) = expected {
+                assert!(boxed(entry, &d), "frame {f}: {entry:?}");
+            }
+        }
     }
 
     #[test]

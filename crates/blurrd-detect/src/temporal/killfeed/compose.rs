@@ -55,6 +55,12 @@
 //!   reached into the portrait.
 //! - **Merge:** boxes of the same name from several parts (IoU ≥
 //!   [`MERGE_IOU`]) become their union.
+//! - **Readings covered:** a reading of the frame that the boxes leave
+//!   readable (a name no part follows yet, such as a row born in the last
+//!   frames of a video, one a part placed in the wrong row, or the end of
+//!   a name a part cut from a short reading) gets a box of its own
+//!   ([`cover_readings`]): the tracker never covers less than the
+//!   per-frame detector.
 
 use blurrd_core::{Confidence, NameKind, RectI};
 
@@ -176,7 +182,7 @@ const RISE_UNION: i32 = 9;
 
 /// Confident frames this close to an uncertain one are escalated with it
 /// (the jitter gate allows no box change shorter than 3 frames).
-const ESCALATE_BRIDGE: u32 = 2;
+pub(super) const ESCALATE_BRIDGE: u32 = 2;
 
 /// A rectangle relative to a template corner: `x0, y0, x1, y1`.
 pub(super) type Offset = (i32, i32, i32, i32);
@@ -407,8 +413,16 @@ struct Candidate {
 }
 
 /// Composes the boxes of frame `f` from `parts` into `out`, reading the
-/// frame (and the next one) from `ring`.
-pub(super) fn compose(f: u32, parts: &mut [Part], ring: &Ring, out: &mut Vec<FeedBox>) {
+/// frame (and the next one) from `ring`. `clearances` receives the box of
+/// every name with the killer-portrait clearance of its row (also of the
+/// names dropped as read on the portrait art).
+pub(super) fn compose(
+    f: u32,
+    parts: &mut [Part],
+    ring: &Ring,
+    out: &mut Vec<FeedBox>,
+    clearances: &mut Vec<Clearance>,
+) {
     let mut candidates = Vec::new();
     for (owner, part) in parts.iter_mut().enumerate() {
         part_candidates(f, owner, part, ring, &mut candidates);
@@ -466,6 +480,10 @@ pub(super) fn compose(f: u32, parts: &mut [Part], ring: &Ring, out: &mut Vec<Fee
             merged.push(c);
         }
     }
+    clearances.extend(merged.iter().map(|c| Clearance {
+        rect: c.rect,
+        floor: c.floor,
+    }));
     // A union may hold a box of a part that did not find the killer
     // portrait: the clearance of the others applies to it as well. A
     // "name" whose text lies left of the clearance was read on the
@@ -483,6 +501,239 @@ pub(super) fn compose(f: u32, parts: &mut [Part], ring: &Ring, out: &mut Vec<Fee
             offset: c.offset,
         })
     }));
+}
+
+/// Adds a box for every kill-feed reading of frame `f` that the boxes in
+/// `out` leave readable, so the tracker never covers less than the
+/// per-frame detector. A name the linker has not turned into a part yet
+/// has no box of its own: fewer than `MIN_DETECTIONS` readings of one
+/// extent (a row born in the last frames of a video, where no later
+/// reference can be followed back) or readings whose extent keeps
+/// alternating. A part that follows the wrong row leaves the name's own
+/// row open, and one cut from a short reading (a row still wiping in)
+/// leaves the end of the full reading open until a reference of it
+/// forms.
+///
+/// A reading is left readable where more than [`TEXT_HALO`] of its
+/// columns right of the row's killer-portrait clearance lie outside every
+/// box of its row; the row's first name may also reach left of the box of
+/// its name by up to half its width (a reading that took killer-portrait
+/// columns for text: up to 40 px measured on real footage, the whole
+/// portrait in a fading synthetic row). A reading no box touches gets its
+/// slot box, escalated; one partly covered gets its own box, without such
+/// portrait columns. Both are found as [`Confidence::GapFill`], keep the
+/// clearances of a tracked box and get a new id from `next_id`; a reading
+/// left of the clearance lies on the portrait (or a multikill badge) and
+/// gets none.
+///
+/// A frame without the reading between two frames that read the name at
+/// the same place (at most [`ESCALATE_BRIDGE`] frames from either) takes
+/// the reading of the frame before, so the box does not flicker, unless
+/// the frame reads another name in its slot (a stack jump).
+///
+/// `before` holds the readings of the frames handed out before `f`
+/// (frame index and readings), which the ring no longer holds;
+/// `clearances` the killer-portrait clearances [`compose`] found in the
+/// frame's rows.
+pub(super) fn cover_readings(
+    f: u32,
+    ring: &Ring,
+    before: &[(u32, Vec<Detection>)],
+    clearances: &[Clearance],
+    next_id: &mut u32,
+    out: &mut Vec<FeedBox>,
+) {
+    let Some(frame) = ring.frame(f) else { return };
+    let own = ring.get(f).map_or(&[][..], |s| &s.detections[..]);
+    let composed_len = out.len();
+    for (d, frame_readings) in readings_to_cover(f, ring, before) {
+        let floor = row_floor(&frame, frame_readings, d, clearances);
+        // Left of the clearance lie the portrait and a multikill badge.
+        let skip = |o: &Detection| o.text.x1 <= floor;
+        if skip(d) {
+            continue;
+        }
+        let row: Vec<&Detection> = frame_readings
+            .iter()
+            .filter(|o| o.row_top == d.row_top && !skip(o))
+            .collect();
+        let slot = slots(
+            &row.iter()
+                .map(|o| (o.kind, (o.rect.x0, o.rect.y0, o.rect.x1, o.rect.y1)))
+                .collect::<Vec<_>>(),
+        );
+        let Some(&(x0, y0, x1, y1)) = row
+            .iter()
+            .position(|o| std::ptr::eq(*o, d))
+            .and_then(|i| slot.get(i))
+        else {
+            continue;
+        };
+        // A reading taken from the frame before is not held where this
+        // frame reads another name in its slot: the row was replaced (a
+        // stack jump moves a row of another name into the place).
+        let bridged = !std::ptr::eq(frame_readings, own);
+        if bridged
+            && own
+                .iter()
+                .any(|o| same_row(o.rect, d.text) && o.text.x0 < x1 && o.text.x1 > x0)
+        {
+            continue;
+        }
+        let lo = d.text.x0.max(floor);
+        let composed = &out[..composed_len];
+        let covered = covered_columns(lo, d.text, composed);
+        // The row's first name may have been read with portrait columns
+        // left of the box of its name (at most half the reading). The
+        // portrait's edge can lie a few columns from the text (filters
+        // blur it), so even a narrow gap there stays the part's: the
+        // first-glyph edge columns of a short box are a known limit (plan
+        // 18.27), portrait blur is not.
+        let first_covered = composed
+            .iter()
+            .filter(|b| same_row(b.rect, d.text) && b.rect.x1 > lo && b.rect.x0 < d.text.x1)
+            .map(|b| b.rect.x0.max(lo))
+            .min();
+        let is_first = row.iter().all(|o| o.text.x0 >= d.text.x0);
+        let misread = match first_covered {
+            Some(x) if is_first && 2 * (x - lo) <= d.text.x1 - lo => x - lo,
+            _ => 0,
+        };
+        if d.text.x1 - lo - covered - misread <= TEXT_HALO {
+            continue;
+        }
+        // No widening reaches left of the row's first name.
+        let row_x0 = row.iter().map(|o| o.rect.x0).min().unwrap_or(x0);
+        let reach = match first_covered {
+            None => (x0.max(row_x0), x1),
+            Some(_) => (d.rect.x0 + misread, d.rect.x1),
+        };
+        let rect = RectI {
+            x0: reach.0.max(floor),
+            y0,
+            x1: reach
+                .1
+                .min((VICTIM_X1 - PORTRAIT_CLEARANCE).max(d.text.x1 + TEXT_HALO)),
+            y1,
+        };
+        if rect.x0 >= rect.x1 {
+            continue;
+        }
+        out.push(FeedBox {
+            rect,
+            kind: d.kind,
+            confidence: Confidence::GapFill,
+            part: *next_id,
+            offset: (0, 0),
+        });
+        *next_id += 1;
+    }
+}
+
+/// The killer-portrait clearance of the row of reading `d` among the
+/// readings `readings` of its frame, in reference pixels (`i32::MIN` if
+/// none): measured from the row's first reading as for a part, and never
+/// left of the clearance `compose` found for a followed name of the row,
+/// which knows its portrait better than a reading no part follows.
+fn row_floor(
+    frame: &Frame<'_>,
+    readings: &[Detection],
+    d: &Detection,
+    clearances: &[Clearance],
+) -> i32 {
+    let row = || readings.iter().filter(|o| o.row_top == d.row_top);
+    let measured = row()
+        .map(|o| o.text)
+        .min_by_key(|t| t.x0)
+        .zip(d.row_top)
+        .and_then(|(first, top)| {
+            let bound = row()
+                .map(|o| o.text.x0)
+                .filter(|&x| x > first.x0)
+                .min()
+                .map_or(i32::MAX, |x| x - STRIP.x0 - TEXT_HALO);
+            killer_clearance(frame.plane, top - STRIP.y0, local(first), bound)
+        })
+        .map(|x| STRIP.x0 + x);
+    clearances
+        .iter()
+        .filter(|c| c.floor != i32::MIN && same_row(c.rect, d.text))
+        .map(|c| c.floor)
+        .min()
+        .into_iter()
+        .chain(measured)
+        .max()
+        .unwrap_or(i32::MIN)
+}
+
+/// The readings [`cover_readings`] checks in frame `f`, each with the
+/// readings of its frame: the frame's own readings and those of the
+/// frames before (`before`) held across a gap.
+fn readings_to_cover<'a>(
+    f: u32,
+    ring: &'a Ring,
+    before: &'a [(u32, Vec<Detection>)],
+) -> Vec<(&'a Detection, &'a [Detection])> {
+    let own = ring.get(f).map_or(&[][..], |s| &s.detections[..]);
+    let after = |k: u32| ring.get(f.checked_add(k)?).map(|s| &s.detections[..]);
+    let mut readings: Vec<(&Detection, &[Detection])> = own.iter().map(|d| (d, own)).collect();
+    let earlier = before
+        .iter()
+        .filter(|(g, _)| *g < f && f - g <= ESCALATE_BRIDGE)
+        .map(|(_, ds)| &ds[..]);
+    for row in earlier {
+        for d in row {
+            let held = (1..=ESCALATE_BRIDGE)
+                .filter_map(after)
+                .any(|next| next.iter().any(|n| same_reading(n, d)));
+            if held && !readings.iter().any(|(r, _)| same_reading(r, d)) {
+                readings.push((d, row));
+            }
+        }
+    }
+    readings
+}
+
+/// The killer-portrait clearance of a composed box's row.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Clearance {
+    /// The box.
+    rect: RectI,
+    /// No box of the row starts left of this column (`i32::MIN` if the
+    /// killer portrait was not found).
+    floor: i32,
+}
+
+/// Whether box `rect` lies in the row of text `text`: it overlaps at least
+/// half the text's height (rows are 39 px apart, boxes at most 31 px
+/// tall).
+fn same_row(rect: RectI, text: RectI) -> bool {
+    2 * (rect.y1.min(text.y1) - rect.y0.max(text.y0)) >= text.y1 - text.y0
+}
+
+/// Whether two readings (of one frame or of neighbouring frames) are the
+/// same name at the same place.
+fn same_reading(a: &Detection, b: &Detection) -> bool {
+    a.kind == b.kind && a.text.iou(&b.text) >= SAME_NAME_IOU
+}
+
+/// The columns of text `text` from column `lo` on that the boxes of its
+/// row in `boxes` cover.
+fn covered_columns(lo: i32, text: RectI, boxes: &[FeedBox]) -> i32 {
+    let mut spans: Vec<(i32, i32)> = boxes
+        .iter()
+        .filter(|b| same_row(b.rect, text))
+        .map(|b| (b.rect.x0.max(lo), b.rect.x1.min(text.x1)))
+        .filter(|(a, b)| a < b)
+        .collect();
+    spans.sort_unstable();
+    let mut width = 0;
+    let mut reach = lo;
+    for (a, b) in spans {
+        width += (b - a.max(reach)).max(0);
+        reach = reach.max(b);
+    }
+    width
 }
 
 /// The candidates of one part (index `owner`) in frame `f`.
@@ -872,13 +1123,53 @@ fn union(a: RectI, b: RectI) -> RectI {
 
 #[cfg(test)]
 mod tests {
-    use blurrd_core::{BlurParams, NameKind, RectI};
+    use blurrd_core::{BlurParams, Confidence, NameKind, RectI};
 
     use crate::image::GrayImage;
 
+    use super::super::FeedBox;
     use super::{
-        PORTRAIT_CLEARANCE, SLOT_REACH, Seen, TEXT_HALO, is_away, killer_clearance, slots,
+        PORTRAIT_CLEARANCE, SLOT_REACH, Seen, TEXT_HALO, covered_columns, is_away,
+        killer_clearance, slots,
     };
+
+    /// A box from `x0` to `x1` in the row whose boxes start at `y0`.
+    fn feed_box(x0: i32, x1: i32, y0: i32) -> FeedBox {
+        FeedBox {
+            rect: RectI {
+                x0,
+                y0,
+                x1,
+                y1: y0 + 25,
+            },
+            kind: NameKind::Killer,
+            confidence: Confidence::Tracked,
+            part: 0,
+            offset: (0, 0),
+        }
+    }
+
+    #[test]
+    fn covered_columns_count_boxes_of_the_row_once() {
+        let text = RectI {
+            x0: 1470,
+            y0: 146,
+            x1: 1552,
+            y1: 160,
+        };
+        // A box cut from a reading taken while the row wiped in leaves the
+        // last 21 columns open.
+        assert_eq!(
+            covered_columns(1470, text, &[feed_box(1465, 1531, 140)]),
+            61
+        );
+        // Overlapping boxes count once; columns left of `lo` do not count.
+        let both = [feed_box(1465, 1531, 140), feed_box(1500, 1560, 140)];
+        assert_eq!(covered_columns(1470, text, &both), 82);
+        assert_eq!(covered_columns(1490, text, &both), 62);
+        // Boxes of another row do not count.
+        assert_eq!(covered_columns(1470, text, &[feed_box(1465, 1560, 179)]), 0);
+    }
 
     #[test]
     fn a_companion_is_away_in_two_frames_in_a_row() {
