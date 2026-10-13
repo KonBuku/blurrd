@@ -162,6 +162,9 @@ pub struct RecapReader {
     card: RefPlane,
     slot: RefPlane,
     hits: Vec<bool>,
+    /// Tops of the cards found in this read whose top or bottom outline
+    /// was lost: their placement is a card's height from the other one.
+    placed: Vec<i32>,
     ink: InkScratch,
 }
 
@@ -186,6 +189,7 @@ impl RecapReader {
             .sample(view, map, Anchor::Right, strip(CARD_X.0), 1);
         self.right
             .sample(view, map, Anchor::Right, strip(CARD_X.1), 1);
+        self.placed.clear();
         let mut cards = self.cards(view, map);
         let first = *cards.first()?;
         let strip = self.strip(view, map, first.0);
@@ -214,13 +218,25 @@ impl RecapReader {
                 x1: CARD_X.1 - 1,
                 y1: bottom,
             };
-            slots.push(Slot {
-                kind: NameKind::RecapName,
-                rect: RectI {
+            // A card placed from one outline may sit a few rows off (a
+            // panel sliding in): its slot is the whole card, grown by the
+            // margin below on both sides.
+            let rect = if self.placed.contains(&top) {
+                RectI {
+                    y0: top - CARD_MARGIN.1,
+                    y1: bottom + CARD_MARGIN.1,
+                    ..half
+                }
+            } else {
+                RectI {
                     y0: half.y0 - CARD_MARGIN.0,
                     y1: half.y1 + CARD_MARGIN.1,
                     ..half
-                },
+                }
+            };
+            slots.push(Slot {
+                kind: NameKind::RecapName,
+                rect,
                 ink: self.has_ink(view, map, half),
             });
         }
@@ -405,12 +421,29 @@ impl RecapReader {
         };
         let (top_line, card_top) = best(top);
         let (bottom_line, bottom_row) = best(bottom - 1);
+        // In downscaled recordings a card's thin top or bottom outline can
+        // fall below the edge step (measured on a real recap at 900p: top
+        // 0.13, bottom 1.0, right outline and panel edge 1.0): with the
+        // panel's edge, the right outline and the other outline all
+        // strong, the card holds.
+        let one_lost = panel.min(right).min(top_line.max(bottom_line)) >= MIN_STRONG;
         let outlined = if panel >= MIN_OUTLINE {
-            top_line >= MIN_LINE && bottom_line >= MIN_LINE
+            (top_line >= MIN_LINE && bottom_line >= MIN_LINE) || one_lost
         } else {
             right.min(top_line).min(bottom_line) >= MIN_STRONG
         };
-        let card = (card_top, bottom_row + 1);
+        // A lost outline does not place the card: it is a card's height
+        // from the outline that held.
+        let card = if top_line >= MIN_LINE && bottom_line >= MIN_LINE {
+            (card_top, bottom_row + 1)
+        } else if bottom_line >= top_line {
+            (bottom_row + 1 - FILL_H, bottom_row + 1)
+        } else {
+            (card_top, card_top + FILL_H)
+        };
+        if outlined && (top_line < MIN_LINE || bottom_line < MIN_LINE) {
+            self.placed.push(card.0);
+        }
         (outlined && card.1 > card.0 && self.smooth_inside(card.0, card.1)).then_some(card)
     }
 
@@ -484,7 +517,7 @@ fn best_column(plane: &RefPlane, y0: i32, y1: i32, test: fn(&RefPlane, i32, i32)
 #[cfg(test)]
 mod tests {
     use blurrd_testkit::hud::killfeed::Team;
-    use blurrd_testkit::hud::recap::{RecapSpec, SECTIONS};
+    use blurrd_testkit::hud::recap::{CARD_INSET, RecapSpec, SECTIONS};
     use blurrd_testkit::hud::screen::ScreenTiming;
     use blurrd_testkit::{Background, FontSet, Layout, Palette, Scene};
 
@@ -639,5 +672,49 @@ mod tests {
         assert_eq!(tops(cards), [457, 515, 573, 631]);
         // A run between one and two cards holds none.
         assert_eq!(split_run(457, 85), vec![]);
+    }
+
+    #[test]
+    fn finds_a_card_whose_top_outline_faded() {
+        // A downscaled recording can lose a card's thin top outline (the
+        // edge step falls below the threshold); its right and bottom
+        // outlines and the panel's edge still hold the card.
+        let spec = RecapSpec {
+            killer: "Killer Name".to_owned(),
+            killer_team: Team::Enemy,
+            agent: "Agent".to_owned(),
+            report: vec!["Opponent".to_owned()],
+            timeline: 1,
+            timing: ScreenTiming::instant(0, 4),
+        };
+        let card_top = spec.top() + SECTIONS.iter().sum::<i32>() + CARD_INSET;
+        let scene = Scene::new(
+            Layout::reference(),
+            Background::noise(3),
+            Palette::DEFAULT,
+            2,
+        )
+        .with_recap(&FontSet::latin(), spec);
+        let mut frame = scene.iter().next().unwrap().frame;
+        for x in CARD_X.0..CARD_X.1 {
+            let above = frame.pixel(x, card_top - 1).unwrap();
+            frame.set(x, card_top, above);
+        }
+        let view = FrameView::native(
+            RgbView::new(
+                frame.data(),
+                frame.width(),
+                frame.height(),
+                3 * frame.width() as usize,
+            )
+            .unwrap(),
+        );
+        let slots = RecapReader::new()
+            .read(&view, &ScreenMap::REFERENCE)
+            .expect("the card holds");
+        assert!(
+            slots.iter().any(|s| s.rect.x0 > CARD_X.0 && s.ink),
+            "{slots:?}"
+        );
     }
 }
