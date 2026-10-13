@@ -62,6 +62,20 @@ const REFINE: i32 = GATE_STEP + 2;
 /// The structure lines must show at least this mean score at native
 /// scale (measured on real boards: 0.81).
 const MIN_LINES: f32 = 0.5;
+/// Where the mean of the structure lines stays below [`MIN_LINES`], the
+/// board is still found if the header band's lower edge (the panel's
+/// strongest line) scores at least this, at least [`MIN_FAINT_COUNT`] of
+/// the other lines score [`MIN_FAINT`], and the panel's left edge holds
+/// ([`MIN_LEFT_EDGE`]). In downscaled recordings the 1 px row separators
+/// lose half their contrast and fall below the edge step, and the header
+/// band's upper edge lies over the scene (measured on a real board at
+/// 720p: header lower edge 0.96 to 1.0, upper edge 0.16 to 0.79, row
+/// boundaries 0.04 to 0.99, mean 0.46 to 0.49, left edge 0.67 to 0.89).
+const MIN_HEADER: f32 = 0.8;
+/// See [`MIN_HEADER`].
+const MIN_FAINT: f32 = 0.3;
+/// See [`MIN_HEADER`].
+const MIN_FAINT_COUNT: usize = 1;
 /// The panel's left edge beside the first five rows must score at least
 /// this at native scale (measured on real boards: 1.0).
 const MIN_LEFT_EDGE: f32 = 0.6;
@@ -72,6 +86,20 @@ const MIN_LEFT_EDGE: f32 = 0.6;
 const MIN_WIDE_LINES: f32 = 0.6;
 /// The x range of those lines.
 const WIDE_X: (i32, i32) = (CELL_X.1 + 4, PANEL_X1 - 8);
+/// Where the structure lines over the name columns are this strong, the
+/// lines across the rest of the panel need only [`MIN_WIDE_WEAK`]: in a
+/// greyscale copy downscaled to 720p the 1 px separators there fade too
+/// (measured on a real board: name-column lines 0.85 to 0.89, wide lines
+/// 0.37 to 0.51, left edge 0.28 to 0.31; 0.83 wide at 1080p).
+const MIN_STRONG_LINES: f32 = 0.8;
+/// See [`MIN_STRONG_LINES`].
+const MIN_WIDE_WEAK: f32 = 0.35;
+/// The weak wide lines also confirm the board where the header band's
+/// edges and the first row boundary each score [`MIN_HEADER`] and the
+/// panel's left edge at least this (measured on two more real boards in
+/// greyscale at 720p: name-column lines 0.68 to 0.74, header lines 0.81
+/// to 1.0, left edge 0.48 to 0.57, wide lines 0.44 to 0.51).
+const MIN_LEFT_WEAK: f32 = 0.45;
 /// The one-block (deathmatch) layout needs at least this score of its own
 /// row boundaries after the first five rows ...
 const MIN_BLOCK: f32 = 0.5;
@@ -171,14 +199,19 @@ impl ScoreboardReader {
         let lines = LINES.map(|(y, x0, x1)| (y + hint, x0, x1));
         let (score, refine) = edges::horizontal_set(&self.plane, &lines, REFINE);
         let dy = hint + refine;
-        if score < MIN_LINES {
+        let rows = (FIRST_ROW + dy + 2, FIRST_ROW + PITCH * TEAM_ROWS + dy - 2);
+        let left_edge = edges::vertical(&self.plane, PANEL_X0, rows.0, rows.1, 1).0;
+        if score < MIN_LINES && !(left_edge >= MIN_LEFT_EDGE && self.header_holds(dy)) {
             return None;
         }
-        let rows = (FIRST_ROW + dy + 2, FIRST_ROW + PITCH * TEAM_ROWS + dy - 2);
-        if edges::vertical(&self.plane, PANEL_X0, rows.0, rows.1, 1).0 < MIN_LEFT_EDGE
-            && self.wide_lines(view, map, dy) < MIN_WIDE_LINES
-        {
-            return None;
+        if left_edge < MIN_LEFT_EDGE {
+            let wide = self.wide_lines(view, map, dy);
+            let agree =
+                score >= MIN_STRONG_LINES || (left_edge >= MIN_LEFT_WEAK && self.header_strong(dy));
+            let needed = if agree { MIN_WIDE_WEAK } else { MIN_WIDE_LINES };
+            if wide < needed {
+                return None;
+            }
         }
         let teams: Vec<i32> = (0..TEAM_ROWS)
             .map(|k| FIRST_ROW + PITCH * k)
@@ -223,6 +256,31 @@ impl ScoreboardReader {
             })
             .collect();
         Some(slots)
+    }
+
+    /// Whether the header band's lower edge and enough of the other
+    /// structure lines hold at the offset `dy` ([`MIN_HEADER`]; each line
+    /// may lie one row off it).
+    fn header_holds(&self, dy: i32) -> bool {
+        let score = |&(y, x0, x1): &(i32, i32, i32)| {
+            edges::horizontal_set(&self.plane, &[(y + dy, x0, x1)], 0).0
+        };
+        let header = LINES.iter().position(|&(y, _, _)| y == FIRST_ROW);
+        let faint = LINES
+            .iter()
+            .enumerate()
+            .filter(|&(i, line)| Some(i) != header && score(line) >= MIN_FAINT)
+            .count();
+        header.is_some_and(|i| score(&LINES[i]) >= MIN_HEADER) && faint >= MIN_FAINT_COUNT
+    }
+
+    /// Whether the header band's two edges and the first row boundary each
+    /// score at least [`MIN_HEADER`] at the offset `dy` (each may lie one
+    /// row off it).
+    fn header_strong(&self, dy: i32) -> bool {
+        LINES[..3].iter().all(|&(y, x0, x1)| {
+            edges::horizontal_set(&self.plane, &[(y + dy, x0, x1)], 0).0 >= MIN_HEADER
+        })
     }
 
     /// The mean score of the structure lines right of the name cell, at
@@ -297,6 +355,35 @@ mod tests {
         assert!(read(&board(PANEL_X1)));
         // The same lines only over the name columns are not a board.
         assert!(!read(&board(super::CELL_X.1 + 4)));
+    }
+
+    #[test]
+    fn the_header_and_the_left_edge_confirm_a_board_with_faded_separators() {
+        // Downscaled: the separators below the first row boundary fall
+        // under the edge step, and the header band's top lies on a scene
+        // of its own tone. The header's lower edge, the first boundary and
+        // the panel's left edge still confirm the board.
+        let (w, h) = (1920usize, 1080usize);
+        let mut data = vec![140u8; 3 * w * h];
+        let fill = |data: &mut [u8], y0: i32, y1: i32, x0: i32, x1: i32, v: u8| {
+            for y in y0..y1 {
+                let row = 3 * y as usize * w;
+                data[row + 3 * x0 as usize..row + 3 * x1 as usize].fill(v);
+            }
+        };
+        let rows = FIRST_ROW + PITCH * TEAM_ROWS;
+        fill(&mut data, FIRST_ROW, rows, PANEL_X0, PANEL_X1, 120);
+        fill(&mut data, HEADER_TOP - 30, FIRST_ROW, 0, w as i32, 60);
+        let y = FIRST_ROW + PITCH;
+        fill(&mut data, y, y + 1, PANEL_X0, PANEL_X1, 200);
+        for k in 2..TEAM_ROWS {
+            let y = FIRST_ROW + PITCH * k;
+            fill(&mut data, y, y + 1, PANEL_X0, PANEL_X1, 126);
+        }
+        assert!(read(&data));
+        // Without the panel's left edge, these lines are no board.
+        fill(&mut data, FIRST_ROW, rows, 0, PANEL_X0, 120);
+        assert!(!read(&data));
     }
 
     #[test]
