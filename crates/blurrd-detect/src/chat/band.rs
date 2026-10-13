@@ -69,11 +69,17 @@ const THUMB_RATIO: f32 = 0.5;
 /// least about 80 rows tall on recordings).
 const THUMB_ROWS: usize = 20;
 /// The first row of the open chat's panel.
-const PANEL_Y0: i32 = 787;
+pub(super) const PANEL_Y0: i32 = 787;
 /// The first row of the open chat's input line, below the panel.
 const INPUT_Y0: i32 = 1028;
 /// Rows a band needs.
 const MIN_ROWS: usize = 10;
+/// A band that reaches above the closed chat and down to the input line is
+/// the open panel; its top is fixed at [`PANEL_Y0`]. Where the band's top
+/// was found up to this many rows lower (a darkening filter fades the
+/// panel's top rows into the background; measured on a real open chat
+/// under gamma 2.0: 12 rows), it starts there, so its first line counts.
+const PANEL_SNAP: i32 = 16;
 /// Bands separated by at most this many rows are one box (a background
 /// without edge contrast splits it).
 const MERGE_GAP: i32 = 24;
@@ -232,6 +238,9 @@ fn extend_panel(rows: &[RowEdge], out: &mut Vec<BoxBand>) {
                 }
             }
         }
+        if band.y0 < CLOSED_Y0 && band.y1 == SEARCH_Y.1 && band.y0 - PANEL_Y0 <= PANEL_SNAP {
+            band.y0 = band.y0.min(PANEL_Y0);
+        }
         push_merged(out, band);
     }
 }
@@ -245,7 +254,7 @@ fn open_panel(rows: &[RowEdge], out: &mut Vec<BoxBand>) {
     let input_rows = &rows[(INPUT_Y0 - SEARCH_Y.0) as usize..];
     let input =
         out.last().is_some_and(|band| band.y1 == SEARCH_Y.1) || input_rows.iter().all(|r| r.dark);
-    if !input || rows.iter().filter(|r| r.thumb).count() < THUMB_ROWS {
+    if !input || !thumb_shows(rows) {
         return;
     }
     let ratio = out.iter().map(|b| b.ratio).fold(MAX_RATIO, f32::min);
@@ -255,6 +264,13 @@ fn open_panel(rows: &[RowEdge], out: &mut Vec<BoxBand>) {
         y1: SEARCH_Y.1,
         ratio,
     });
+}
+
+/// Whether the open chat's scrollbar thumb shows in the searched rows
+/// `rows` (as measured by [`find_bands`]): the thumb is white against any
+/// background, so it shows where a filter hides the panel's edges.
+pub(super) fn thumb_shows(rows: &[RowEdge]) -> bool {
+    rows.iter().filter(|r| r.thumb).count() >= THUMB_ROWS
 }
 
 /// Appends `band`, merged with the previous band if the gap between them

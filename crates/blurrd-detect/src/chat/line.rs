@@ -321,7 +321,12 @@ pub(super) fn find_names<F>(
                 continue;
             };
             let line = LineInk::new(scratch, crop, origin, a, b);
-            if let Some(read) = read_name(&line) {
+            // A line in a box band the edges confirmed is a chat line: one
+            // the reader cannot make sense of is covered whole.
+            let confirmed = bands[band].ratio < UNSEEN_RATIO;
+            if let Some(read) =
+                read_name(&line).or_else(|| confirmed.then(|| unread_line(&line)).flatten())
+            {
                 // The name's own strokes may reach beyond the line's rows,
                 // which were trimmed where the line has little ink (faint
                 // capitals at the top, descenders at the bottom).
@@ -554,6 +559,28 @@ struct NameRead {
     start: NameStart,
     end: NameEnd,
     message: Option<(u32, u32)>,
+}
+
+/// The edge ratio of a box band whose edges were not seen
+/// ([`super::ChatDetector`] reads the lines of a frame without a band
+/// with it): its lines are not known to be chat lines.
+pub(super) const UNSEEN_RATIO: f32 = 1.0;
+
+/// A line of a confirmed box band that [`read_name`] cannot read (a
+/// sharpening filter can merge the prefix with the name and break the
+/// colon apart; measured on a real open chat: one line lost in 124
+/// frames): covered from the end of the shortest prefix to its last ink
+/// (Safe geometry). `None` if it does not start at the text column.
+fn unread_line(line: &LineInk<'_>) -> Option<NameRead> {
+    let first = *line.segments.first()?;
+    let last_ink = line.segments.last()?.end - 1;
+    let nx0 = first.start + MIN_PREFIX_WIDTH;
+    (first.start <= PREFIX_MAX_X && nx0 <= last_ink).then_some(NameRead {
+        name: (nx0, last_ink),
+        start: NameStart::Shortest,
+        end: NameEnd::Safe,
+        message: None,
+    })
 }
 
 /// Reads the sender name of a line, or returns `None` if the line does not

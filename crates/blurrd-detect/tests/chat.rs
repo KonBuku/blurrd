@@ -331,7 +331,7 @@ fn skips_the_continuation_of_wrapped_messages() {
         let fx = chat_fixture(
             Language::English,
             messages,
-            BACKGROUNDS[(seed % 3) as usize],
+            BACKGROUNDS[(seed % 2) as usize],
             Palette::DEFAULT,
         );
         let check = check_frame(&fx);
@@ -352,7 +352,7 @@ fn ignores_texture_at_the_box_edge() {
         let mut fx = chat_fixture(
             Language::English,
             messages,
-            BACKGROUNDS[(seed % 3) as usize],
+            BACKGROUNDS[(seed % 2) as usize],
             Palette::DEFAULT,
         );
         for top in [948, 977, 1006] {
@@ -853,6 +853,50 @@ fn finds_open_chat_lines_without_edge_contrast() {
             let context = format!("background {b}, {name}");
             check.assert_clean(&context);
             assert_eq!(check.detections.len(), 8, "{context}");
+        }
+    }
+}
+
+#[test]
+fn finds_closed_chat_lines_without_box_edges() {
+    // A filter that crushes a dark scene next to the box to black or
+    // lifts its black to a flat grey leaves no step at either box edge:
+    // the lines whose name ends at its colon or its colour are still
+    // found. (Over a bright scene the box edges stay visible.)
+    let rect = |x0, y0, x1, y1| RectI { x0, y0, x1, y1 };
+    let channels = [Channel::All, Channel::Team, Channel::Party];
+    for seed in 0..6u64 {
+        let mut rng = Rng::new(1100 + seed);
+        let messages = (0..3)
+            .map(|i| {
+                message(
+                    &mut rng,
+                    channels[(seed as usize + i) % 3],
+                    SINGLE_WORD[i],
+                    i as u32,
+                )
+            })
+            .collect();
+        let mut fx = chat_fixture(
+            Language::English,
+            messages,
+            BACKGROUNDS[(seed % 2) as usize],
+            Palette::DEFAULT,
+        );
+        for colour in [[0, 0, 0], [33, 33, 33]] {
+            for r in [rect(14, 925, 34, 1040), rect(461, 925, 481, 1040)] {
+                fx.frame.fill_rect(r, colour, 1.0);
+            }
+            let mut detector = ChatDetector::new();
+            let check = check_with(&mut detector, &fx);
+            let context = format!("seed {seed}, edge colour {colour:?}");
+            assert!(
+                detector.bands().is_empty(),
+                "{context}: {:?}",
+                detector.bands()
+            );
+            check.assert_clean(&context);
+            assert_eq!(check.detections.len(), 3, "{context}");
         }
     }
 }

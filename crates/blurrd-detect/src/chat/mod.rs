@@ -238,14 +238,12 @@ impl ChatDetector {
             0
         };
         self.ink_measured = self.frames_without_box <= track::FADE_MAX;
-        if !self.ink_measured {
+        if self.bands.is_empty() {
+            self.read_without_box(crop, origin, out);
             return Ok(());
         }
         let top = self.ink_top();
         self.scratch.lines.compute_ink(crop, origin, top);
-        if self.bands.is_empty() {
-            return Ok(());
-        }
         let lines = &mut self.lines;
         line::find_names(
             crop,
@@ -253,30 +251,73 @@ impl ChatDetector {
             &self.bands,
             &mut self.scratch.lines,
             |found, band| {
-                let name = RectI {
-                    x0: found.cols.0,
-                    y0: found.rows.0,
-                    x1: found.cols.1,
-                    y1: found.rows.1,
-                };
-                lines.push(ChatLine {
-                    top: found.rows.0,
-                    bottom: found.rows.1,
-                    band: *band,
-                    name,
-                    start: found.start,
-                    end: found.end,
-                    message: found.message.map(|(x0, x1)| RectI {
-                        x0,
-                        y0: found.rows.0,
-                        x1,
-                        y1: found.rows.1,
-                    }),
-                });
-                out.push(name_detection(name));
+                let line = chat_line(&found, band);
+                out.push(name_detection(line.name));
+                lines.push(line);
             },
         );
         Ok(())
+    }
+
+    /// Reads the lines of a frame in which no box band was found. A box
+    /// that darkens the frame multiplicatively shows no edges where a
+    /// filter crushes the frame next to it to black (brightness -0.2 on a
+    /// dark scene) or lifts that black to a flat grey (brightness + 0.06
+    /// with contrast 0.85); the lines on it stay readable (measured on
+    /// real recordings: every line of a closed chat and of an open history
+    /// panel lost under those filters). Without the box, a line whose
+    /// structure is unambiguous confirms the chat as a band would: a name
+    /// ending at a colon, or one after a prefix closed by a parenthesis
+    /// ending at its colour. Then every line read in the frame counts,
+    /// covered to its end.
+    /// The lines lie in the closed chat's rows, or in the open panel's
+    /// while its scrollbar thumb shows. They carry a band of edge ratio 1
+    /// (no box seen), which the tracker never takes for a solid new
+    /// message.
+    fn read_without_box(
+        &mut self,
+        crop: &RgbView<'_>,
+        origin: (i32, i32),
+        out: &mut Vec<Detection>,
+    ) {
+        let top = if band::thumb_shows(&self.scratch.rows) {
+            band::PANEL_Y0 - INK_MARGIN
+        } else {
+            CLOSED_INK_TOP.min(self.ink_top())
+        };
+        self.scratch.lines.compute_ink(crop, origin, top);
+        let unseen = [BoxBand {
+            y0: top,
+            y1: SEARCH_Y.1,
+            ratio: line::UNSEEN_RATIO,
+        }];
+        let lines = &mut self.lines;
+        let mut confirmed = false;
+        line::find_names(
+            crop,
+            origin,
+            &unseen,
+            &mut self.scratch.lines,
+            |found, band| {
+                confirmed |= found.end == NameEnd::Colon
+                    || (found.start == NameStart::Parenthesis && found.end == NameEnd::Colour);
+                lines.push(chat_line(&found, band));
+            },
+        );
+        if !confirmed {
+            self.lines.clear();
+        }
+        // The filters that hide the box also break glyphs into colon-like
+        // dots (measured on a real line under sharpening: a colon found
+        // inside the name, its last two letters left out): without the box
+        // as evidence, every line is covered to its end (Safe geometry).
+        for line in &mut self.lines {
+            if let Some(message) = line.message.take() {
+                line.name.x1 = line.name.x1.max(message.x1);
+            }
+            line.end = NameEnd::Safe;
+        }
+        out.extend(self.lines.iter().map(|l| name_detection(l.name)));
     }
 
     /// The first row of this frame's ink area: [`CLOSED_INK_TOP`], or
@@ -296,6 +337,30 @@ impl ChatDetector {
             self.ink_extra_age += 1;
         }
         CLOSED_INK_TOP - self.ink_extra
+    }
+}
+
+/// The chat line of a name found in the box band `band`.
+fn chat_line(found: &line::NameLine, band: &BoxBand) -> ChatLine {
+    let name = RectI {
+        x0: found.cols.0,
+        y0: found.rows.0,
+        x1: found.cols.1,
+        y1: found.rows.1,
+    };
+    ChatLine {
+        top: found.rows.0,
+        bottom: found.rows.1,
+        band: *band,
+        name,
+        start: found.start,
+        end: found.end,
+        message: found.message.map(|(x0, x1)| RectI {
+            x0,
+            y0: found.rows.0,
+            x1,
+            y1: found.rows.1,
+        }),
     }
 }
 
