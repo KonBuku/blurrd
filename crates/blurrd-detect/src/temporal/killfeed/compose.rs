@@ -469,7 +469,10 @@ pub(super) fn compose(
     for c in kept {
         if let Some(m) = merged.iter_mut().find(|m| m.rect.iou(&c.rect) >= MERGE_IOU) {
             m.rect = union(m.rect, c.rect);
-            m.floor = lower_floor(m.floor, c.floor);
+            m.floor = merged_floor(m, &c);
+            if c.name.x0 < m.name.x0 {
+                m.name = c.name;
+            }
             m.text_x1 = m.text_x1.max(c.text_x1);
             if rank(c.confidence) > rank(m.confidence) {
                 // The weakest evidence decides how the box is blurred; the
@@ -633,8 +636,11 @@ pub(super) fn cover_readings(
 /// The killer-portrait clearance of the row of reading `d` among the
 /// readings `readings` of its frame, in reference pixels (`i32::MIN` if
 /// none): measured from the row's first reading as for a part, and never
-/// left of the clearance `compose` found for a followed name of the row,
-/// which knows its portrait better than a reading no part follows.
+/// left of the clearance `compose` found for a followed name of the row
+/// whose box starts left of the reading's end, which knows its portrait
+/// better than a reading no part follows. A box wholly right of the
+/// reading belongs to a later name of the row: its clearance says
+/// nothing about the reading.
 fn row_floor(
     frame: &Frame<'_>,
     readings: &[Detection],
@@ -657,7 +663,7 @@ fn row_floor(
         .map(|x| STRIP.x0 + x);
     clearances
         .iter()
-        .filter(|c| c.floor != i32::MIN && same_row(c.rect, d.text))
+        .filter(|c| c.floor != i32::MIN && same_row(c.rect, d.text) && c.rect.x0 < d.text.x1)
         .map(|c| c.floor)
         .min()
         .into_iter()
@@ -1058,6 +1064,26 @@ pub(super) fn slots(row: &[(NameKind, Offset)]) -> Vec<Offset> {
         .collect()
 }
 
+/// The clearance of the union of the boxes of `m` and `c`. A clearance is
+/// measured right of the portrait left of the row's first name, so it
+/// limits the names it was measured for: where the two boxes follow the
+/// same name, the lower one of both ([`lower_floor`]); where they follow
+/// different names (an escalated slot box reaching over the next name),
+/// the clearance of the name further left. A part whose reference frame
+/// did not read the row's killer measures its "portrait" left of the
+/// victim, on the weapon and kill icons, and that clearance must not cut
+/// the killer's box (measured on a real row under a saturation filter:
+/// the killer's escalated box was cut from x 1533 to x 1728 for 5 frames).
+fn merged_floor(m: &Candidate, c: &Candidate) -> i32 {
+    if m.name.x0 < c.name.x1 && c.name.x0 < m.name.x1 {
+        lower_floor(m.floor, c.floor)
+    } else if c.name.x0 < m.name.x0 {
+        c.floor
+    } else {
+        m.floor
+    }
+}
+
 /// The clearance of a box built from two boxes with clearances `a` and
 /// `b`: the lower one. Both were measured right of the same portrait, and
 /// one measured in a frame where the row moved can reach into the name; a
@@ -1129,8 +1155,8 @@ mod tests {
 
     use super::super::FeedBox;
     use super::{
-        PORTRAIT_CLEARANCE, SLOT_REACH, Seen, TEXT_HALO, covered_columns, is_away,
-        killer_clearance, slots,
+        Candidate, PORTRAIT_CLEARANCE, SLOT_REACH, Seen, TEXT_HALO, covered_columns, is_away,
+        killer_clearance, merged_floor, slots,
     };
 
     /// A box from `x0` to `x1` in the row whose boxes start at `y0`.
@@ -1294,5 +1320,38 @@ mod tests {
         // A self-kill: only the victim, the icon on its left.
         assert_eq!(slots(&[victim]), vec![(300 - SLOT_REACH, 5, 380, 28)]);
         assert_eq!(slots(&[killer]), vec![(100, 5, 160 + SLOT_REACH, 28)]);
+    }
+
+    fn candidate(name: (i32, i32), floor: i32, kind: NameKind) -> Candidate {
+        let name = RectI::new(name.0, 101, name.1, 128).unwrap();
+        Candidate {
+            rect: name,
+            floor,
+            text_x1: name.x1 - 5,
+            name,
+            kind,
+            confidence: Confidence::Tracked,
+            part: 0,
+            offset: (0, 0),
+            owner: 0,
+            own: true,
+        }
+    }
+
+    #[test]
+    fn a_union_keeps_the_clearance_of_its_first_name() {
+        // The victim part measured its "portrait" on the weapon icons left
+        // of the victim (its reference frame did not read the killer):
+        // that clearance must not cut the killer's box in a union.
+        let killer = candidate((1533, 1583), i32::MIN, NameKind::Killer);
+        let victim = candidate((1777, 1834), 1728, NameKind::Victim);
+        assert_eq!(merged_floor(&killer, &victim), i32::MIN);
+        assert_eq!(merged_floor(&victim, &killer), i32::MIN);
+        // Two boxes of the same name take the lower clearance, a box
+        // without one the other's.
+        let a = candidate((1533, 1583), 1530, NameKind::Killer);
+        let b = candidate((1535, 1583), 1520, NameKind::Killer);
+        assert_eq!(merged_floor(&a, &b), 1520);
+        assert_eq!(merged_floor(&a, &killer), 1530);
     }
 }
