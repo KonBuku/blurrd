@@ -23,6 +23,23 @@ const MIN_COMP_AREA: u32 = 3;
 const MIN_COMP_TOP: i32 = 8;
 /// Components ending this close to the row bottom touch the row edge.
 const MIN_COMP_BOTTOM_GAP: i32 = 7;
+/// A glyph whose top is at most this far below the row top starts at or
+/// above the x-height (the line's lowercase glyphs start at + 14 to + 15).
+const X_HEIGHT_TOP: i32 = 15;
+/// Lowest end of a descender below the row top (`_on_line`: + 28). Deep
+/// descenders (measured: Cyrillic у and ф on a real row) end at + 27,
+/// inside [`MIN_COMP_BOTTOM_GAP`].
+const DESCENDER_BOTTOM: i32 = 28;
+/// Lowest baseline of the text line below the row top (port spec: + 24;
+/// measured: the lower part of a CJK glyph at the end of a real victim
+/// name ends one row below the Latin baseline of + 24).
+const BASELINE_LOW: i32 = 25;
+/// Most rows the text line may sit below the row top the row finder
+/// reports (measured: under a gamma 1.5 filter the anchor of a real row
+/// landed one row high and every lowercase glyph ended at + 25).
+const MAX_LINE_OFFSET: i32 = 2;
+/// Glyphs with at least this much ink set the line's baseline.
+const BASELINE_GLYPH: u32 = 20;
 /// A component with at least this much ink is a "big" glyph.
 const BIG_GLYPH: u32 = 12;
 /// Clustering gap of killer glyphs and one-colour rows.
@@ -135,9 +152,30 @@ fn to_comp(c: &Component) -> Comp {
     }
 }
 
+/// Which components ending near the row bottom [`text_comps`] keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bottom {
+    /// None: anything that reaches into the bottom gap touches the row
+    /// edge (the port spec's rule).
+    Clear,
+    /// Also descenders that start at or right of this column: glyphs that
+    /// start at or above the x-height and end by [`DESCENDER_BOTTOM`].
+    /// Only where the victim name lies (right of the colour boundary, or
+    /// next to the portrait in a one-colour row), so that pieces of the
+    /// weapon icon, which reach as deep, never pass as text (measured on
+    /// real rows read as one-colour rows).
+    DescendersFrom(i32),
+}
+
 /// Text-like components of the stroke mask in the row band at `top`
 /// between columns `x0..x1` (`_text_comps`), into `s.comps`.
-fn text_comps(classes: &PixelClasses, top: i32, x0: i32, x1: i32, s: &mut Scratch) {
+///
+/// The port spec drops every component that ends inside the bottom gap,
+/// which also drops a deep descender at the end of a victim name: the
+/// name then ends short of the right alignment and the whole row reported
+/// nothing (measured on a real recording: a row with a Cyrillic victim
+/// name ending in ф stayed unblurred for 58 frames).
+fn text_comps(classes: &PixelClasses, top: i32, x0: i32, x1: i32, bottom: Bottom, s: &mut Scratch) {
     s.comps.clear();
     if x1 - x0 < 3 {
         return;
@@ -155,18 +193,41 @@ fn text_comps(classes: &PixelClasses, top: i32, x0: i32, x1: i32, s: &mut Scratc
             && h <= MAX_COMP_H
             && w <= MAX_COMP_W
             && c.top - top >= MIN_COMP_TOP
-            && c.bottom - top <= ROW_H - MIN_COMP_BOTTOM_GAP
+            && (c.bottom - top <= ROW_H - MIN_COMP_BOTTOM_GAP
+                || matches!(bottom, Bottom::DescendersFrom(from) if c.x0 >= from
+                    && c.top - top <= X_HEIGHT_TOP
+                    && c.bottom - top <= DESCENDER_BOTTOM))
     }));
 }
 
 /// Whether a glyph sits on the text line of the row at `top` (`_on_line`):
 /// bottom on the baseline, a descender whose top is above the x-height, or
-/// a small dot or accent above the line.
+/// a small dot or accent above the line. The baseline window ends at
+/// [`BASELINE_LOW`], one row lower than the port spec's.
 fn on_line(c: &Comp, top: i32) -> bool {
     let (t, b) = (c.top - top, c.bottom - top);
-    (19..=24).contains(&b)
+    (19..=BASELINE_LOW).contains(&b)
         || ((24..=28).contains(&b) && t <= 15)
         || (b <= 15 && t >= 7 && c.area <= 12)
+}
+
+/// The row top that puts the line's glyphs on the baseline window of
+/// [`on_line`]: `top`, moved down by as many rows (at most
+/// [`MAX_LINE_OFFSET`]) as the median bottom of the big glyphs in `comps`
+/// lies below [`BASELINE_LOW`] - 1. Without that, every glyph of a row
+/// found a row or two high fails the window and the row reports nothing.
+fn line_top(comps: &[Comp], top: i32) -> i32 {
+    let mut bottoms: Vec<i32> = comps
+        .iter()
+        .filter(|c| c.area >= BASELINE_GLYPH)
+        .map(|c| c.bottom - top)
+        .collect();
+    if bottoms.is_empty() {
+        return top;
+    }
+    let mid = bottoms.len() / 2;
+    let (_, median, _) = bottoms.select_nth_unstable(mid);
+    top + (*median - (BASELINE_LOW - 1)).clamp(0, MAX_LINE_OFFSET)
 }
 
 /// Keeps the components of the killer part that sit on the row's text
@@ -319,8 +380,16 @@ pub(super) fn analyze_row(
         return;
     };
     // Victim: right of the boundary, right-aligned to the portrait.
-    text_comps(classes, top, xb + VICTIM_START, VICTIM_TEXT_X1, s);
-    s.comps.retain(|c| on_line(c, top));
+    text_comps(
+        classes,
+        top,
+        xb + VICTIM_START,
+        VICTIM_TEXT_X1,
+        Bottom::DescendersFrom(xb + VICTIM_START),
+        s,
+    );
+    let line = line_top(&s.comps, top);
+    s.comps.retain(|c| on_line(c, line));
     let mut clusters = std::mem::take(&mut s.clusters);
     cluster(&mut s.comps, GAP_VICTIM, &mut clusters);
     clusters.retain(|c| is_text(c, &s.comps));
@@ -486,9 +555,17 @@ fn one_colour_row(
         })
         .map(|c| (c.x0 - ICON_MARGIN, c.x1 + ICON_MARGIN))
         .collect();
-    text_comps(classes, top, FEED_X0, VICTIM_TEXT_X1, s);
+    text_comps(
+        classes,
+        top,
+        FEED_X0,
+        VICTIM_TEXT_X1,
+        Bottom::DescendersFrom(VICTIM_COLOUR_X0),
+        s,
+    );
+    let line = line_top(&s.comps, top);
     s.comps
-        .retain(|c| on_line(c, top) && !icons.iter().any(|&(i0, i1)| c.x0 < i1 && c.x1 > i0));
+        .retain(|c| on_line(c, line) && !icons.iter().any(|&(i0, i1)| c.x0 < i1 && c.x1 > i0));
     let mut clusters = std::mem::take(&mut s.clusters);
     cluster(&mut s.comps, GAP_NAME, &mut clusters);
     clusters.retain(|c| is_text(c, &s.comps) && multi_glyph(c, &s.comps));
@@ -551,7 +628,14 @@ fn killer(
 /// weapon or the colour boundary): the prototype cut it at `limit`, so the
 /// end of a name that comes close to a small icon stayed readable.
 fn killer_comps(classes: &PixelClasses, top: i32, limit: i32, hard: i32, s: &mut Scratch) {
-    text_comps(classes, top, FEED_X0, hard.min(limit + MAX_COMP_W), s);
+    text_comps(
+        classes,
+        top,
+        FEED_X0,
+        hard.min(limit + MAX_COMP_W),
+        Bottom::Clear,
+        s,
+    );
     s.comps.retain(|c| c.x0 < limit);
 }
 
@@ -578,4 +662,37 @@ fn weapon_x(classes: &PixelClasses, top: i32, xb: i32, s: &mut Scratch) -> Optio
         }
     }
     best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Comp, MAX_LINE_OFFSET, line_top, on_line};
+
+    fn glyph(top: i32, bottom: i32) -> Comp {
+        Comp {
+            x0: 0,
+            x1: 6,
+            top,
+            bottom,
+            area: 30,
+        }
+    }
+
+    #[test]
+    fn a_row_found_high_is_moved_onto_the_line() {
+        // Glyphs on the line of a row at 100 (baseline + 22), read with a
+        // row top found two rows high.
+        let comps: Vec<Comp> = (0..5).map(|_| glyph(111, 122)).collect();
+        assert_eq!(line_top(&comps, 100), 100);
+        let line = line_top(&comps, 98);
+        assert_eq!(line, 98);
+        assert!(comps.iter().all(|c| on_line(c, line)));
+        // Three rows low on the window's end: moved by at most two.
+        let comps: Vec<Comp> = (0..5).map(|_| glyph(116, 128)).collect();
+        assert_eq!(line_top(&comps, 100), 100 + MAX_LINE_OFFSET);
+        assert!(comps.iter().all(|c| on_line(c, 100 + MAX_LINE_OFFSET)));
+        assert!(!on_line(&comps[0], 100));
+        // No big glyph: the row top stays.
+        assert_eq!(line_top(&[], 100), 100);
+    }
 }

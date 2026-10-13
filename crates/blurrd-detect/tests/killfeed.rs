@@ -144,3 +144,54 @@ fn reusing_a_detector_gives_the_same_result() {
         assert_eq!(a, b, "frame {frame}");
     }
 }
+
+#[test]
+fn finds_victim_names_that_end_in_a_deep_descender() {
+    // Some glyphs of real names (Cyrillic ф in a real recording) reach
+    // from above the x-height to 27 px below the row top, deeper than the
+    // synthetic font's descenders. Replace the victim name's last glyph
+    // with such a stroke: the name must still end at the right alignment,
+    // or the whole row reports nothing.
+    const TOP: i32 = 96;
+    let fonts = FontSet::latin();
+    for seed in 0..8u64 {
+        let mut rng = Rng::new(900 + seed);
+        let kill = random_kill(&mut rng, 0);
+        let scene = Scene::new(Layout::reference(), Background::dusk(), Palette::DEFAULT, 8)
+            .with_kill_feed(&fonts, KillFeedSpec::new(vec![kill]));
+        let mut fx = scene.render(5);
+        let victim = fx
+            .truth
+            .in_region(Region::KillFeed)
+            .find(|i| i.kind == NameKind::Victim)
+            .map(|i| i.text)
+            .unwrap();
+        // Clear the last glyph and a gap before it, then draw the new one.
+        let glyph = victim.x1 - 9..victim.x1 - 1;
+        for x in glyph.start - 2..glyph.end {
+            let bar = fx.frame.pixel(x, TOP + 5).unwrap();
+            for y in TOP + 8..TOP + 29 {
+                fx.frame.set(x, y, bar);
+            }
+        }
+        // A ф: a two-pixel stem from above the x-height to + 27 through
+        // a ring on the line.
+        let white = [255, 255, 255];
+        let stem = glyph.start + 3;
+        for y in TOP + 11..TOP + 27 {
+            fx.frame.set(stem, y, white);
+            fx.frame.set(stem + 1, y, white);
+        }
+        for y in TOP + 14..TOP + 23 {
+            let edge = !(TOP + 16..TOP + 21).contains(&y);
+            for x in glyph.clone() {
+                if edge || x <= glyph.start + 1 || x >= glyph.end - 2 {
+                    fx.frame.set(x, y, white);
+                }
+            }
+        }
+        let check = support::check_frame(&fx);
+        check.assert_clean(&format!("seed {seed}"));
+        check.assert_found(&format!("seed {seed}"));
+    }
+}
