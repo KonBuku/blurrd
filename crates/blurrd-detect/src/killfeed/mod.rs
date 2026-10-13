@@ -214,10 +214,12 @@ impl KillFeedDetector {
             y1: FEED_ROI.y1,
         });
         self.classes.compute_rect(crop, score, &self.params);
-        // A darkening filter: classify again with thresholds that follow
-        // the white level of the names.
-        let params = rows::white_level(&self.classes, &self.params)
-            .map_or(self.params, |white| self.params.for_white_level(white));
+        // A darkening filter or a colour tint: classify again with
+        // thresholds that follow the white point of the names.
+        let params = rows::white_point(&self.classes, &self.params)
+            .map_or(self.params, |(white, chroma)| {
+                self.params.for_white_point(white, chroma)
+            });
         if params != self.params {
             self.classes.compute_rect(crop, score, &params);
         }

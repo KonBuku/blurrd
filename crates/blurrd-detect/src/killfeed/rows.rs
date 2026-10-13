@@ -145,13 +145,14 @@ fn mean_of(sums: &[f64], a: i32, b: i32) -> f64 {
     (sums[b as usize] - sums[a as usize]) / f64::from((b - a).max(1))
 }
 
-/// The white level of the frame's HUD text: the value of the
-/// [`WHITE_RANK`]th brightest thin bright stroke pixel in the victim text
-/// columns, or `None` if there is no white text there.
+/// The white point of the frame's HUD text, `(level, chroma)`: the value
+/// of the [`WHITE_RANK`]th brightest thin bright stroke pixel in the
+/// victim text columns, and the median chroma of the stroke pixels at that
+/// level or brighter; `None` if there is no white text there.
 ///
 /// `classes` must hold the classified score columns over the whole crop
 /// height.
-pub(super) fn white_level(classes: &PixelClasses, params: &ClassParams) -> Option<u8> {
+pub(super) fn white_point(classes: &PixelClasses, params: &ClassParams) -> Option<(u8, u8)> {
     let width = classes.width() as usize;
     let (x0, x1) = (
         (ANCHOR_X.0 - FEED_ROI.x0) as usize,
@@ -171,13 +172,40 @@ pub(super) fn white_level(classes: &PixelClasses, params: &ClassParams) -> Optio
         }
     }
     let mut seen = 0;
+    let mut found = None;
     for (level, &n) in (0..=255u8).zip(&hist).rev() {
         seen += n;
         if seen >= WHITE_RANK {
-            return (level >= MIN_WHITE_LEVEL).then_some(level);
+            found = (level >= MIN_WHITE_LEVEL).then_some(level);
+            break;
         }
     }
-    None
+    let level = found?;
+    // The chroma of those strokes: the median over the pixels at the white
+    // level or brighter.
+    let mut chromas = [0u32; 256];
+    for y in 0..classes.height() as usize {
+        let range = y * width + x0..y * width + x1;
+        let pixels = classes.tophat().data()[range.clone()]
+            .iter()
+            .zip(&classes.mn().data()[range.clone()])
+            .zip(&classes.chroma().data()[range]);
+        for ((&tophat, &mn), &chroma) in pixels {
+            if tophat >= WHITE_SAMPLE_TOPHAT && chroma <= params.text_max_chroma && mn >= level {
+                chromas[usize::from(chroma)] += 1;
+            }
+        }
+    }
+    let total: u32 = chromas.iter().sum();
+    let mut acc = 0;
+    let chroma = (0..=255u8)
+        .zip(&chromas)
+        .find(|&(_, &n)| {
+            acc += n;
+            2 * acc >= total
+        })
+        .map_or(0, |(c, _)| c);
+    Some((level, chroma))
 }
 
 /// Finds the rows of the kill-feed stack, top to bottom, and the bar

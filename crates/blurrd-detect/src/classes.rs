@@ -223,6 +223,38 @@ impl ClassParams {
         }
     }
 
+    /// The chroma of white HUD text the chroma windows were tuned for: the
+    /// median chroma of the brightest kill-feed name strokes is 6 to 13
+    /// in unfiltered, greyscale and gamma-filtered recordings (measured).
+    pub const REFERENCE_CHROMA: u8 = 16;
+
+    /// The chroma windows widen by at most this much.
+    const MAX_CHROMA_SHIFT: u8 = 40;
+
+    /// The thresholds for a frame whose white HUD text reaches `white`
+    /// with the median chroma `chroma` ([`ClassParams::for_white_level`]
+    /// for the brightness): a colour tint of the GPU driver (a Freestyle
+    /// or colour balance preset) gives every white a colour cast, which
+    /// the fixed chroma windows of [`Class::White`], [`Class::PureWhite`]
+    /// and [`Class::Text`] reject (measured on a real kill feed under a
+    /// colour balance tint: chroma 49 instead of 13, the weapon icon and
+    /// killer names lost). The windows widen by `chroma −
+    /// REFERENCE_CHROMA`, at most 40; the team colours' chroma stays far
+    /// above them.
+    #[must_use]
+    pub fn for_white_point(&self, white: u8, chroma: u8) -> Self {
+        let level = self.for_white_level(white);
+        let extra = chroma
+            .saturating_sub(Self::REFERENCE_CHROMA)
+            .min(Self::MAX_CHROMA_SHIFT);
+        Self {
+            white_max_chroma: level.white_max_chroma.saturating_add(extra),
+            pure_white_max_chroma: level.pure_white_max_chroma.saturating_add(extra),
+            text_max_chroma: level.text_max_chroma.saturating_add(extra),
+            ..level
+        }
+    }
+
     /// The colour flags of one pixel (everything except [`Class::Text`],
     /// which needs the neighbourhood).
     pub fn colour_flags(&self, rgb: [u8; 3]) -> u8 {
@@ -604,6 +636,33 @@ mod tests {
         assert_eq!(white, Class::White.bit() | Class::PureWhite.bit());
         assert_eq!(p.colour_flags([180, 180, 200]), Class::White.bit());
         assert_eq!(p.colour_flags([90, 90, 90]), 0);
+    }
+
+    #[test]
+    fn a_tinted_white_point_widens_the_chroma_windows() {
+        let p = ClassParams::default();
+        // Unfiltered and greyscale: nothing changes.
+        assert_eq!(p.for_white_point(240, 13), p);
+        assert_eq!(p.for_white_point(255, 0), p);
+        // A colour balance tint (measured: white level 202, chroma 49):
+        // the whitened weapon icon and the tinted names are white again.
+        let tint = p.for_white_point(202, 49);
+        assert_eq!(tint.white_max_chroma, p.white_max_chroma + 33);
+        assert_eq!(tint.pure_white_max_chroma, p.pure_white_max_chroma + 33);
+        assert_eq!(tint.text_max_chroma, p.text_max_chroma + 33);
+        assert_eq!(tint.white_min, p.for_white_level(202).white_min);
+        assert_ne!(
+            tint.colour_flags([222, 240, 196]) & Class::PureWhite.bit(),
+            0
+        );
+        assert_eq!(p.colour_flags([222, 240, 196]) & Class::PureWhite.bit(), 0);
+        // The team colours stay out of the white classes.
+        let white = Class::White.bit() | Class::PureWhite.bit();
+        assert_eq!(tint.colour_flags([96, 220, 190]) & white, 0);
+        assert_eq!(tint.colour_flags([235, 85, 90]) & white, 0);
+        // The widening is bounded.
+        let far = p.for_white_point(200, 200);
+        assert_eq!(far.white_max_chroma, p.white_max_chroma + 40);
     }
 
     #[test]
