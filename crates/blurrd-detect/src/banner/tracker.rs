@@ -38,7 +38,14 @@ const EPISODE_GAP: u32 = 10;
 /// not make an episode.
 const GATE_MIN_FRAMES: u32 = 3;
 /// The settled box stays this many frames after the last gated frame.
-const FADE: u32 = 6;
+/// The port spec's 6 frames end too early: in the OCR leak sweep of 31
+/// real recordings the name of a fading banner stayed readable for up to
+/// 11 frames after the last gated frame (darkening filters end the gate
+/// earlier; unfiltered, one name was read 7 frames after it). At most
+/// one frame more than the episode gap: the episode ends when that frame
+/// arrives, and every pending frame up to it is still handed out.
+pub const FADE: u32 = 11;
+const _: () = assert!(FADE <= EPISODE_GAP + 1);
 /// Consecutive centred detections that mark the settle frame.
 const SETTLE_RUN: u32 = 3;
 /// The settled box is sized from the centred detections of this many
@@ -523,7 +530,7 @@ fn fallback_box(episode: &Episode, g: u32, seen: Seen, right: i32) -> (RectI, Co
 mod tests {
     use blurrd_core::{Confidence, RectI};
 
-    use super::{BannerBox, BannerTracker, FALLBACK_HALF, RING};
+    use super::{BannerBox, BannerTracker, FADE, FALLBACK_HALF, RING};
     use crate::banner::{BannerFrame, BannerName, Plate};
 
     /// A gated frame with a plate and a name at `x0..x1` (not centred
@@ -597,13 +604,14 @@ mod tests {
             }
             assert_ne!(b[0].conf, Confidence::Tracked);
         }
-        // Six frames of fade-out, then nothing.
+        // `FADE` frames of fade-out, then nothing.
+        let end = 633 + FADE as usize;
         assert!(
-            boxes[633..639]
+            boxes[633..end]
                 .iter()
                 .all(|b| b[0].conf == Confidence::PostRoll)
         );
-        assert!(boxes[639..].iter().all(Vec::is_empty));
+        assert!(boxes[end..].iter().all(Vec::is_empty));
     }
 
     #[test]

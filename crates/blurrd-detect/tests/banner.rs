@@ -11,7 +11,7 @@
 mod support;
 
 use blurrd_core::{Confidence, RectI};
-use blurrd_detect::banner::FALLBACK_HALF;
+use blurrd_detect::banner::{FADE, FALLBACK_HALF};
 use blurrd_testkit::hud::banner::{
     BannerSpec, NAME_BASELINE, PLATE, ULT_READY_BASELINE, UltReadySpec,
 };
@@ -67,7 +67,8 @@ fn every_name_frame_is_covered_from_slide_in_to_fade_out() {
             // the gate is on (a white sky keeps it on, as in the
             // prototype), plus the fade-out hold.
             let first_name = spec.settle() - spec.slide_frames;
-            let gated = |f: u32| (f.saturating_sub(7)..=f).any(|g| run.seen[g as usize].gate);
+            let gated =
+                |f: u32| (f.saturating_sub(FADE + 1)..=f).any(|g| run.seen[g as usize].gate);
             assert!(
                 run.empty_boxes
                     .iter()

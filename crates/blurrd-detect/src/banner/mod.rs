@@ -36,7 +36,7 @@ mod tracker;
 use blurrd_core::{NameKind, RectI, Region};
 
 pub use plate::Plate;
-pub use tracker::{BannerBox, BannerTracker, FALLBACK_HALF, RING};
+pub use tracker::{BannerBox, BannerTracker, FADE, FALLBACK_HALF, RING};
 
 use self::plate::{PlateScratch, find_plate};
 
