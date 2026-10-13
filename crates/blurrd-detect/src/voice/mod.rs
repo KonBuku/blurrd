@@ -150,6 +150,14 @@ const EDGE_ALIGNED: (i32, i32) = (56, 62);
 const NAME_BEARING_END: i32 = 64;
 /// Name score a name starting in the side-bearing columns needs.
 const BEARING_SCORE: f32 = 1.5;
+/// A text line whose first glyph is thin (the "i" of "in B Main", an "l"
+/// or "I" of a name) can lose it in downscaled video, and its edge is
+/// then found at the next glyph: up to this many columns right of
+/// [`EDGE_ALIGNED`] (measured on real recordings at 720p: location lines
+/// at x 69 to 73, a name at x 70). The location line may start that late;
+/// a name only with [`BEARING_SCORE`], a clean gap and a location line
+/// that starts at most that late as well.
+const THIN_LEAD: i32 = 14;
 /// Median of the darkest channel behind the name from which the
 /// background counts as bright: a white name there may not stand out
 /// (lift), so the entry can only be found from its structure.
@@ -306,9 +314,11 @@ pub struct SlotEvidence {
 
 impl SlotEvidence {
     /// Whether both text lines start at the speaker-name edge (the name
-    /// possibly a few columns later, see [`SlotEvidence::name_starts`]).
+    /// possibly a few columns later, see [`SlotEvidence::name_starts`];
+    /// either line later still after losing a thin first glyph,
+    /// up to 14 columns).
     pub fn aligned(&self) -> bool {
-        self.name_starts() && at_edge(self.location_edge)
+        self.name_starts() && near_edge(self.location_edge)
     }
 
     /// Whether the name line starts at the speaker-name edge: at x 56 to
@@ -317,7 +327,9 @@ impl SlotEvidence {
     pub fn name_starts(&self) -> bool {
         match self.name_edge {
             Some(x) if x >= EDGE_ALIGNED.1 => {
-                x < NAME_BEARING_END && !self.gap_blocked && self.score >= BEARING_SCORE
+                let late =
+                    x < NAME_BEARING_END || (near_edge(Some(x)) && near_edge(self.location_edge));
+                late && !self.gap_blocked && self.score >= BEARING_SCORE
             }
             edge => at_edge(edge),
         }
@@ -336,7 +348,7 @@ impl SlotEvidence {
             && self.background >= BRIGHT_BACKGROUND
             && !self.gap_blocked
             && !from_left
-            && at_edge(self.location_edge)
+            && near_edge(self.location_edge)
     }
 
     /// Whether the slot shows an entry.
@@ -378,6 +390,12 @@ pub fn entry_detection(top: i32, rows: (i32, i32), name_x1: i32) -> Detection {
 /// Whether a text line starting at `edge` is aligned with [`TEXT_X`].
 fn at_edge(edge: Option<i32>) -> bool {
     edge.is_some_and(|x| (EDGE_ALIGNED.0..EDGE_ALIGNED.1).contains(&x))
+}
+
+/// Whether a text line starting at `edge` is aligned with [`TEXT_X`]
+/// after losing a thin first glyph ([`THIN_LEAD`]).
+fn near_edge(edge: Option<i32>) -> bool {
+    edge.is_some_and(|x| (EDGE_ALIGNED.0..EDGE_ALIGNED.1 + THIN_LEAD).contains(&x))
 }
 
 /// Top of slot `k` in reference pixels.
@@ -662,5 +680,35 @@ const fn to_crop(r: RectI) -> RectI {
         y0: r.y0 - LEFT_PANEL_ROI.y0,
         x1: r.x1 - LEFT_PANEL_ROI.x0,
         y1: r.y1 - LEFT_PANEL_ROI.y0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EDGE_ALIGNED, SlotEvidence, THIN_LEAD};
+
+    fn evidence(name_edge: i32, location_edge: i32, score: f32) -> SlotEvidence {
+        SlotEvidence {
+            name_edge: Some(name_edge),
+            location_edge: Some(location_edge),
+            score,
+            ..SlotEvidence::default()
+        }
+    }
+
+    #[test]
+    fn lines_that_lost_a_thin_first_glyph_stay_aligned() {
+        // Measured at 720p: the location line found at x 69 to 73 (its
+        // "i" lost), a name at x 70.
+        assert!(evidence(58, 58, 1.0).aligned());
+        assert!(evidence(58, 73, 1.0).aligned());
+        assert!(evidence(70, 69, 1.6).aligned());
+        // A late name (a thin first letter lost) needs a strong score.
+        assert!(evidence(70, 58, 1.6).aligned());
+        assert!(!evidence(70, 69, 1.0).aligned());
+        // Text that starts further in is no entry.
+        let late = EDGE_ALIGNED.1 + THIN_LEAD;
+        assert!(!evidence(58, late, 2.0).aligned());
+        assert!(!evidence(late, late - 1, 2.0).aligned());
     }
 }
