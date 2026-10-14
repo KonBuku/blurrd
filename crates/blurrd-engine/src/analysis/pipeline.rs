@@ -3,20 +3,21 @@
 //! ```text
 //! decode ─frames─► crop workers ─crops─► dispatch (reorder) ─┬─► kill-feed stage ──┐
 //!                  (ROI copy, RGB,                           ├─► panel stage ──────┼─► collector
-//!                   reference scale)                         ├─► screen stage ─────┘   (merge, tracks)
-//!                                                            └─► pass 0 (OCR, optional)
+//!                   reference scale,                         ├─► screen stage ─────┘   (merge, tracks)
+//!                   screen reads)                            └─► pass 0 (OCR, optional)
 //! ```
 //!
 //! The decoder hands out reference-counted frames (no pixel copy); a fixed
-//! number of crop workers cut and convert the HUD crops in parallel; the
-//! dispatcher restores frame order and gives every stage a shared handle
-//! to each frame's crops; each stage runs its detectors and temporal models
-//! over the frames in order on its own thread; the collector merges the
-//! stages' final boxes frame by frame (each stage's output is delayed by
-//! its temporal model's look-ahead) and builds the tracks. Every queue is
-//! bounded, so memory does not depend on the clip length and a slow stage
-//! slows the decoder down. The first error or a cancellation stops every
-//! thread at its next frame.
+//! number of crop workers cut and convert the HUD crops and read the screen
+//! surfaces of single frames in parallel; the dispatcher restores frame
+//! order and gives every stage a shared handle to each frame's crops; each
+//! stage runs its detectors and temporal models over the frames in order on
+//! its own thread; the collector merges the stages' final boxes frame by
+//! frame (each stage's output is delayed by its temporal model's
+//! look-ahead) and builds the tracks. Every queue is bounded, so memory
+//! does not depend on the clip length and a slow stage slows the decoder
+//! down. The first error or a cancellation stops every thread at its next
+//! frame.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -183,7 +184,7 @@ impl Pipeline<'_> {
                     (frame_rx.clone(), crop_tx.clone(), cropper.clone());
                 scope.spawn(move || {
                     for frame in frame_rx {
-                        let crops = cropper.crops(frame).map_err(AppError::from);
+                        let crops = cropper.crops(frame);
                         if !send(&crop_tx, crops, control) {
                             break;
                         }

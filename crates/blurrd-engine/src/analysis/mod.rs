@@ -295,7 +295,7 @@ impl Engine {
             input: &req.input,
             decode,
             cropper: Cropper::new(map, converter.clone(), req.regions),
-            stages: stages::stages(req.regions, map, &converter),
+            stages: stages::stages(req.regions, map),
             sources: stages::sources(req.regions),
             pass0,
             previews,

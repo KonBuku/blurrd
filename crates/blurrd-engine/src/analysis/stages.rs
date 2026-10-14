@@ -5,14 +5,13 @@
 use blurrd_core::{AppError, Confidence, RectI, Region, RegionSet};
 use blurrd_detect::banner::BannerBox;
 use blurrd_detect::scene_cut::SceneCutDetector;
-use blurrd_detect::screens::{self, Anchor, FrameView, SurfaceFrame};
+use blurrd_detect::screens::{self, Anchor};
 use blurrd_detect::temporal::killfeed::{FrameBoxes, KillFeedFrame};
 use blurrd_detect::voice::{MEASURE_PORTRAIT, VoiceFrame, VoiceFrameBoxes};
 use blurrd_detect::{
     BannerDetector, BannerTracker, ChatDetector, ChatTracker, Detection, KillFeedDetector,
-    KillFeedTracker, RgbView, ScreenDetector, VoiceDetector, VoiceTracker,
+    KillFeedTracker, ScreenDetector, VoiceDetector, VoiceTracker,
 };
-use blurrd_video::{RgbConverter, RgbImage, YuvRoi};
 
 use super::frame::FrameCrops;
 use super::tracks::{Grid, Link, RegionBox};
@@ -88,11 +87,7 @@ pub(crate) trait Stage: Send {
 /// The stages for `regions`: the kill feed alone (the costliest detector),
 /// banner plus voice plus chat, and the screen surfaces, so they can run on
 /// three threads.
-pub(crate) fn stages(
-    regions: RegionSet,
-    map: HudMap,
-    converter: &RgbConverter,
-) -> Vec<Box<dyn Stage>> {
+pub(crate) fn stages(regions: RegionSet, map: HudMap) -> Vec<Box<dyn Stage>> {
     let mut out: Vec<Box<dyn Stage>> = Vec::new();
     if regions.contains(Region::KillFeed) {
         out.push(Box::new(KillFeedStage::new(map)));
@@ -102,7 +97,7 @@ pub(crate) fn stages(
         out.push(Box::new(PanelStage::new(regions, map)));
     }
     if Region::SCREENS.iter().any(|&r| regions.contains(r)) {
-        out.push(Box::new(ScreenStage::new(regions, map, converter.clone())));
+        out.push(Box::new(ScreenStage::new(regions, map)));
     }
     out
 }
@@ -361,25 +356,19 @@ impl Stage for PanelStage {
     }
 }
 
-/// The screen surfaces: the quarter-scale gate on every frame, the native
-/// zone of a candidate surface, the surfaces' temporal stage.
+/// The screen surfaces' temporal stage; the crop workers already gated
+/// every frame and read the native zone of a candidate surface.
 struct ScreenStage {
     map: HudMap,
     detector: ScreenDetector,
-    converter: RgbConverter,
-    roi: YuvRoi,
-    zone: RgbImage,
     ready: Vec<(u32, Vec<Detection>)>,
 }
 
 impl ScreenStage {
-    fn new(regions: RegionSet, map: HudMap, converter: RgbConverter) -> Self {
+    fn new(regions: RegionSet, map: HudMap) -> Self {
         Self {
             map,
             detector: ScreenDetector::new(&regions),
-            converter,
-            roi: YuvRoi::new(),
-            zone: RgbImage::default(),
             ready: Vec::new(),
         }
     }
@@ -412,42 +401,11 @@ fn emit_screens(
 
 impl Stage for ScreenStage {
     fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<bool, AppError> {
-        let screen_map = *self.map.screen_map();
-        let quarter = crops.quarter_view().map_err(|e| detector_error(&e))?;
-        let signals = self.detector.gate(
-            &FrameView::scaled(quarter, crops.quarter_scale),
-            &screen_map,
-        );
-        let mut surfaces: [SurfaceFrame; 4] = Default::default();
-        for (i, region) in Region::SCREENS.into_iter().enumerate() {
-            let signal = signals[i];
-            surfaces[i].candidate = signal.candidate;
-            surfaces[i].score = signal.score;
-            let zone =
-                screens::zone(region, &screen_map).and_then(|z| z.intersection(&self.map.frame()));
-            let (true, Some(zone)) = (signal.candidate, zone) else {
-                continue;
-            };
-            crops
-                .frame
-                .roi_yuv(zone, &mut self.roi)
-                .and_then(|()| self.converter.convert(&self.roi, &mut self.zone))
-                .map_err(|e| detector_error(&e))?;
-            let origin = self.roi.rect().map_or((zone.x0, zone.y0), |r| (r.x0, r.y0));
-            let pixels = RgbView::new(
-                &self.zone.data,
-                self.zone.width,
-                self.zone.height,
-                3 * self.zone.width as usize,
-            )
-            .map_err(|e| detector_error(&e))?;
-            surfaces[i].slots = self.detector.read(
-                region,
-                &FrameView::crop(pixels, origin),
-                &screen_map,
-                &signal,
-            );
-        }
+        // The crop workers gated and read the frame (see `Cropper`).
+        let surfaces = crops
+            .surfaces
+            .clone()
+            .ok_or_else(|| internal("the screen surfaces of a frame were not read"))?;
         let structure = surfaces.iter().any(|s| s.candidate);
         self.detector.push(crops.index, surfaces, &mut self.ready);
         emit_screens(&self.map, &mut self.ready, Some(crops.index), out);

@@ -1,13 +1,15 @@
-//! The crops of one frame that the detector stages read.
+//! The crops of one frame that the detector stages read, and its screen
+//! surfaces read by the crop workers.
 
-use blurrd_core::{RectI, Region, RegionSet};
+use blurrd_core::{AppError, RectI, Region, RegionSet};
 use blurrd_detect::chat::LEFT_PANEL_ROI;
 use blurrd_detect::killfeed::FEED_ROI;
-use blurrd_detect::screens::Anchor;
-use blurrd_detect::{ImageError, RgbView};
-use blurrd_video::{RgbConverter, RgbImage, VideoError, VideoFrame, YuvRoi};
+use blurrd_detect::screens::{self, Anchor, FrameView, SurfaceFrame};
+use blurrd_detect::{ImageError, RgbView, ScreenDetector};
+use blurrd_video::{RgbConverter, RgbImage, VideoFrame, YuvRoi};
 
 use crate::hud::{HudMap, RefCrop};
+use crate::job::internal;
 
 /// One frame and its crops at the reference scale.
 #[derive(Debug)]
@@ -26,8 +28,9 @@ pub(crate) struct FrameCrops {
     pub(crate) left: RefCrop,
     /// The whole frame downscaled ([`HudMap::quarter`]).
     quarter: RgbImage,
-    /// View pixels per source pixel of `quarter`.
-    pub(crate) quarter_scale: f32,
+    /// The screen surfaces' gate signals and name slots of this frame,
+    /// when a screen surface is analysed.
+    pub(crate) surfaces: Option<[SurfaceFrame; 4]>,
 }
 
 impl FrameCrops {
@@ -60,6 +63,8 @@ pub(crate) struct Cropper {
     /// screen-surface gates).
     quarter: bool,
     roi: YuvRoi,
+    /// Reads the screen surfaces, when one is analysed.
+    screens: Option<ScreenReader>,
 }
 
 impl Cropper {
@@ -76,11 +81,15 @@ impl Cropper {
             quarter: regions.contains(Region::VoiceChat)
                 || Region::SCREENS.iter().any(|&r| regions.contains(r)),
             roi: YuvRoi::new(),
+            screens: Region::SCREENS
+                .iter()
+                .any(|&r| regions.contains(r))
+                .then(|| ScreenReader::new(regions)),
         }
     }
 
-    /// The crops of `frame`.
-    pub(crate) fn crops(&mut self, frame: VideoFrame) -> Result<FrameCrops, VideoError> {
+    /// The crops of `frame`, and its screen surfaces read.
+    pub(crate) fn crops(&mut self, frame: VideoFrame) -> Result<FrameCrops, AppError> {
         let (scale, width, height) = self.map.quarter();
         let mut quarter = RgbImage::default();
         if self.quarter {
@@ -107,6 +116,12 @@ impl Cropper {
             None
         };
         let left = crop(self, LEFT_PANEL_ROI, Anchor::Left)?;
+        let surfaces = match &mut self.screens {
+            Some(reader) => {
+                Some(reader.read(&frame, &quarter, scale, &self.map, &self.converter)?)
+            }
+            None => None,
+        };
         Ok(FrameCrops {
             index: frame.index(),
             frame,
@@ -114,7 +129,81 @@ impl Cropper {
             banner,
             left,
             quarter,
-            quarter_scale: scale,
+            surfaces,
         })
+    }
+}
+
+/// Reads the screen surfaces of single frames: the quarter-scale gates
+/// and, for a candidate surface, the name slots in its native zone. Both
+/// depend on the frame alone (the readers keep only scratch buffers), so
+/// the crop workers read in parallel and the screen stage's temporal
+/// model takes the results in frame order.
+#[derive(Debug, Clone)]
+struct ScreenReader {
+    detector: ScreenDetector,
+    roi: YuvRoi,
+    zone: RgbImage,
+}
+
+impl ScreenReader {
+    fn new(regions: RegionSet) -> Self {
+        Self {
+            detector: ScreenDetector::new(&regions),
+            roi: YuvRoi::new(),
+            zone: RgbImage::default(),
+        }
+    }
+
+    /// The surfaces of `frame`, whose downscaled copy is `quarter` (at
+    /// `scale` view pixels per source pixel).
+    fn read(
+        &mut self,
+        frame: &VideoFrame,
+        quarter: &RgbImage,
+        scale: f32,
+        map: &HudMap,
+        converter: &RgbConverter,
+    ) -> Result<[SurfaceFrame; 4], AppError> {
+        let detector_error = |e: ImageError| internal(format!("detector: {e}"));
+        let screen_map = *map.screen_map();
+        let quarter = RgbView::new(
+            &quarter.data,
+            quarter.width,
+            quarter.height,
+            3 * quarter.width as usize,
+        )
+        .map_err(detector_error)?;
+        let signals = self
+            .detector
+            .gate(&FrameView::scaled(quarter, scale), &screen_map);
+        let mut surfaces: [SurfaceFrame; 4] = Default::default();
+        for (i, region) in Region::SCREENS.into_iter().enumerate() {
+            let signal = signals[i];
+            surfaces[i].candidate = signal.candidate;
+            surfaces[i].score = signal.score;
+            let zone =
+                screens::zone(region, &screen_map).and_then(|z| z.intersection(&map.frame()));
+            let (true, Some(zone)) = (signal.candidate, zone) else {
+                continue;
+            };
+            frame.roi_yuv(zone, &mut self.roi)?;
+            converter.convert(&self.roi, &mut self.zone)?;
+            let origin = self.roi.rect().map_or((zone.x0, zone.y0), |r| (r.x0, r.y0));
+            let pixels = RgbView::new(
+                &self.zone.data,
+                self.zone.width,
+                self.zone.height,
+                3 * self.zone.width as usize,
+            )
+            .map_err(detector_error)?;
+            surfaces[i].slots = self.detector.read(
+                region,
+                &FrameView::crop(pixels, origin),
+                &screen_map,
+                &signal,
+            );
+        }
+        Ok(surfaces)
     }
 }
