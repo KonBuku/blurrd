@@ -39,6 +39,8 @@
 //!   Audio, subtitle and data packets are copied unchanged (or audio is
 //!   re-encoded as AAC), recorder metadata is stripped by default, and
 //!   MP4/MOV outputs get their index in space reserved at the front.
+//! - [`ProxyWriter`]: the preview proxy, a small H.264 copy for players
+//!   that cannot play the source, written while the analysis decodes.
 //! - [`sys::gpu`]: the machine's GPUs from DXGI, identified by LUID.
 //! - [`PtsTable`]: the PTS of every presentation frame, persisted as
 //!   `pts.bin` in the project cache. Rendering and seeking compare decoded
@@ -63,6 +65,7 @@ mod log_bridge;
 mod mp4;
 mod mux;
 mod probe;
+mod proxy;
 mod pts;
 mod rgb;
 mod roi;
@@ -83,6 +86,7 @@ pub use encode::{
 };
 pub use error::VideoError;
 pub use probe::{probe, pts_table};
+pub use proxy::{PROXY_HEIGHT, ProxyWriter};
 pub use pts::PtsTable;
 pub use rgb::{RgbConverter, RgbImage};
 pub use roi::{RoiLayout, YuvRoi};

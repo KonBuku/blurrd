@@ -988,7 +988,7 @@ fn frame_duration(pts: &PtsTable, index: u32) -> i64 {
 
 /// `<stem>.tmp.<ext>` next to `output`, after checking that the output is
 /// a supported container and not the input.
-fn temp_path(input: &Path, output: &Path) -> Result<PathBuf, VideoError> {
+pub(crate) fn temp_path(input: &Path, output: &Path) -> Result<PathBuf, VideoError> {
     let extension = output
         .extension()
         .and_then(|e| e.to_str())
@@ -1036,7 +1036,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 /// Removes a temporary output, logging (not failing) when that fails.
-fn remove_temp(temp: &Path) {
+pub(crate) fn remove_temp(temp: &Path) {
     if let Err(error) = std::fs::remove_file(temp)
         && error.kind() != std::io::ErrorKind::NotFound
     {
