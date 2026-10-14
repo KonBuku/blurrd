@@ -153,6 +153,10 @@ pub(super) struct NameLine {
     /// The columns of the text after the name (the message), if there is
     /// any.
     pub(super) message: Option<(i32, i32)>,
+    /// Whether the line starts with a prefix in parentheses: an opening
+    /// parenthesis and a closing one of the same height. A chat line's
+    /// structure, whatever the name start and end found.
+    pub(super) bracketed: bool,
 }
 
 /// Reusable buffers of the line finder.
@@ -339,6 +343,7 @@ pub(super) fn find_names<F>(
                     start: read.start,
                     end: read.end,
                     message: read.message.map(|(m0, m1)| (x(m0), x(m1) + 1)),
+                    bracketed: read.bracketed,
                 };
                 pending = Some((name, band));
             }
@@ -559,6 +564,8 @@ struct NameRead {
     start: NameStart,
     end: NameEnd,
     message: Option<(u32, u32)>,
+    /// See [`NameLine::bracketed`].
+    bracketed: bool,
 }
 
 /// The edge ratio of a box band whose edges were not seen
@@ -580,6 +587,7 @@ fn unread_line(line: &LineInk<'_>) -> Option<NameRead> {
         start: NameStart::Shortest,
         end: NameEnd::Safe,
         message: None,
+        bracketed: false,
     })
 }
 
@@ -627,6 +635,12 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
             }
         };
     let last_ink = line.segments.last()?.end - 1;
+    // A closing parenthesis inside the first word (the prefix ran into the
+    // name) or past it (the prefix fell apart) is evidence of a chat line
+    // only: the name start stays at the shortest prefix, as a tall glyph of
+    // an overlay can pass for the parenthesis.
+    let bracketed = start == NameStart::Parenthesis
+        || paren.is_some_and(|shape| inner_closing_paren(line, prefix, shape).is_some());
     let mut colours = LineColours::new(line, (first.start, prefix_end));
     let second = words.get(1);
     let second_is_colon = second.is_some_and(|word| word.len() <= COLON_COLUMNS);
@@ -682,6 +696,18 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
         (start, prefix_end, nx0) = shortest();
         (nx1, cover_end, end) = name_end(start, nx0);
     }
+    if start == NameStart::Shortest
+        && end == NameEnd::Colon
+        && colours.prefix.is_none()
+        && nx1 < prefix.end
+    {
+        // The prefix ran into the name and the colon ends that first word,
+        // but no colour says that the text after it is the white message:
+        // in greyscale video a closing parenthesis broken into two dots
+        // looks like a colon (measured at 720p: the name after a broadcast
+        // prefix stayed unblurred for 136 frames). Safe geometry.
+        (nx1, cover_end, end) = (last_ink, last_ink, NameEnd::Safe);
+    }
     if nx1 < nx0 + MIN_NAME_WIDTH {
         return None;
     }
@@ -701,6 +727,7 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
         start,
         end,
         message,
+        bracketed,
     })
 }
 
@@ -739,6 +766,7 @@ fn faint_name(line: &LineInk<'_>) -> Option<NameRead> {
             .iter()
             .find(|s| s.start > colon.end)
             .map(|s| (s.start, last_ink)),
+        bracketed: false,
     })
 }
 
@@ -859,6 +887,32 @@ fn closing_paren(line: &LineInk<'_>, prefix: Run, shape: (u32, u32)) -> bool {
 /// rows agree, up to one row at one end for sub-pixel positions (measured
 /// on recordings: 89 % exact, 97 % within this rule). A glyph that ends a
 /// row short at both ends (capitals, digits, descenders) is not one.
+/// The column of the prefix's closing parenthesis where the first word is
+/// not the prefix: the first column, at least [`MIN_PREFIX_WIDTH`] and at
+/// most [`PREFIX_MAX_WIDTH`] from the line start, whose own ink reaches
+/// from the ascender line to below the baseline as the opening parenthesis
+/// does (`shape`), with ink in most columns before it. No letter does:
+/// ascenders end on the baseline and descenders start at the x-height. The
+/// first word runs on into the name where the space after the prefix
+/// closes up (upscaled video), and it ends inside the prefix where faint
+/// glyphs fall apart (a dark filter); measured on real broadcast lines,
+/// which have no colon: names lost for up to 60 frames.
+fn inner_closing_paren(line: &LineInk<'_>, prefix: Run, shape: (u32, u32)) -> Option<u32> {
+    let from = prefix.start + MIN_PREFIX_WIDTH - PAREN_COLUMNS;
+    let to = (prefix.start + PREFIX_MAX_WIDTH + 1).min(line.width);
+    let c = (from..to).find(|&c| line.extent(c, c).is_some_and(|rows| same_rows(rows, shape)))?;
+    // The prefix word lies between the parentheses: ink in most of its
+    // columns. A faint prefix and name (greyscale video on a bright
+    // background) leave the columns empty, and a tall glyph further on is
+    // no parenthesis of a prefix.
+    let inner = prefix.start + PAREN_COLUMNS..c;
+    let inked = inner
+        .clone()
+        .filter(|&x| line.segments.iter().any(|s| s.start <= x && x < s.end))
+        .count();
+    (2 * inked >= inner.len()).then_some(c)
+}
+
 fn same_rows(rows: (u32, u32), shape: (u32, u32)) -> bool {
     let (top, bottom) = (rows.0.abs_diff(shape.0), rows.1.abs_diff(shape.1));
     top.max(bottom) <= 1 && top.min(bottom) == 0

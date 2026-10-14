@@ -267,9 +267,10 @@ impl ChatDetector {
     /// real recordings: every line of a closed chat and of an open history
     /// panel lost under those filters). Without the box, a line whose
     /// structure is unambiguous confirms the chat as a band would: a name
-    /// ending at a colon, or one after a prefix closed by a parenthesis
-    /// ending at its colour. Then every line read in the frame counts,
-    /// covered to its end.
+    /// ending at a colon, or one after a prefix in parentheses (measured
+    /// under brightness -0.2: broadcast lines, which have no colon and whose
+    /// prefix colour runs into the name's, lost for up to 60 frames). Then
+    /// every line read in the frame counts, covered to its end.
     /// The lines lie in the closed chat's rows, or in the open panel's
     /// while its scrollbar thumb shows. They carry a band of edge ratio 1
     /// (no box seen), which the tracker never takes for a solid new
@@ -299,8 +300,7 @@ impl ChatDetector {
             &unseen,
             &mut self.scratch.lines,
             |found, band| {
-                confirmed |= found.end == NameEnd::Colon
-                    || (found.start == NameStart::Parenthesis && found.end == NameEnd::Colour);
+                confirmed |= found.end == NameEnd::Colon || found.bracketed;
                 lines.push(chat_line(&found, band));
             },
         );

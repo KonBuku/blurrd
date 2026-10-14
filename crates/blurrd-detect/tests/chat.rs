@@ -902,6 +902,44 @@ fn finds_closed_chat_lines_without_box_edges() {
 }
 
 #[test]
+fn finds_bracketed_lines_without_colon_or_box_edges() {
+    // Broadcast and system lines have no colon, and their names do not end
+    // at a colour: without box edges, the prefix in parentheses alone shows
+    // that they are chat lines (measured on real recordings under
+    // brightness -0.2: broadcast names lost for up to 60 frames).
+    let rect = |x0, y0, x1, y1| RectI { x0, y0, x1, y1 };
+    let channels = [Channel::Broadcast, Channel::System, Channel::Purchase];
+    for seed in 0..4u64 {
+        let mut rng = Rng::new(1200 + seed);
+        let messages = (0..3)
+            .map(|i| {
+                message(
+                    &mut rng,
+                    channels[(seed as usize + i) % 3],
+                    SINGLE_WORD[i + 1],
+                    i as u32,
+                )
+            })
+            .collect();
+        let mut fx = chat_fixture(
+            Language::English,
+            messages,
+            BACKGROUNDS[(seed % 2) as usize],
+            Palette::DEFAULT,
+        );
+        for r in [rect(14, 925, 34, 1040), rect(461, 925, 481, 1040)] {
+            fx.frame.fill_rect(r, [0, 0, 0], 1.0);
+        }
+        let mut detector = ChatDetector::new();
+        let check = check_with(&mut detector, &fx);
+        let context = format!("seed {seed}");
+        assert!(detector.bands().is_empty(), "{context}");
+        check.assert_clean(&context);
+        assert!(check.detections.len() >= 3, "{context}");
+    }
+}
+
+#[test]
 fn finds_open_chat_names_too_faint_to_see_in_greyscale() {
     // On a bright background in greyscale video, a red name and its prefix
     // are darker than the panel around them and leave no bright strokes:
