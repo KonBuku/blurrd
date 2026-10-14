@@ -89,6 +89,33 @@ impl<'a> RgbView<'a> {
         &self.data[start..start + 3 * self.width as usize]
     }
 
+    /// A packed view (`3 × width` bytes per row) of a buffer that holds at
+    /// least `width × height` pixels.
+    pub(crate) fn packed(data: &'a [u8], width: u32, height: u32) -> Self {
+        debug_assert!(data.len() >= 3 * width as usize * height as usize);
+        Self {
+            data,
+            width,
+            height,
+            stride: 3 * width as usize,
+        }
+    }
+
+    /// The part `r` of the image, or `None` if `r` is not inside it.
+    pub fn sub(&self, r: RectI) -> Option<Self> {
+        let inside =
+            r.x0 >= 0 && r.y0 >= 0 && r.x1 as u32 <= self.width && r.y1 as u32 <= self.height;
+        inside.then(|| {
+            let start = r.y0 as usize * self.stride + 3 * r.x0 as usize;
+            Self {
+                data: &self.data[start..],
+                width: r.width(),
+                height: r.height(),
+                stride: self.stride,
+            }
+        })
+    }
+
     /// The colour of pixel `(x, y)`.
     ///
     /// # Panics

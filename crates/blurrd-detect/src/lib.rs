@@ -54,10 +54,12 @@
 )]
 
 pub mod banner;
+pub mod calibration;
 pub mod chat;
 pub mod classes;
 pub mod components;
 mod detection;
+pub mod geometry;
 mod image;
 pub mod killfeed;
 pub mod morph;
