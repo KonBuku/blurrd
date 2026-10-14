@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use blurrd_core::{AppError, Luid};
+use blurrd_core::{AppError, EncoderSetting, Luid};
 
 /// Where the OCR runtime and models are.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +76,8 @@ pub struct EngineConfig {
     pub decoder_threads: Option<u32>,
     /// Pool and queue sizes.
     pub pools: PoolSizes,
+    /// The encoder of the preview proxy (`Auto`: the export chain).
+    pub proxy_encoder: EncoderSetting,
 }
 
 impl EngineConfig {
@@ -88,6 +90,7 @@ impl EngineConfig {
             gpu: true,
             decoder_threads: None,
             pools: PoolSizes::default(),
+            proxy_encoder: EncoderSetting::Auto,
         }
     }
 }

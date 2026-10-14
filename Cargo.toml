@@ -29,6 +29,8 @@ blurrd-testkit = { path = "crates/blurrd-testkit" }
 blurrd-video = { path = "crates/blurrd-video" }
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"
+# Thumbnails of analysed videos (blurrd-engine).
+jpeg-encoder = "=0.7.1"
 # Ctrl+C handling in the CLI (cancels the job and removes partial output).
 ctrlc = "=3.5.2"
 # FFmpeg 9.0 bindings, linked against the pinned build in third_party/ffmpeg

@@ -226,6 +226,9 @@ impl Engine {
             regions: req.regions,
             blur: req.blur,
             verify: req.verify,
+            // Thumbnails and the proxy serve the desktop app's preview; a
+            // run goes straight to the output.
+            previews: false,
         };
         let prepared = self.prepare_analysis(&req.input, req.verify, job)?;
         let dir = ProjectDir::new(&self.config().cache_dir, &prepared.fingerprint);

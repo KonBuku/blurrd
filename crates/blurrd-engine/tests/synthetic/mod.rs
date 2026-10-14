@@ -256,3 +256,22 @@ pub fn video_stream_digest(path: &Path) -> String {
             hex
         })
 }
+
+/// The number of frames of the video stream of `path` and how many of
+/// them are keyframes (from the packets).
+pub fn frames_and_keyframes(path: &Path) -> (u32, u32) {
+    let mut input = format::input(path).unwrap();
+    let index = input
+        .streams()
+        .best(ffmpeg_the_third::media::Type::Video)
+        .unwrap()
+        .index();
+    let (mut frames, mut keys) = (0, 0);
+    for (stream, packet) in input.packets().map(Result::unwrap) {
+        if stream.index() == index {
+            frames += 1;
+            keys += u32::from(packet.is_key());
+        }
+    }
+    (frames, keys)
+}

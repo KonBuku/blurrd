@@ -8,8 +8,10 @@
 //!   decodes the video once, cuts the HUD crops on a fixed pool of
 //!   workers, runs every region's detectors and temporal models in frame
 //!   order and turns their boxes into the project's tracks; pass 0 of the
-//!   verification reads the protected zones on an OCR worker. The project
-//!   and the PTS table go into the [`cache`].
+//!   verification reads the protected zones on an OCR worker, and a
+//!   preview worker writes thumbnails and, for videos the desktop app's
+//!   player cannot play, a preview proxy. The project, the PTS table and
+//!   the previews go into the [`cache`].
 //! - [`Engine::render`]: the render job. It checks that the video is the
 //!   project's (fingerprint, timestamps from the cached PTS table,
 //!   keyframes), blurs every frame's boxes and encodes the export, named

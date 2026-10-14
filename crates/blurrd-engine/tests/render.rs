@@ -52,6 +52,7 @@ fn analysed(work: &Workdir, engine: &Engine, frames: u32, seed: u64) -> (PathBuf
     synthetic::write_clip(&clip, &scene);
     let mut req = AnalyzeRequest::new(JobId(uuid::Uuid::now_v7()), clip.clone());
     req.verify = false;
+    req.previews = false;
     let analysis = engine
         .analyze(&req, &sink(), &CancellationToken::new())
         .unwrap();

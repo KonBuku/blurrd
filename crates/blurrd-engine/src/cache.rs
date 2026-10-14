@@ -5,6 +5,7 @@
 //! ```text
 //! <cache>/projects/<fingerprint>/project.json
 //! <cache>/projects/<fingerprint>/pts.bin
+//! <cache>/projects/<fingerprint>/proxy.mp4  (videos the preview cannot play)
 //! <cache>/projects/<fingerprint>/thumbs/00042.jpg
 //! <cache>/caps/decoders.json  caps/encoders.json
 //! ```
@@ -125,6 +126,16 @@ impl ProjectDir {
     /// The PTS table.
     pub(crate) fn pts(&self) -> PathBuf {
         self.dir.join("pts.bin")
+    }
+
+    /// The thumbnail folder.
+    pub(crate) fn thumbs(&self) -> PathBuf {
+        self.dir.join("thumbs")
+    }
+
+    /// The preview proxy.
+    pub(crate) fn proxy(&self) -> PathBuf {
+        self.dir.join("proxy.mp4")
     }
 
     /// Creates the folder.

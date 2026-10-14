@@ -8,7 +8,9 @@ mod synthetic;
 
 use std::sync::Mutex;
 
-use blurrd_core::{ErrorKind, JobEvent, JobId, Region, RegionSet, Stage, VerifyState, WarningCode};
+use blurrd_core::{
+    EncoderSetting, ErrorKind, JobEvent, JobId, Region, RegionSet, Stage, VerifyState, WarningCode,
+};
 use blurrd_engine::{
     AnalyzeRequest, CancellationToken, Engine, EngineConfig, LOOKAHEAD_MAX, OcrSetup, ProgressSink,
     cache,
@@ -55,6 +57,7 @@ impl ProgressSink for CancelAfter<'_> {
 fn engine(work: &Workdir) -> Engine {
     let mut config = EngineConfig::new(work.path("cache"));
     config.gpu = false;
+    config.proxy_encoder = EncoderSetting::Named(String::from("mpeg4"));
     Engine::new(config).unwrap()
 }
 
@@ -62,6 +65,7 @@ fn request(input: std::path::PathBuf, regions: RegionSet) -> AnalyzeRequest {
     let mut req = AnalyzeRequest::new(JobId(uuid::Uuid::now_v7()), input);
     req.regions = regions;
     req.verify = false;
+    req.previews = false;
     req
 }
 
@@ -333,6 +337,52 @@ fn verification_builds_the_name_dictionary_or_warns() {
             .take()
             .iter()
             .any(|e| matches!(e, JobEvent::Warning { .. }))
+    );
+}
+
+#[test]
+fn analysis_writes_thumbnails_and_a_preview_proxy() {
+    let work = Workdir::new("analysis-previews");
+    // 90 frames at 60 fps: thumbnails at 0, 0.5 and 1.0 s.
+    let scene = synthetic::hud_scene(Layout::reference(), 90, 41);
+    let clip = work.path("clip.mkv");
+    synthetic::write_clip(&clip, &scene);
+    let mut req = request(clip, RegionSet::all());
+    req.previews = true;
+    let events = Events::default();
+    let engine = engine(&work);
+    let analysis = engine
+        .analyze(&req, &events, &CancellationToken::new())
+        .unwrap();
+    assert!(
+        !events
+            .take()
+            .iter()
+            .any(|e| matches!(e, JobEvent::Warning { .. }))
+    );
+    let report = &analysis.report;
+    assert_eq!(report.thumbnails, 3);
+    let dir = report.project_file.parent().unwrap();
+    for k in 0..3 {
+        let jpeg = std::fs::read(dir.join("thumbs").join(format!("{k:05}.jpg"))).unwrap();
+        assert_eq!(&jpeg[..2], [0xFF, 0xD8], "a JPEG");
+    }
+    // Matroska is not playable in the desktop app's player: a proxy.
+    let proxy = report.proxy.clone().unwrap();
+    assert_eq!(proxy, dir.join("proxy.mp4"));
+    let info = blurrd_video::probe(&proxy).unwrap();
+    assert_eq!((info.width, info.height), (960, 540));
+    let (count, _) = synthetic::frames_and_keyframes(&proxy);
+    assert_eq!(count, 90);
+    // A later analysis keeps the proxy.
+    let modified = std::fs::metadata(&proxy).unwrap().modified().unwrap();
+    let again = engine
+        .analyze(&req, &Events::default(), &CancellationToken::new())
+        .unwrap();
+    assert_eq!(again.report.proxy.as_ref(), Some(&proxy));
+    assert_eq!(
+        std::fs::metadata(&proxy).unwrap().modified().unwrap(),
+        modified
     );
 }
 

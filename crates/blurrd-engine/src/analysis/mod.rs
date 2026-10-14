@@ -3,6 +3,7 @@
 mod frame;
 mod pass0;
 mod pipeline;
+mod previews;
 mod stages;
 pub(crate) mod tracks;
 
@@ -15,13 +16,15 @@ use blurrd_core::{
     TemporalParams, VerifyState, WarningCode,
 };
 use blurrd_video::{
-    DecodeOptions, DecodePurpose, DecoderChoice, HwDecode, PtsTable, RgbConverter, VideoColour,
+    DecodeOptions, DecodePurpose, DecoderChoice, EncodeOptions, HwDecode, PtsTable, RgbConverter,
+    VideoColour,
 };
 use serde::Serialize;
 
 use self::frame::Cropper;
 use self::pass0::Pass0;
 use self::pipeline::Pipeline;
+use self::previews::Previews;
 use self::tracks::TrackBuilder;
 use crate::cache::{self, ProjectDir};
 use crate::dictionary::Pass0Stats;
@@ -50,11 +53,14 @@ pub struct AnalyzeRequest {
     /// Whether to verify: builds the OCR name dictionary (pass 0) when OCR
     /// is available, and warns when it is not.
     pub verify: bool,
+    /// Whether to make the thumbnails and, for videos the desktop app's
+    /// player cannot play, the preview proxy.
+    pub previews: bool,
 }
 
 impl AnalyzeRequest {
     /// Analyses every supported region of `input` with the default blur,
-    /// with verification.
+    /// with verification and previews.
     pub fn new(job: JobId, input: PathBuf) -> Self {
         Self {
             job,
@@ -62,6 +68,7 @@ impl AnalyzeRequest {
             regions: RegionSet::all(),
             blur: BlurParams::default(),
             verify: true,
+            previews: true,
         }
     }
 }
@@ -87,6 +94,10 @@ pub struct AnalyzeReport {
     pub max_delay: u32,
     /// Pass 0 counters, when OCR ran.
     pub pass0: Option<Pass0Stats>,
+    /// Thumbnails written.
+    pub thumbnails: u32,
+    /// The preview proxy, when the video needed one.
+    pub proxy: Option<PathBuf>,
 }
 
 /// A finished analysis: the project (also saved in the cache) and the
@@ -259,6 +270,14 @@ impl Engine {
             pass0,
         } = prepared;
         let decoder = decoder_name(decode.hw);
+        let dir = ProjectDir::new(&self.config().cache_dir, &fingerprint);
+        dir.create()?;
+        let previews = req.previews.then(|| {
+            let mut proxy = EncodeOptions::default();
+            proxy.encoder = self.config().proxy_encoder.clone();
+            proxy.gpu = self.config().gpu;
+            Previews::open(&dir, &info, converter.clone(), &proxy)
+        });
         job.stage(Stage::Detect);
         let pipeline = Pipeline {
             input: &req.input,
@@ -267,6 +286,7 @@ impl Engine {
             stages: stages::stages(req.regions, map, &converter),
             sources: stages::sources(req.regions),
             pass0,
+            previews,
             pools: self.config().pools,
             progress,
         };
@@ -287,9 +307,11 @@ impl Engine {
         if output.pts.is_empty() {
             return Err(no_frames());
         }
+        let previews = output.previews.unwrap_or_default();
+        for problem in &previews.problems {
+            job.warning(WarningCode::PreviewUnavailable, problem.clone(), None);
+        }
         let pts = PtsTable::new(info.time_base, output.pts)?;
-        let dir = ProjectDir::new(&self.config().cache_dir, &fingerprint);
-        dir.create()?;
         pts.write(&dir.pts())?;
         let media = ProjectMedia {
             path: req.input.clone(),
@@ -331,6 +353,8 @@ impl Engine {
                 fps: f64::from(frames) / elapsed.as_secs_f64().max(1e-9),
                 max_delay: output.max_delay,
                 pass0: output.pass0,
+                thumbnails: previews.thumbnails,
+                proxy: previews.proxy,
             },
             project,
         })

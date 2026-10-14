@@ -47,6 +47,7 @@ fn engine() -> (Engine, std::path::PathBuf) {
 fn analyze(engine: &Engine, clip: &Path) -> Analysis {
     let mut req = AnalyzeRequest::new(JobId(uuid::Uuid::now_v7()), clip.to_path_buf());
     req.verify = false;
+    req.previews = false;
     engine
         .analyze(&req, &Quiet, &CancellationToken::new())
         .unwrap()

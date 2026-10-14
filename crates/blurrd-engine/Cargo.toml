@@ -18,6 +18,7 @@ blurrd-detect.workspace = true
 blurrd-ocr.workspace = true
 blurrd-video.workspace = true
 crossbeam-channel.workspace = true
+jpeg-encoder.workspace = true
 serde.workspace = true
 sha2.workspace = true
 tokio-util.workspace = true

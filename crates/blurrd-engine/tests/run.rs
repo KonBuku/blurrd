@@ -97,6 +97,7 @@ fn a_streamed_run_equals_analysis_then_render() {
     let two_pass = engine(work.path("cache-two-pass"));
     let mut analyze = AnalyzeRequest::new(job(), clip.clone());
     analyze.verify = false;
+    analyze.previews = false;
     let analysis = two_pass
         .analyze(&analyze, &sink(), &CancellationToken::new())
         .unwrap();
@@ -135,6 +136,7 @@ fn cached_overrides_make_the_run_analyse_first() {
     let engine = engine(work.path("cache"));
     let mut analyze = AnalyzeRequest::new(job(), clip.clone());
     analyze.verify = false;
+    analyze.previews = false;
     let analysis = engine
         .analyze(&analyze, &sink(), &CancellationToken::new())
         .unwrap();

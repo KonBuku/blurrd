@@ -47,6 +47,14 @@ crate = "ffmpeg-the-third"
 allow = ["WTFPL"]
 crate = "ffmpeg-sys-the-third"
 
+# jpeg-encoder (thumbnails) is "(MIT OR Apache-2.0) AND IJG": parts are
+# derived from the Independent JPEG Group's software, whose permissive
+# license asks for an acknowledgement in the documentation of binaries
+# (kept in the generated third-party notices). Allowed for this crate only.
+[[licenses.exceptions]]
+allow = ["IJG"]
+crate = "jpeg-encoder"
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

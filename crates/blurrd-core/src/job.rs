@@ -93,6 +93,9 @@ pub enum WarningCode {
     OverrideUnbound,
     /// OCR is not available; the result is unverified.
     OcrUnavailable,
+    /// The thumbnails or the preview proxy could not be made; the preview
+    /// may not show this video.
+    PreviewUnavailable,
 }
 
 /// Result of a finished job.

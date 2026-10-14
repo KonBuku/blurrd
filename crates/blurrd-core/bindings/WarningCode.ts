@@ -3,4 +3,4 @@
 /**
  * Warnings a job can emit. The UI shows them; none of them fails the job.
  */
-export type WarningCode = "EncoderFallback" | "CalibrationLow" | "RegionHealth" | "HdrToneMapped" | "OutOfScopeNames" | "UnverifiableItems" | "OverrideUnbound" | "OcrUnavailable";
+export type WarningCode = "EncoderFallback" | "CalibrationLow" | "RegionHealth" | "HdrToneMapped" | "OutOfScopeNames" | "UnverifiableItems" | "OverrideUnbound" | "OcrUnavailable" | "PreviewUnavailable";

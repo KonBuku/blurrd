@@ -30,6 +30,7 @@ use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
 use super::frame::{Cropper, FrameCrops};
 use super::pass0::Pass0;
+use super::previews::{PreviewOutput, Previews};
 use super::stages::{Emitted, SOURCES, Stage};
 use super::tracks::{RegionBox, TrackBuilder};
 use crate::dictionary::Pass0Stats;
@@ -52,6 +53,8 @@ pub(crate) struct PipelineOutput {
     pub(crate) pass0: Option<Pass0Stats>,
     /// Why pass 0 stopped, if it failed.
     pub(crate) pass0_error: Option<String>,
+    /// What the previews produced, when they ran.
+    pub(crate) previews: Option<PreviewOutput>,
 }
 
 /// The parts of one analysis pipeline.
@@ -68,6 +71,8 @@ pub(crate) struct Pipeline<'a> {
     pub(crate) sources: [bool; SOURCES],
     /// Pass 0, when OCR runs.
     pub(crate) pass0: Option<Pass0>,
+    /// Thumbnails and the proxy, when wanted.
+    pub(crate) previews: Option<Previews>,
     /// Pool and queue sizes.
     pub(crate) pools: PoolSizes,
     /// Report progress, with the number of frames the video is expected
@@ -146,6 +151,7 @@ impl Pipeline<'_> {
             stages,
             sources,
             pass0,
+            previews,
             pools,
             progress,
         } = self;
@@ -162,8 +168,10 @@ impl Pipeline<'_> {
             .unzip();
         let (pass0_tx, pass0_rx) = bounded::<Arc<FrameCrops>>(pools.ocr_queue.max(1));
         let pass0_tx = pass0.is_some().then_some(pass0_tx);
+        let (previews_tx, previews_rx) = bounded::<Arc<FrameCrops>>(pools.stage_queue.max(1));
+        let previews_tx = previews.is_some().then_some(previews_tx);
 
-        let (pts, tracks, max_delay, pass0_result) = std::thread::scope(|scope| {
+        let (pts, tracks, max_delay, pass0_result, previews) = std::thread::scope(|scope| {
             let control = &control;
             let decoder = scope.spawn(move || {
                 control
@@ -184,7 +192,8 @@ impl Pipeline<'_> {
             }
             drop((frame_rx, crop_tx));
             scope.spawn(move || {
-                control.guard(|| dispatch(&crop_rx, &to_stages, pass0_tx.as_ref(), control));
+                let sides: Vec<_> = pass0_tx.iter().chain(&previews_tx).collect();
+                control.guard(|| dispatch(&crop_rx, &to_stages, &sides, control));
             });
             for (stage, rx) in stages.into_iter().zip(stage_inputs) {
                 let (emit_tx, signal_tx) = (emit_tx.clone(), signal_tx.clone());
@@ -196,6 +205,7 @@ impl Pipeline<'_> {
             drop((emit_tx, signal_tx));
             let pass0 = pass0
                 .map(|pass0| scope.spawn(move || pass0.run(&pass0_rx, &signal_rx, hud_stages)));
+            let previews = previews.map(|previews| scope.spawn(move || previews.run(&previews_rx)));
             let collected = collect(&emit_rx, sources, progress, job, control, on_frame);
             let pts = decoder.join().unwrap_or_default();
             let pass0 = pass0.map(|handle| {
@@ -203,9 +213,13 @@ impl Pipeline<'_> {
                     .join()
                     .unwrap_or_else(|_| Err(String::from("the OCR worker panicked")))
             });
+            let previews = previews.map(|handle| match handle.join() {
+                Ok(output) => output,
+                Err(panic) => std::panic::resume_unwind(panic),
+            });
             let (tracks, max_delay) =
                 collected.finish(u32::try_from(pts.len()).unwrap_or(u32::MAX), on_frame);
-            (pts, tracks, max_delay, pass0)
+            (pts, tracks, max_delay, pass0, previews)
         });
         if let Some(error) = control.into_error() {
             return Err(error);
@@ -225,6 +239,7 @@ impl Pipeline<'_> {
             max_delay,
             pass0,
             pass0_error,
+            previews,
         })
     }
 }
@@ -254,11 +269,12 @@ fn decode_frames(
     }
 }
 
-/// Restores frame order and hands every frame to each stage (and pass 0).
+/// Restores frame order and hands every frame to each stage and side
+/// output (pass 0, previews).
 fn dispatch(
     crops: &Receiver<Result<FrameCrops, AppError>>,
     stages: &[Sender<Arc<FrameCrops>>],
-    pass0: Option<&Sender<Arc<FrameCrops>>>,
+    sides: &[&Sender<Arc<FrameCrops>>],
     control: &Control,
 ) -> Result<(), AppError> {
     let mut waiting: BTreeMap<u32, FrameCrops> = BTreeMap::new();
@@ -273,9 +289,10 @@ fn dispatch(
                     return Ok(());
                 }
             }
-            // Pass 0 stopping (OCR failed) does not stop the analysis.
-            if let Some(tx) = pass0 {
-                let _ = send(tx, shared, control);
+            // A side output stopping (OCR failed) does not stop the
+            // analysis.
+            for tx in sides {
+                let _ = send(tx, Arc::clone(&shared), control);
             }
             next += 1;
         }
