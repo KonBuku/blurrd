@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use blurrd_blur::CpuBlur;
-use blurrd_core::{EncoderSetting, NvencSessions, RectI};
+use blurrd_core::{BlurBox, EncoderSetting, FrameBoxTable, NvencSessions, RectI};
 use blurrd_video::{
-    DecodeOptions, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder, VideoError,
-    output_color, probe,
+    BoxSource, DecodeOptions, EncodeOptions, MuxOptions, PtsTable, TranscodeReport, Transcoder,
+    VideoError, output_color, probe,
 };
 use support::{ClipSpec, TempClip, box_table, decode_table, pictures, pixel_params, write_clip};
 
@@ -287,6 +287,54 @@ fn canceling_leaves_no_file() {
     write_clip(source.path(), &ClipSpec::cfr(60));
     let output = TempClip::new("render-cancel-out", "mp4");
     let error = render(source.path(), output.path(), "mpeg4", (1, 0), Some(20)).unwrap_err();
+    assert!(matches!(error, VideoError::Canceled), "{error}");
+    assert_eq!(leftovers(output.path()), Vec::<PathBuf>::new());
+}
+
+/// A box source whose producer stopped at frame `end`.
+struct StoppedAt {
+    table: FrameBoxTable,
+    end: u32,
+}
+
+impl BoxSource for StoppedAt {
+    fn frame_count(&self) -> u32 {
+        self.table.frame_count()
+    }
+
+    fn boxes_into(&self, frame: u32, out: &mut Vec<BlurBox>) -> Result<(), VideoError> {
+        if frame >= self.end {
+            return Err(VideoError::Canceled);
+        }
+        self.table.boxes_into(frame, out)
+    }
+}
+
+#[test]
+fn a_box_source_that_stops_stops_the_render() {
+    let source = TempClip::new("render-source-stop", "mp4");
+    write_clip(source.path(), &ClipSpec::cfr(60));
+    let output = TempClip::new("render-source-stop-out", "mp4");
+    let info = probe(source.path()).unwrap();
+    let (pts, _) = decode_table(source.path());
+    let boxes = StoppedAt {
+        table: box_table(pts.len(), 5, 40, RectI::new(64, 64, 160, 96).unwrap()),
+        end: 30,
+    };
+    let mut options = EncodeOptions::default();
+    options.encoder = EncoderSetting::Named(String::from("mpeg4"));
+    let transcoder = Transcoder::open(
+        &info,
+        Arc::new(pts),
+        output.path(),
+        &DecodeOptions::default(),
+        &options,
+        MuxOptions::default(),
+    )
+    .unwrap();
+    let error = transcoder
+        .run(&boxes, &CpuBlur, &pixel_params(&info), &|| false, |_| {})
+        .unwrap_err();
     assert!(matches!(error, VideoError::Canceled), "{error}");
     assert_eq!(leftovers(output.path()), Vec::<PathBuf>::new());
 }

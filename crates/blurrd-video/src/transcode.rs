@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use blurrd_blur::{BlurBackend, PixelParams, prepare_boxes};
 use blurrd_core::{
-    AudioMode, EncoderSetting, ExportSettings, FrameBoxTable, KeyframePolicy, MediaInfo,
+    AudioMode, BlurBox, EncoderSetting, ExportSettings, FrameBoxTable, KeyframePolicy, MediaInfo,
     MetadataMode, MoovMode, NvencSessions,
 };
 use crossbeam_channel::{Receiver, Sender, bounded};
@@ -154,6 +154,38 @@ pub struct TranscodeReport {
     pub moov: MoovLayout,
     /// Wall-clock time of [`Transcoder::run`].
     pub elapsed: Duration,
+}
+
+/// Where a render takes the boxes of each frame from.
+///
+/// A [`FrameBoxTable`] knows every frame's boxes up front. A streaming
+/// source (the engine's `run`, which renders while the analysis is still
+/// going) may block until a frame's boxes are final; the render asks for
+/// each frame right before it blurs it.
+pub trait BoxSource: Sync {
+    /// Number of frames the source describes.
+    fn frame_count(&self) -> u32;
+
+    /// Writes the boxes of presentation frame `frame` into `out` (cleared
+    /// first), waiting until they are known.
+    ///
+    /// # Errors
+    ///
+    /// [`VideoError::Canceled`] when the boxes will never be known (the
+    /// job producing them stopped); the render then stops too.
+    fn boxes_into(&self, frame: u32, out: &mut Vec<BlurBox>) -> Result<(), VideoError>;
+}
+
+impl BoxSource for FrameBoxTable {
+    fn frame_count(&self) -> u32 {
+        FrameBoxTable::frame_count(self)
+    }
+
+    fn boxes_into(&self, frame: u32, out: &mut Vec<BlurBox>) -> Result<(), VideoError> {
+        out.clear();
+        out.extend_from_slice(self.boxes(frame));
+        Ok(())
+    }
 }
 
 /// One encoder session: a decoder and an encoder of its own.
@@ -280,8 +312,8 @@ impl Transcoder {
         &self.fallbacks
     }
 
-    /// Renders the video: blurs the boxes of `table` with `blur` and
-    /// `params` and writes the output.
+    /// Renders the video: blurs the boxes `table` gives for each frame
+    /// with `blur` and `params` and writes the output.
     ///
     /// `cancel` is polled once per frame; `progress` is called on the
     /// calling thread with the number of frames written so far.
@@ -294,7 +326,7 @@ impl Transcoder {
     /// when a stage fails. The temporary file is removed on every error.
     pub fn run(
         self,
-        table: &FrameBoxTable,
+        table: &dyn BoxSource,
         blur: &dyn BlurBackend,
         params: &PixelParams,
         cancel: &(dyn Fn() -> bool + Sync),
@@ -351,7 +383,7 @@ impl Transcoder {
     fn transcode(
         self,
         muxer: &mut Muxer,
-        table: &FrameBoxTable,
+        table: &dyn BoxSource,
         blur: &dyn BlurBackend,
         params: &PixelParams,
         cancel: &(dyn Fn() -> bool + Sync),
@@ -410,6 +442,7 @@ impl Transcoder {
                             encoder,
                             pool: FramePool::default(),
                             table,
+                            boxes: Vec::new(),
                             blur,
                             params,
                         };
@@ -768,7 +801,9 @@ impl DecodeStage<'_> {
 struct EncodeStage<'a> {
     encoder: VideoEncoder,
     pool: FramePool,
-    table: &'a FrameBoxTable,
+    table: &'a dyn BoxSource,
+    /// The boxes of the current frame.
+    boxes: Vec<BlurBox>,
     blur: &'a dyn BlurBackend,
     params: &'a PixelParams,
 }
@@ -791,7 +826,7 @@ impl EncodeStage<'_> {
             if control.aborted() {
                 return Ok(blurred);
             }
-            let boxes = self.table.boxes(frame.index());
+            self.table.boxes_into(frame.index(), &mut self.boxes)?;
             let target = self.encoder.input_layout();
             let started = Instant::now();
             // Frames the encoder cannot take directly are converted into a
@@ -801,10 +836,10 @@ impl EncodeStage<'_> {
                 frame = self.pool.copy(&frame, target)?;
                 owned = true;
             }
-            if !boxes.is_empty() {
+            if !self.boxes.is_empty() {
                 owned |= !frame.is_writable();
                 let (width, height) = (frame.width(), frame.height());
-                prepare_boxes(boxes, width, height, self.params, &mut prepared);
+                prepare_boxes(&self.boxes, width, height, self.params, &mut prepared);
                 let mut view = frame.make_writable(&mut self.pool)?;
                 self.blur.blur(&mut view, (0, 0), &prepared, self.params)?;
                 blurred.frames += 1;

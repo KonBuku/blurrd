@@ -88,7 +88,7 @@ pub use rgb::{RgbConverter, RgbImage};
 pub use roi::{RoiLayout, YuvRoi};
 pub use seek::{FrameSeeker, SeekerOptions};
 pub use streams::SkippedStream;
-pub use transcode::{MoovLayout, MuxOptions, TranscodeReport, Transcoder};
+pub use transcode::{BoxSource, MoovLayout, MuxOptions, TranscodeReport, Transcoder};
 
 /// Sets up FFmpeg for blurrd. Safe to call more than once; only the first
 /// call does the work.
