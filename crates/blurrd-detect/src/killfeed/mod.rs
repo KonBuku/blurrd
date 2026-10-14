@@ -35,8 +35,11 @@
 //! detector's entire budget (plan 18.12).
 
 mod analysis;
+mod hues;
 mod rows;
 mod tones;
+
+pub use hues::{BarHueLearner, BarHues, TeamHue};
 
 use blurrd_core::{NameKind, RectI, Region};
 

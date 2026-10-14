@@ -19,6 +19,13 @@
 //!    [`MIN_EVIDENCE`] frames showed structure; a region's confidence is
 //!    the same for the frames that showed that region's structure.
 //!
+//! The kill-feed rows of the winning layout also learn the video's bar
+//! colours ([`BarHueLearner`]): [`CalibratedSegment::hues`] holds them when
+//! they differ from the default teal and red (a colour-blind mode, custom
+//! team colours, a GPU colour filter), and their
+//! [`BarHues::params`](crate::killfeed::BarHues::params) make them the
+//! detector's fast path.
+//!
 //! The calibration is kept per scene segment: when the bars change for good
 //! (the game resolution changed, a different recording was spliced in), a
 //! new segment starts. Confidence below [`MIN_CONFIDENCE`] means Safe
@@ -30,10 +37,11 @@ use std::collections::BTreeMap;
 use blurrd_core::{HudAnchor, HudGeometry, HudLayout, Region};
 
 use crate::chat::{BOX_X, BoxBand, ChatDetector, LEFT_PANEL_ROI, PANEL_X1};
+use crate::classes::ClassParams;
 use crate::detection::Detection;
 use crate::geometry::{HudCrop, HudSampler};
 use crate::image::RgbView;
-use crate::killfeed::{FEED_ROI, KillFeedDetector};
+use crate::killfeed::{BarHueLearner, BarHues, FEED_ROI, KillFeedDetector};
 
 /// Calibration confidence below this means Safe geometry and a
 /// `CalibrationLow` warning.
@@ -87,6 +95,9 @@ pub struct CalibratedSegment {
     pub first_frame: u32,
     /// The geometry, with its confidence.
     pub geometry: HudGeometry,
+    /// The kill-feed bar colours learned in the segment, if they differ
+    /// from the defaults.
+    pub hues: Option<BarHues>,
 }
 
 /// The result of a calibration: one geometry per segment, in frame order.
@@ -122,6 +133,7 @@ struct Hypothesis {
     sampler: HudSampler,
     feed: KillFeedDetector,
     chat: ChatDetector,
+    hues: BarHueLearner,
     /// Kill-feed rows whose right end lies where the layout puts it.
     feed_rows: u32,
     /// Chat box bands with lines whose right edge lies where the layout
@@ -135,6 +147,7 @@ impl Hypothesis {
             sampler: HudSampler::new(geometry),
             feed: KillFeedDetector::new(),
             chat: ChatDetector::new(),
+            hues: BarHueLearner::new(),
             feed_rows: 0,
             chat_bands: 0,
         }
@@ -151,6 +164,7 @@ impl Hypothesis {
         if self.feed.detect(&feed, dets).is_ok() {
             let rows = self.feed.rows().iter();
             self.feed_rows += rows.filter(|r| row_end_aligned(&feed, r.top)).count() as u32;
+            self.hues.push(&self.feed);
         }
         let left = self
             .sampler
@@ -250,6 +264,7 @@ impl Calibrator {
             self.done.push(CalibratedSegment {
                 first_frame: 0,
                 geometry: HudGeometry::for_layout(self.width, self.height, self.layout),
+                hues: None,
             });
         }
         if let Some(first) = self.done.first_mut() {
@@ -319,6 +334,7 @@ fn close(open: &Open) -> CalibratedSegment {
         return CalibratedSegment {
             first_frame: open.first_frame,
             geometry: HudGeometry::default(),
+            hues: None,
         };
     };
     let second = ranked.get(1);
@@ -337,6 +353,7 @@ fn close(open: &Open) -> CalibratedSegment {
     CalibratedSegment {
         first_frame: open.first_frame,
         geometry,
+        hues: best.hues.hues(&ClassParams::default()),
     }
 }
 

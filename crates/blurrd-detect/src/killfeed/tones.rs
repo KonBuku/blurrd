@@ -80,6 +80,27 @@ impl Tone {
         hue_distance(self.hue, other.hue)
     }
 
+    /// A tone from its parts.
+    #[cfg(test)]
+    pub(super) const fn new(hue: u8, min_s: u8, min_v: u8) -> Self {
+        Self { hue, min_s, min_v }
+    }
+
+    /// The tone's hue (OpenCV units, `0..180`).
+    pub(super) const fn hue(self) -> u8 {
+        self.hue
+    }
+
+    /// The minimum saturation of a matching pixel.
+    pub(super) const fn min_s(self) -> u8 {
+        self.min_s
+    }
+
+    /// The minimum value of a matching pixel.
+    pub(super) const fn min_v(self) -> u8 {
+        self.min_v
+    }
+
     /// Adds the pixels of each column of `rect` that have this colour to
     /// `counts` (one entry per column of `rect`).
     pub(super) fn count_columns(self, classes: &PixelClasses, rect: RectI, counts: &mut [u32]) {
@@ -136,7 +157,7 @@ pub(super) fn plane_rows(
 }
 
 /// Circular distance of two OpenCV hues (`0..180`).
-fn hue_distance(a: u8, b: u8) -> u8 {
+pub(super) fn hue_distance(a: u8, b: u8) -> u8 {
     let d = a.abs_diff(b);
     d.min(180u8.saturating_sub(d))
 }

@@ -116,14 +116,17 @@ impl Class {
 /// the port spec; the hue ranges may be replaced by learned ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassParams {
-    /// Inclusive hue range (`0..180`) of [`Class::Teal`].
+    /// Inclusive hue range (`0..180`) of [`Class::Teal`]. A range whose
+    /// start is above its end wraps around 0 ([`in_hue_range`]).
     pub teal_hue: (u8, u8),
     /// Minimum saturation of [`Class::Teal`].
     pub teal_min_s: u8,
     /// Minimum value of [`Class::Teal`].
     pub teal_min_v: u8,
-    /// [`Class::Red`] hues are `≤ red_hue_max` or `≥ red_hue_min` (the
-    /// range wraps around 0).
+    /// [`Class::Red`] hues lie in the circular range `red_hue_min ..=
+    /// red_hue_max`: the default (170 to 10) wraps around 0, so it means
+    /// `≥ red_hue_min` or `≤ red_hue_max`; a learned range may not wrap
+    /// ([`in_hue_range`]).
     pub red_hue_max: u8,
     /// See [`ClassParams::red_hue_max`].
     pub red_hue_min: u8,
@@ -276,11 +279,8 @@ impl ClassParams {
     fn classify(&self, [h, s, v]: [u8; 3], mn: u8, diff: u8) -> u8 {
         let white = (mn >= self.white_min) & (diff <= self.white_max_chroma);
         let pure = (mn >= self.pure_white_min) & (diff <= self.pure_white_max_chroma);
-        let teal = (h >= self.teal_hue.0)
-            & (h <= self.teal_hue.1)
-            & (s >= self.teal_min_s)
-            & (v >= self.teal_min_v);
-        let red = ((h <= self.red_hue_max) | (h >= self.red_hue_min))
+        let teal = in_hue_range(h, self.teal_hue) & (s >= self.teal_min_s) & (v >= self.teal_min_v);
+        let red = in_hue_range(h, (self.red_hue_min, self.red_hue_max))
             & (s >= self.red_min_s)
             & (v >= self.red_min_v);
         let bar = (teal & (v >= self.bar_teal_min_v) & (s >= self.bar_teal_min_s))
@@ -291,6 +291,22 @@ impl ClassParams {
             | Class::PureWhite.bit_if(pure)
             | Class::Bar.bit_if(bar)
     }
+}
+
+/// Whether hue `h` lies in the inclusive circular range `start ..= end`
+/// (OpenCV hues, `0..180`): `start ≤ h ≤ end`, or, for a range with
+/// `start > end` that wraps around 0, `h ≥ start` or `h ≤ end`.
+///
+/// Branch-free like [`ClassParams::colour_flags`]: for a range that does
+/// not wrap the second term is always false, for one that wraps the first.
+#[inline]
+#[allow(
+    clippy::needless_bitwise_bool,
+    reason = "non-short-circuit operators keep the classification branch-free"
+)]
+pub const fn in_hue_range(h: u8, (start, end): (u8, u8)) -> bool {
+    let wraps = start > end;
+    ((h >= start) & (h <= end)) | (wraps & ((h >= start) | (h <= end)))
 }
 
 /// Per-row buffers of [`PixelClasses::compute`].
@@ -608,7 +624,7 @@ impl PixelClasses {
 mod tests {
     use blurrd_core::RectI;
 
-    use super::{Class, ClassParams, PixelClasses, hsv};
+    use super::{Class, ClassParams, PixelClasses, hsv, in_hue_range};
     use crate::image::RgbView;
 
     #[test]
@@ -754,6 +770,27 @@ mod tests {
             ..ClassParams::default()
         };
         check_rows(&colours, &shifted);
+        // Learned ranges: a red that does not wrap, a teal that does.
+        let learned = ClassParams {
+            teal_hue: (172, 8),
+            red_hue_min: 20,
+            red_hue_max: 45,
+            ..ClassParams::default()
+        };
+        check_rows(&colours, &learned);
+    }
+
+    #[test]
+    fn hue_ranges_may_wrap_around_red() {
+        for h in 0..180u8 {
+            assert_eq!(in_hue_range(h, (66, 96)), (66..=96).contains(&h), "{h}");
+            assert_eq!(in_hue_range(h, (170, 10)), h >= 170 || h <= 10, "{h}");
+        }
+        assert!(in_hue_range(40, (40, 40)) && !in_hue_range(41, (40, 40)));
+        // The default red range is the port spec's `h ≤ 10 or h ≥ 170`.
+        let p = ClassParams::default();
+        let red = |rgb| p.colour_flags(rgb) & Class::Red.bit() != 0;
+        assert!(red([230, 40, 40]) && red([230, 40, 70]) && !red([230, 140, 40]));
     }
 
     #[test]

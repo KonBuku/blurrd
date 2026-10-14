@@ -94,9 +94,9 @@ const WEAPON_GAP: i32 = 6;
 const ICON_ZONE: i32 = 40;
 /// A learned victim colour must cover at least this share of the
 /// non-white pixels next to the victim name...
-const VICTIM_TONE_SHARE: f32 = 0.5;
+pub(super) const VICTIM_TONE_SHARE: f32 = 0.5;
 /// ... and at least this many pixels (of about 1,200).
-const VICTIM_TONE_PIXELS: u32 = 300;
+pub(super) const VICTIM_TONE_PIXELS: u32 = 300;
 /// The killer colour is learned from this column to [`VICTIM_COLOUR_X0`]:
 /// the colour boundary of a 16-character victim name lies at about x 1680,
 /// and the killer bar shows between its name, weapon and icons.

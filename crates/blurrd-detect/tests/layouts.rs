@@ -1,9 +1,10 @@
 //! HUD geometry calibration and normalised reading on synthetic frames of
 //! every layout of the fixture matrix (16:9 at 720p, 1080p, 1440p and 4K,
 //! native 4:3, 4:3 pillarboxed, 16:10 and 4:3 stretched) and every
-//! colour-blind palette: the calibration finds the layout, and every
-//! kill-feed and chat name read through it is fully covered in source
-//! pixels (plan 7.3, M15).
+//! colour-blind palette: the calibration finds the layout and learns the
+//! kill-feed bar colours of the palettes, and every kill-feed and chat
+//! name read through it is fully covered in source pixels (plan 7.3,
+//! M15).
 
 #![allow(
     clippy::cast_possible_wrap,
@@ -149,6 +150,14 @@ fn calibration_finds_every_layout_and_its_names_are_covered() {
             );
             assert!((geometry.sx - layout.sx).abs() < 1e-3, "{what}");
             assert!((geometry.sy - layout.sy).abs() < 1e-3, "{what}");
+            // Colour-blind palettes learn their bar colours; the default
+            // palette keeps the default classes.
+            let hues = calibration.segments[0].hues;
+            assert_eq!(
+                hues.is_some(),
+                palette != Palette::DEFAULT,
+                "{what}: {hues:?}"
+            );
             let sampler = HudSampler::new(geometry);
             // Every name in the settled frames is covered.
             for f in [16, 24, 32] {
