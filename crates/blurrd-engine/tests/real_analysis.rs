@@ -99,7 +99,7 @@ fn real_analysis_throughput_and_lookahead() {
                 .sum::<usize>(),
         );
         frames += u64::from(report.frames);
-        seconds += report.elapsed.as_secs_f64();
+        seconds += report.elapsed_ms as f64 / 1000.0;
     }
     eprintln!(
         "total: {frames} frames in {seconds:.1} s, {:.0} fps",

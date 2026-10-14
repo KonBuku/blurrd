@@ -3,147 +3,116 @@
 //! stdout for people.
 
 use std::io::Write;
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
 
-use blurrd_core::{AppError, JobEvent, JobId, WarningCode};
+use blurrd_core::{AppError, JobEvent, JobId, JobKind};
+use blurrd_engine::ProgressSink;
 use serde::Serialize;
 
-/// Progress events and lines are sent at most this often (20 per second).
-const PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
-
-/// Writes the events of one job.
+/// Receives the events of the engine's jobs and prints them.
 #[derive(Debug)]
 pub(crate) struct Events {
     json: bool,
-    job: JobId,
-    started: Instant,
-    last_progress: Option<Instant>,
+    state: Mutex<State>,
+}
+
+#[derive(Debug, Default)]
+struct State {
+    /// What the progress line calls the running job.
+    label: &'static str,
     /// Whether a progress line is on the terminal (and needs ending).
     progress_line: bool,
-    warnings: u32,
 }
 
 impl Events {
-    /// Events of the job `job`; JSON lines when `json` is set.
-    pub(crate) fn new(job: JobId, json: bool) -> Self {
+    /// Events printed as JSON lines when `json` is set.
+    pub(crate) fn new(json: bool) -> Self {
         Self {
             json,
+            state: Mutex::new(State {
+                label: "job",
+                progress_line: false,
+            }),
+        }
+    }
+
+    /// Reports a failure of job `job` that happened before the engine
+    /// started it (the engine reports its own failures): a `Failed` event
+    /// with `--json`, a message on stderr otherwise.
+    pub(crate) fn failed(&self, job: JobId, error: &AppError) {
+        self.emit(JobEvent::Failed {
             job,
-            started: Instant::now(),
-            last_progress: None,
-            progress_line: false,
-            warnings: 0,
-        }
-    }
-
-    /// The job the events belong to.
-    pub(crate) fn job(&self) -> JobId {
-        self.job
-    }
-
-    /// Number of warnings emitted so far.
-    pub(crate) fn warnings(&self) -> u32 {
-        self.warnings
-    }
-
-    /// Emits an event: as a JSON line, or (for warnings and failures) as a
-    /// line on stderr.
-    pub(crate) fn emit(&mut self, event: &JobEvent) {
-        if let JobEvent::Warning { .. } = event {
-            self.warnings += 1;
-        }
-        if self.json {
-            write_json(event);
-            return;
-        }
-        match event {
-            JobEvent::Warning { message, .. } => self.line(&format!("warning: {message}")),
-            JobEvent::Canceled { .. } => self.line("canceled"),
-            _ => {}
-        }
-    }
-
-    /// Emits a warning.
-    pub(crate) fn warning(&mut self, code: WarningCode, message: String) {
-        let event = JobEvent::Warning {
-            job: self.job,
-            code,
-            message,
-            frames: None,
-        };
-        self.emit(&event);
-    }
-
-    /// Reports that `frame` of `total` frames are done, at most 20 times
-    /// per second (and always for the last frame).
-    pub(crate) fn progress(&mut self, frame: u32, total: u32) {
-        let now = Instant::now();
-        let due = self
-            .last_progress
-            .is_none_or(|last| now.duration_since(last) >= PROGRESS_INTERVAL);
-        if !due && frame < total {
-            return;
-        }
-        self.last_progress = Some(now);
-        let seconds = self.started.elapsed().as_secs_f64();
-        let fps = if seconds > 0.0 {
-            f64::from(frame) / seconds
-        } else {
-            0.0
-        };
-        let eta_ms = if fps > 0.0 {
-            (f64::from(total.saturating_sub(frame)) / fps * 1000.0) as u64
-        } else {
-            0
-        };
-        if self.json {
-            write_json(&JobEvent::Progress {
-                job: self.job,
-                frame,
-                total,
-                fps: fps as f32,
-                eta_ms,
-            });
-        } else {
-            let mut stderr = std::io::stderr().lock();
-            // A failed write to the terminal is not worth failing the job.
-            let _ = write!(
-                stderr,
-                "\rrender: {frame}/{total} frames, {fps:.0} fps, {:.1} s left   ",
-                eta_ms as f64 / 1000.0
-            );
-            let _ = stderr.flush();
-            self.progress_line = true;
-        }
-    }
-
-    /// Reports a failure: a `Failed` event with `--json`, a message on
-    /// stderr otherwise.
-    pub(crate) fn failed(&mut self, error: &AppError) {
-        if self.json {
-            write_json(&JobEvent::Failed {
-                job: self.job,
-                error: error.clone(),
-            });
-        } else {
-            self.line(&error_text(error));
-        }
+            error: error.clone(),
+        });
     }
 
     /// The final report: a JSON line `{"type":"Report", …}`, or `summary`
     /// on stdout.
-    pub(crate) fn report(&mut self, report: &impl Serialize, summary: &str) {
+    pub(crate) fn report(&self, report: &impl Serialize, summary: &str) {
         if self.json {
             write_json(&Tagged {
                 kind: "Report",
                 body: report,
             });
         } else {
-            self.end_progress();
+            self.with_state(State::end_progress);
             let _ = writeln!(std::io::stdout().lock(), "{summary}");
         }
     }
 
+    fn with_state(&self, f: impl FnOnce(&mut State)) {
+        if let Ok(mut state) = self.state.lock() {
+            f(&mut state);
+        }
+    }
+}
+
+impl ProgressSink for Events {
+    /// Prints an event: every event as a JSON line with `--json`;
+    /// otherwise progress as one updating line on stderr, warnings,
+    /// failures and cancellations as lines on stderr.
+    fn emit(&self, event: JobEvent) {
+        if self.json {
+            write_json(&event);
+            return;
+        }
+        self.with_state(|state| match &event {
+            JobEvent::Started { kind, .. } => {
+                state.label = match kind {
+                    JobKind::Analyze => "analyze",
+                    JobKind::Render => "render",
+                    JobKind::Run => "run",
+                    _ => "job",
+                };
+            }
+            JobEvent::Progress {
+                frame,
+                total,
+                fps,
+                eta_ms,
+                ..
+            } => {
+                let mut stderr = std::io::stderr().lock();
+                // A failed write to the terminal is not worth failing the
+                // job.
+                let _ = write!(
+                    stderr,
+                    "\r{}: {frame}/{total} frames, {fps:.0} fps, {:.1} s left   ",
+                    state.label,
+                    *eta_ms as f64 / 1000.0
+                );
+                let _ = stderr.flush();
+                state.progress_line = true;
+            }
+            JobEvent::Warning { message, .. } => state.line(&format!("warning: {message}")),
+            JobEvent::Failed { error, .. } => state.line(&error_text(error)),
+            JobEvent::Canceled { .. } => state.line("canceled"),
+            _ => {}
+        });
+    }
+}
+
+impl State {
     /// Writes a line on stderr, ending a progress line first.
     fn line(&mut self, text: &str) {
         self.end_progress();

@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use blurrd_core::{AudioMode, Codec, EncoderSetting, NvencSessions, RateControl, Strength};
+use blurrd_core::{
+    AudioMode, Codec, EncoderSetting, NvencSessions, RateControl, Region, RegionSet, Strength,
+};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// blurrd blurs player names in gameplay recordings.
@@ -46,8 +48,13 @@ pub(crate) enum Command {
     /// Show what blurrd knows about a recording: streams, timing, colour
     /// tags, keyframes.
     Probe(ProbeArgs),
+    /// Find the names in a recording and save the project (the boxes to
+    /// blur) in the cache, optionally also as a file.
+    Analyze(AnalyzeArgs),
     /// Blur a recording with an analysed project and export it.
     Render(RenderArgs),
+    /// Analyse and blur recordings in one pass and export them.
+    Run(RunArgs),
 }
 
 /// Arguments of `blurrd probe`.
@@ -55,6 +62,32 @@ pub(crate) enum Command {
 pub(crate) struct ProbeArgs {
     /// The recording.
     pub(crate) input: PathBuf,
+}
+
+/// Which names to find.
+#[derive(Debug, Args)]
+pub(crate) struct DetectArgs {
+    /// Regions to blur, comma-separated: killfeed, banner, voice, chat,
+    /// scoreboard, recap, spectating, matchend, or all (every supported
+    /// region). Name tags above players' heads are out of scope.
+    #[arg(long, default_value = "all", value_parser = parse_regions, value_name = "LIST")]
+    pub(crate) regions: RegionSet,
+    /// Skip the OCR verification (the result stays unverified).
+    #[arg(long)]
+    pub(crate) no_verify: bool,
+}
+
+/// Arguments of `blurrd analyze`.
+#[derive(Debug, Args)]
+pub(crate) struct AnalyzeArgs {
+    /// The recording.
+    pub(crate) input: PathBuf,
+    #[command(flatten)]
+    pub(crate) detect: DetectArgs,
+    /// Also write the project to this file (`.blurrd.json`), for
+    /// `blurrd render --plan`.
+    #[arg(short, long, value_name = "FILE")]
+    pub(crate) output: Option<PathBuf>,
 }
 
 /// Arguments of `blurrd render`.
@@ -69,6 +102,29 @@ pub(crate) struct RenderArgs {
     /// .mkv). An existing file is replaced; the input never is.
     #[arg(short, long, value_name = "FILE")]
     pub(crate) output: PathBuf,
+    #[command(flatten)]
+    pub(crate) export: ExportArgs,
+}
+
+/// Arguments of `blurrd run`.
+#[derive(Debug, Args)]
+pub(crate) struct RunArgs {
+    /// The recordings.
+    #[arg(required = true)]
+    pub(crate) inputs: Vec<PathBuf>,
+    /// The output file, or a folder for `<name>_blurrd.<ext>` files (a
+    /// folder when there are several recordings).
+    #[arg(short, long, value_name = "FILE|DIR")]
+    pub(crate) output: PathBuf,
+    #[command(flatten)]
+    pub(crate) detect: DetectArgs,
+    #[command(flatten)]
+    pub(crate) export: ExportArgs,
+}
+
+/// How to export.
+#[derive(Debug, Args)]
+pub(crate) struct ExportArgs {
     /// Output codec.
     #[arg(long, value_enum, default_value_t = CodecArg::Source)]
     pub(crate) codec: CodecArg,
@@ -90,7 +146,7 @@ pub(crate) struct RenderArgs {
     /// Audio: `copy`, `aac:KBPS` (re-encode) or `none`.
     #[arg(long, default_value = "copy", value_parser = parse_audio)]
     pub(crate) audio: AudioMode,
-    /// Blur strength (overrides the project's).
+    /// Blur strength (for render: overrides the project's).
     #[arg(long, value_enum)]
     pub(crate) strength: Option<StrengthArg>,
     /// Name the output normally even if the project is not verified.
@@ -141,6 +197,28 @@ impl From<StrengthArg> for Strength {
             StrengthArg::High => Self::High,
         }
     }
+}
+
+/// Parses `--regions`: `all` or comma-separated region keys.
+fn parse_regions(text: &str) -> Result<RegionSet, String> {
+    if text.trim() == "all" {
+        return Ok(RegionSet::all());
+    }
+    let mut set = RegionSet::empty();
+    for key in text.split(',').map(str::trim).filter(|k| !k.is_empty()) {
+        let region = RegionSet::all()
+            .iter()
+            .find(|r| r.key() == key)
+            .ok_or_else(|| {
+                let keys: Vec<&str> = RegionSet::all().iter().map(Region::key).collect();
+                format!("`{key}` is not a region; use {} or all", keys.join(", "))
+            })?;
+        set.insert(region);
+    }
+    if set.is_empty() {
+        return Err(String::from("no region given"));
+    }
+    Ok(set)
 }
 
 /// Peak bit rate as a multiple of the average for `source` and `vbr:M`.
@@ -218,14 +296,34 @@ fn parse_audio(text: &str) -> Result<AudioMode, String> {
 
 #[cfg(test)]
 mod tests {
-    use blurrd_core::{AudioMode, EncoderSetting, NvencSessions, RateControl};
+    use blurrd_core::{AudioMode, EncoderSetting, NvencSessions, RateControl, Region, RegionSet};
     use clap::CommandFactory;
 
-    use super::{Cli, parse_audio, parse_encoder, parse_preset, parse_quality, parse_sessions};
+    use super::{
+        Cli, parse_audio, parse_encoder, parse_preset, parse_quality, parse_regions, parse_sessions,
+    };
 
     #[test]
     fn the_command_line_is_consistent() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_every_region_key() {
+        assert_eq!(parse_regions("all"), Ok(RegionSet::all()));
+        let keys = "killfeed,banner,voice,chat,scoreboard,recap,spectating,matchend";
+        assert_eq!(parse_regions(keys), Ok(RegionSet::all()));
+        for region in RegionSet::all().iter() {
+            let one: RegionSet = [region].into_iter().collect();
+            assert_eq!(parse_regions(region.key()), Ok(one));
+        }
+        assert_eq!(
+            parse_regions("killfeed, chat"),
+            Ok([Region::KillFeed, Region::TextChat].into_iter().collect())
+        );
+        for bad in ["", ",", "names", "killfeed,manual", "world"] {
+            assert!(parse_regions(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

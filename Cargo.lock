@@ -181,15 +181,14 @@ name = "blurrd-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "blurrd-blur",
  "blurrd-core",
+ "blurrd-engine",
  "blurrd-video",
  "clap",
  "ctrlc",
  "ffmpeg-the-third",
  "serde",
  "serde_json",
- "sha2",
  "tracing",
  "tracing-subscriber",
  "uuid",

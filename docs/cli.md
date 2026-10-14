@@ -4,18 +4,20 @@
 app.
 
 ```text
-blurrd probe  <input> [--json]
-blurrd render <input> --plan <project.blurrd.json> -o <output> [options]
+blurrd probe   <input> [--json]
+blurrd analyze <input> [--regions LIST] [--no-verify] [-o project.blurrd.json]
+blurrd render  <input> --plan <project.blurrd.json> -o <output> [export options]
+blurrd run     <input>... -o <output|folder> [--regions LIST] [--no-verify] [export options]
 ```
 
 Global options (before or after the command):
 
-| Option              | Meaning                                                                                   |
-| ------------------- | ----------------------------------------------------------------------------------------- |
-| `--json`            | Machine-readable output: one JSON object per line on stdout, JSON logs on stderr.         |
-| `--log-level LEVEL` | `error`, `warn` (default), `info`, `debug` or `trace`. `RUST_LOG` overrides it.           |
-| `--threads N`       | Decoder threads (default: chosen by the decoder).                                         |
-| `--no-gpu`          | Software decoding, and Media Foundation instead of NVENC, AMF or Quick Sync for encoding. |
+| Option              | Meaning                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| `--json`            | Machine-readable output: one JSON object per line on stdout, JSON logs on stderr.        |
+| `--log-level LEVEL` | `error`, `warn` (default), `info`, `debug` or `trace`. `RUST_LOG` overrides it.          |
+| `--threads N`       | Decoder threads (default: chosen by the decoder).                                        |
+| `--no-gpu`          | Software decoding, Media Foundation instead of NVENC, AMF or Quick Sync, OCR on the CPU. |
 
 ## `blurrd probe`
 
@@ -23,6 +25,25 @@ Shows what blurrd knows about a recording: codec, picture size, frame rate
 (and whether it varies), frame and keyframe counts, colour tags, B-frames,
 edit lists, audio and subtitle streams. With `--json` it prints the
 `MediaInfo` object (see `crates/blurrd-core/bindings/MediaInfo.ts`).
+
+## `blurrd analyze`
+
+Finds the player names in a recording and saves the project (the boxes to
+blur, per frame) in the cache folder `%LOCALAPPDATA%\blurrd\projects`, next
+to the recording's PTS table. A project of the same recording that is
+already in the cache keeps its manual edits.
+
+| Option              | Meaning                                                                  |
+| ------------------- | ------------------------------------------------------------------------ |
+| `--regions LIST`    | Comma-separated region keys, or `all` (default: every supported region). |
+| `--no-verify`       | Skip the OCR verification. The result stays unverified.                  |
+| `-o, --output FILE` | Also write the project to this file, for `blurrd render --plan`.         |
+
+The region keys are `killfeed`, `banner`, `voice`, `chat`, `scoreboard`,
+`recap`, `spectating` and `matchend`. Name tags above players' heads in
+the game world are out of scope and never blurred. Without ONNX Runtime and
+the OCR models (or with `--no-verify`) the result is not verified, and
+outputs made from it are named `*_UNVERIFIED`.
 
 ## `blurrd render`
 
@@ -49,9 +70,28 @@ recorder metadata (titles, comments, creation times, account tags) is
 removed; MP4 and MOV outputs keep their index at the front of the file.
 
 Before rendering, blurrd checks that the input is the video the project was
-made for (picture size, frame count and the hash of every frame
-timestamp). A changed file fails with `ProjectMismatch` instead of
-blurring the wrong frames.
+made for: the file's fingerprint (size and a hash of its first and last
+megabyte), the picture size, the frame count, and the hashes of every frame
+timestamp and of the keyframes. A changed file fails with `ProjectMismatch`
+instead of blurring the wrong frames. The timestamps come from the cache
+when the recording was analysed on this computer, otherwise from one pass
+over the file.
+
+## `blurrd run`
+
+Analyses and blurs recordings in one pass: the render trails the analysis
+and blurs each frame as soon as its boxes are final, so the output is the
+same as `analyze` followed by `render`, in about the time of the slower of
+the two. The project is saved in the cache as by `analyze`. It takes
+`--regions` and `--no-verify` like `analyze` and the export options of
+`render` (`--strength` sets the blur strength).
+
+`-o` names the output file. With several recordings, or when it names an
+existing folder, the outputs go into that folder as `<name>_blurrd.<ext>`
+(MP4, MOV and Matroska inputs keep their container, others become MP4).
+Each recording is its own job; a failed one does not stop the others, a
+Ctrl+C stops the run. When a recording's cached project has manual edits,
+it is analysed first and then rendered with them.
 
 ### Verification and output names
 
@@ -73,11 +113,11 @@ NVIDIA GPUs); HEVC and AV1 split each frame across them instead.
 
 ## JSON output
 
-With `--json`, `render` prints the job's events, one per line, in the form
-the desktop app receives them (`crates/blurrd-core/bindings/JobEvent.ts`),
-tagged by `type`: `Stage`, `Started`, `Progress` (at most 20 per second),
-`Warning`, then `Finished`, `Canceled` or `Failed`. A successful render ends
-with a report:
+With `--json`, `analyze`, `render` and `run` print the job's events, one per
+line, in the form the desktop app receives them
+(`crates/blurrd-core/bindings/JobEvent.ts`), tagged by `type`: `Stage`,
+`Started`, `Progress` (at most 20 per second), `Warning`, then `Finished`,
+`Canceled` or `Failed`. The last line is a report. A render's report:
 
 ```json
 {
@@ -95,6 +135,13 @@ with a report:
   "moov": "reserved"
 }
 ```
+
+An analysis reports `project_file` (the project in the cache), `frames`,
+`tracks`, `decoder`, `elapsed_ms`, `fps`, `max_delay` (the largest number of
+frames a temporal model held a frame, at most 240), `pass0` (OCR counters,
+`null` without OCR) and `plan` (the file of `-o`, or `null`). A run reports
+`runs`: per written recording its `analysis` and `render` reports, whether
+it `streamed`, and its `elapsed_ms`.
 
 `probe --json` prints the `MediaInfo` object. Errors outside a job are
 printed as `{"type": "Error", "error": {"kind": "NotFound", "message": "…",

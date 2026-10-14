@@ -8,7 +8,6 @@ mod stages;
 pub(crate) mod tracks;
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use blurrd_blur::PixelParams;
 use blurrd_core::{
@@ -86,8 +85,8 @@ pub struct AnalyzeReport {
     pub tracks: usize,
     /// The decoder used (`software`, `nvdec` or `d3d11va`).
     pub decoder: &'static str,
-    /// Wall-clock time.
-    pub elapsed: Duration,
+    /// Wall-clock time in milliseconds.
+    pub elapsed_ms: u64,
     /// Frames per second over the whole job.
     pub fps: f64,
     /// The largest look-ahead of a temporal model in frames (at most
@@ -247,7 +246,7 @@ impl Engine {
             job: req.job,
             summary: JobSummary {
                 frames: analysis.report.frames,
-                elapsed_ms: u64::try_from(analysis.report.elapsed.as_millis()).unwrap_or(u64::MAX),
+                elapsed_ms: analysis.report.elapsed_ms,
                 output: Some(analysis.report.project_file.clone()),
                 verify: Some(analysis.project.verify.state),
                 warnings: job.warnings(),
@@ -362,7 +361,7 @@ impl Engine {
                 frames,
                 tracks: project.tracks.len(),
                 decoder,
-                elapsed,
+                elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
                 fps: f64::from(frames) / elapsed.as_secs_f64().max(1e-9),
                 max_delay: output.max_delay,
                 pass0: output.pass0,

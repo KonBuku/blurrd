@@ -9,12 +9,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use blurrd_core::{
-    BlurParams, DetectorInfo, Fingerprint, HudGeometry, MediaInfo, Mode, Override, Project,
-    ProjectMedia, RectI, Region, RegionSet, Sensitivity, TemporalParams, VerifyState, schema,
+    BlurParams, DetectorInfo, HudGeometry, MediaInfo, Mode, Override, Project, ProjectMedia, RectI,
+    Region, RegionSet, Sensitivity, TemporalParams, VerifyState, schema,
 };
+use blurrd_engine::cache;
 use ffmpeg_the_third::{Rational as FfRational, codec, encoder, format, frame};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 /// A folder for one test, removed when dropped.
 struct Workdir(PathBuf);
@@ -40,6 +40,11 @@ impl Drop for Workdir {
 
 /// Writes a 320×240 MPEG-4 clip of `frames` frames at 60 fps.
 fn write_clip(path: &Path, frames: i64) {
+    write_sized_clip(path, frames, 320, 240);
+}
+
+/// Writes a `width × height` MPEG-4 clip of `frames` frames at 60 fps.
+fn write_sized_clip(path: &Path, frames: i64, width: u32, height: u32) {
     ffmpeg_the_third::init().unwrap();
     let mut out = format::output(path).unwrap();
     let codec = encoder::find_by_name("mpeg4").unwrap();
@@ -47,8 +52,8 @@ fn write_clip(path: &Path, frames: i64) {
         .encoder()
         .video()
         .unwrap();
-    ctx.set_width(320);
-    ctx.set_height(240);
+    ctx.set_width(width);
+    ctx.set_height(height);
     ctx.set_format(format::Pixel::YUV420P);
     ctx.set_time_base(FfRational::new(1, 60));
     ctx.set_gop(30);
@@ -59,7 +64,7 @@ fn write_clip(path: &Path, frames: i64) {
     stream.set_time_base(FfRational::new(1, 60));
     out.write_header().unwrap();
     let stream_tb = out.stream(0).unwrap().time_base();
-    let mut picture = frame::Video::new(format::Pixel::YUV420P, 320, 240);
+    let mut picture = frame::Video::new(format::Pixel::YUV420P, width, height);
     let mut packet = codec::packet::Packet::empty();
     for pts in 0..=frames {
         if pts < frames {
@@ -85,17 +90,10 @@ fn write_clip(path: &Path, frames: i64) {
     out.write_trailer().unwrap();
 }
 
-/// Hex SHA-256 of the clip's PTS table in the `pts.bin` format.
+/// The frame count and PTS hash of the clip (as the project stores it).
 fn pts_sha256(clip: &Path) -> (u32, String) {
     let table = blurrd_video::pts_table(clip).unwrap();
-    let hash = Sha256::digest(table.to_bytes())
-        .iter()
-        .fold(String::new(), |mut hex, b| {
-            use std::fmt::Write as _;
-            let _ = write!(hex, "{b:02x}");
-            hex
-        });
-    (table.len(), hash)
+    (table.len(), cache::pts_sha256(&table))
 }
 
 /// Writes a project for `clip` with one manual box on frames 5 to 9.
@@ -107,11 +105,7 @@ fn write_project(clip: &Path, project_path: &Path, verified: bool, wrong_hash: b
     }
     let media = ProjectMedia {
         path: clip.to_path_buf(),
-        fingerprint: Fingerprint {
-            size: info.size,
-            mtime: 0,
-            blake3_head_tail: String::from("0"),
-        },
+        fingerprint: cache::fingerprint(clip).unwrap(),
         width: info.width,
         height: info.height,
         fps: info.fps,
@@ -120,7 +114,7 @@ fn write_project(clip: &Path, project_path: &Path, verified: bool, wrong_hash: b
         pts_sha256: hash,
         is_vfr: info.is_vfr,
         has_b_frames: info.has_b_frames,
-        keyframes_sha256: String::from("0"),
+        keyframes_sha256: cache::keyframes_sha256(info.keyframes.as_deref()),
     };
     let detector = DetectorInfo {
         version: String::from("test"),
@@ -314,6 +308,127 @@ fn rejects_a_video_that_does_not_match_the_project() {
 }
 
 #[test]
+fn analyze_render_and_run_a_recording() {
+    let dir = Workdir::new("pipeline");
+    let clip = dir.path("clip.mp4");
+    write_sized_clip(&clip, 90, 640, 360);
+    let plan = dir.path("plan.blurrd.json");
+    let out = blurrd(
+        &dir,
+        &[
+            "analyze",
+            s(&clip),
+            "--no-verify",
+            "--regions",
+            "killfeed,chat,scoreboard",
+            "-o",
+            s(&plan),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let lines = json_lines(&out);
+    let kinds = types(&lines);
+    assert!(kinds.contains(&String::from("Started")));
+    assert_eq!(kinds[kinds.len() - 2], "Finished");
+    let report = lines.last().unwrap();
+    assert_eq!(report["type"], "Report");
+    assert_eq!(report["frames"], 90);
+    assert_eq!(report["plan"], s(&plan));
+    let project = cache::read_project(&plan).unwrap();
+    assert_eq!(project.media.frame_count, 90);
+    assert_eq!(
+        project.detector.regions,
+        [Region::KillFeed, Region::TextChat, Region::Scoreboard]
+            .into_iter()
+            .collect()
+    );
+    // The project is also in the cache folder.
+    assert!(
+        report["project_file"]
+            .as_str()
+            .unwrap()
+            .contains("projects")
+    );
+
+    let rendered = dir.path("rendered.mp4");
+    let out = blurrd(
+        &dir,
+        &[
+            "render",
+            s(&clip),
+            "--plan",
+            s(&plan),
+            "-o",
+            s(&rendered),
+            "--encoder",
+            "mpeg4",
+            "--accept-unverified",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(rendered.is_file());
+}
+
+#[test]
+fn run_writes_one_output_per_recording() {
+    let dir = Workdir::new("run");
+    let clip = dir.path("clip.mp4");
+    write_sized_clip(&clip, 90, 640, 360);
+    // A run writes the unverified output (no OCR yet) and reports it.
+    let out = blurrd(
+        &dir,
+        &[
+            "run",
+            s(&clip),
+            "-o",
+            s(&dir.path("run.mp4")),
+            "--no-verify",
+            "--encoder",
+            "mpeg4",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(3), "{out:?}");
+    assert!(dir.path("run_UNVERIFIED.mp4").is_file());
+    let report = json_lines(&out).pop().unwrap();
+    assert_eq!(report["type"], "Report");
+    assert_eq!(report["runs"][0]["streamed"], true);
+    assert_eq!(report["runs"][0]["render"]["frames"], 90);
+
+    // Several recordings go into a folder, named after each.
+    let second = dir.path("second.mp4");
+    write_sized_clip(&second, 30, 640, 360);
+    let folder = dir.path("outputs");
+    let out = blurrd(
+        &dir,
+        &[
+            "run",
+            s(&clip),
+            s(&second),
+            "-o",
+            s(&folder),
+            "--no-verify",
+            "--encoder",
+            "mpeg4",
+            "--accept-unverified",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(folder.join("clip_blurrd.mp4").is_file());
+    assert!(folder.join("second_blurrd.mp4").is_file());
+    let summary = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        summary.lines().filter(|l| l.starts_with("wrote ")).count(),
+        2
+    );
+}
+
+#[test]
 fn invalid_arguments_exit_with_2() {
     let dir = Workdir::new("usage");
     for args in [
@@ -332,6 +447,9 @@ fn invalid_arguments_exit_with_2() {
             "render", "clip.mp4", "--plan", "p.json", "-o", "o.mp4", "--preset", "p9",
         ],
         &["frobnicate"],
+        &["analyze", "clip.mp4", "--regions", "names"],
+        &["analyze", "clip.mp4", "--regions", ""],
+        &["run", "-o", "out"],
     ] {
         let out = blurrd(&dir, args, &[]);
         assert_eq!(out.status.code(), Some(2), "{args:?}");
