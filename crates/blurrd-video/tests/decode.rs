@@ -2,8 +2,10 @@
 
 mod support;
 
-use blurrd_video::{DecodeOptions, Decoder, PixelLayout, PtsTable, probe};
-use support::{ClipSpec, TempClip, write_clip};
+use blurrd_video::{
+    DecodeOptions, Decoder, PixelLayout, PtsTable, RgbConverter, RgbImage, VideoColour, probe,
+};
+use support::{BLOCK, ClipSpec, TempClip, read_number, write_clip};
 
 #[allow(
     clippy::unwrap_used,
@@ -51,6 +53,33 @@ fn probes_and_decodes_a_constant_rate_clip() {
             assert_eq!(count, table.len(), "{ext}");
         }
     }
+}
+
+#[test]
+fn thumbnails_average_whole_frames() {
+    let clip = TempClip::new("thumbs", "mkv");
+    write_clip(clip.path(), &ClipSpec::cfr(40));
+    let info = probe(clip.path()).unwrap();
+    let converter = RgbConverter::new(VideoColour::from_info(&info.color, info.height));
+    let mut decoder = Decoder::open(clip.path(), &DecodeOptions::default()).unwrap();
+    let mut thumb = RgbImage::default();
+    // 40 x 30 of 320 x 240: every thumbnail pixel averages 8 x 8 pixels,
+    // so each frame-number block becomes 2 x 2 uniform thumbnail pixels.
+    let cell = BLOCK / 2;
+    while let Some(frame) = decoder.next_frame().unwrap() {
+        frame.thumbnail(40, 30, &converter, &mut thumb).unwrap();
+        assert_eq!((thumb.width, thumb.height), (40, 30));
+        let number = read_number(|x, y| {
+            let (tx, ty) = (x / cell, y / cell);
+            thumb.data[3 * (ty * 40 + tx) as usize + 1]
+        });
+        assert_eq!(number, frame.index());
+    }
+    // Odd sizes are rounded down to even ones.
+    let mut decoder = Decoder::open(clip.path(), &DecodeOptions::default()).unwrap();
+    let frame = decoder.next_frame().unwrap().unwrap();
+    frame.thumbnail(33, 1, &converter, &mut thumb).unwrap();
+    assert_eq!((thumb.width, thumb.height), (32, 2));
 }
 
 #[test]

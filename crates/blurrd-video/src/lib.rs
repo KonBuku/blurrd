@@ -18,6 +18,9 @@
 //!   in a layout the blur works on, and their RGB conversion (bit-exact
 //!   with FFmpeg's `bgr24` for SDR, tone-mapped for HDR) with every colour
 //!   tag mapped ([`VideoColour`]).
+//! - [`VideoFrame::thumbnail`]: a downscaled RGB copy of a whole frame,
+//!   area-averaged in the YUV domain (thumbnails, the quarter-scale view
+//!   of the screen gates).
 //! - [`FrameSeeker`]: random access by presentation index with a frame
 //!   cache, prefetching and a PTS check against the project's table.
 //! - [`DecoderChoice`]: picks software decoding, NVDEC or D3D11VA per video
@@ -67,6 +70,7 @@ mod seek;
 mod segments;
 mod streams;
 pub mod sys;
+mod thumb;
 mod transcode;
 
 use std::sync::OnceLock;

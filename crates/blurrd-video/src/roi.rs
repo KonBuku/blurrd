@@ -53,6 +53,26 @@ impl YuvRoi {
         self.rect
     }
 
+    /// An 8-bit planar picture of `width × height` pixels (both even) that
+    /// is not cut out of a frame, such as a downscaled copy of one. Its
+    /// rectangle starts at `(0, 0)`.
+    pub(crate) fn from_i420(
+        width: u32,
+        height: u32,
+        y: Vec<u8>,
+        u: Vec<u8>,
+        v: Vec<u8>,
+    ) -> Option<Self> {
+        let rect = RectI::new(0, 0, width.cast_signed(), height.cast_signed()).ok()?;
+        Some(Self {
+            rect: Some(rect),
+            layout: RoiLayout::I420,
+            y,
+            c0: u,
+            c1: v,
+        })
+    }
+
     /// Sample layout.
     pub fn layout(&self) -> RoiLayout {
         self.layout
