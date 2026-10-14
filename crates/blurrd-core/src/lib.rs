@@ -46,7 +46,9 @@ pub use export::{
     RateControl, Toggle,
 };
 pub use geometry::{EmptyRectError, RectI};
-pub use hud::{HudGeometry, HudLayout, RegionCalibration};
+pub use hud::{
+    HudAnchor, HudGeometry, HudLayout, REFERENCE_HEIGHT, REFERENCE_WIDTH, RegionCalibration,
+};
 pub use job::{JobEvent, JobId, JobKind, JobSummary, Stage, WarningCode};
 pub use media::{AudioStreamInfo, ColorInfo, ColorRange, Fingerprint, HdrKind, MediaInfo};
 pub use overrides::{ADJUST_MIN_IOU, BindStatus, Override, OverrideBinding, SUPPRESS_MIN_IOU};
