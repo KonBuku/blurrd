@@ -228,12 +228,12 @@ fn mean_abs_diff(a: &[u8], b: &[u8]) -> f32 {
 /// Buffers of the thumbnail computation, reused across frames.
 #[derive(Debug, Clone, Default)]
 struct ThumbScratch {
-    /// Thumbnail column of every source column.
-    columns: Vec<usize>,
+    /// The source columns of every thumbnail column, as `start..end`.
+    runs: Vec<(usize, usize)>,
+    /// Source rows per thumbnail row.
+    row_counts: Vec<u32>,
     /// Luma sums per thumbnail cell.
     sums: Vec<u32>,
-    /// Source pixels per thumbnail cell.
-    counts: Vec<u32>,
 }
 
 impl ThumbScratch {
@@ -247,23 +247,39 @@ impl ThumbScratch {
         if width == 0 || height == 0 {
             return;
         }
-        self.columns.clear();
-        self.columns.extend((0..width).map(|x| x * cols / width));
+        // Source column x belongs to thumbnail column x * cols / width, so
+        // every thumbnail column is one contiguous run of source columns
+        // (empty when the view is narrower than the thumbnail).
+        self.runs.clear();
+        self.runs.resize(cols, (0, 0));
+        for (cell, run) in self.runs.iter_mut().enumerate() {
+            let start = (cell * width).div_ceil(cols);
+            let end = ((cell + 1) * width).div_ceil(cols).min(width);
+            *run = (start, end.max(start));
+        }
+        self.row_counts.clear();
+        self.row_counts.resize(rows, 0);
         self.sums.clear();
         self.sums.resize(cols * rows, 0);
-        self.counts.clear();
-        self.counts.resize(cols * rows, 0);
         for y in 0..height {
-            let base = y * rows / height * cols;
-            let row = view.row(y as u32);
-            for (px, &cell) in row.as_chunks::<3>().0.iter().zip(&self.columns) {
-                let [r, g, b] = px.map(u32::from);
-                self.sums[base + cell] += (299 * r + 587 * g + 114 * b + 500) / 1000;
-                self.counts[base + cell] += 1;
+            let cell_row = y * rows / height;
+            self.row_counts[cell_row] += 1;
+            let pixels = view.row(y as u32).as_chunks::<3>().0;
+            let sums = &mut self.sums[cell_row * cols..(cell_row + 1) * cols];
+            for (sum, &(start, end)) in sums.iter_mut().zip(&self.runs) {
+                *sum += pixels[start..end]
+                    .iter()
+                    .map(|px| {
+                        let [r, g, b] = px.map(u32::from);
+                        (299 * r + 587 * g + 114 * b + 500) / 1000
+                    })
+                    .sum::<u32>();
             }
         }
-        for ((luma, sum), count) in out.iter_mut().zip(&self.sums).zip(&self.counts) {
-            *luma = (sum + count / 2).checked_div(*count).unwrap_or(0) as u8;
+        for (cell, (luma, sum)) in out.iter_mut().zip(&self.sums).enumerate() {
+            let (start, end) = self.runs[cell % cols];
+            let count = self.row_counts[cell / cols] * (end - start) as u32;
+            *luma = (sum + count / 2).checked_div(count).unwrap_or(0) as u8;
         }
     }
 }
@@ -286,6 +302,49 @@ mod tests {
         let mut out = vec![];
         ThumbScratch::default().thumbnail(&view, 64, 36, &mut out);
         assert_eq!((out[0], out[31], out[32], out[63]), (0, 0, 200, 200));
+    }
+
+    #[test]
+    fn thumbnails_equal_the_per_pixel_definition() {
+        // The cell of every source pixel and the rounded means, directly.
+        fn reference(
+            data: &[u8],
+            width: usize,
+            height: usize,
+            cols: usize,
+            rows: usize,
+        ) -> Vec<u8> {
+            let (mut sums, mut counts) = (vec![0u32; cols * rows], vec![0u32; cols * rows]);
+            for row in 0..height {
+                for col in 0..width {
+                    let at = 3 * (row * width + col);
+                    let [r, g, b] = [data[at], data[at + 1], data[at + 2]].map(u32::from);
+                    let cell = row * rows / height * cols + col * cols / width;
+                    sums[cell] += (299 * r + 587 * g + 114 * b + 500) / 1000;
+                    counts[cell] += 1;
+                }
+            }
+            sums.iter()
+                .zip(&counts)
+                .map(|(sum, count)| (sum + count / 2).checked_div(*count).unwrap_or(0) as u8)
+                .collect()
+        }
+        let mut scratch = ThumbScratch::default();
+        let mut out = vec![];
+        for (w, h) in [(780, 410), (480, 270), (65, 37), (31, 15), (1, 1), (100, 3)] {
+            let data: Vec<u8> = (0..w * h * 3)
+                .map(|i| ((i * 2_654_435_761usize) >> 7) as u8)
+                .collect();
+            let view = RgbView::new(&data, w as u32, h as u32, 3 * w).unwrap();
+            for (cols, rows) in [(64, 36), (32, 16)] {
+                scratch.thumbnail(&view, cols, rows, &mut out);
+                assert_eq!(
+                    out,
+                    reference(&data, w, h, cols, rows),
+                    "{w}x{h} -> {cols}x{rows}"
+                );
+            }
+        }
     }
 
     #[test]
