@@ -8,7 +8,8 @@
 //! Each encoder session has its own decode and blur+encode threads. With
 //! one session it decodes the whole video; with two (H.264 on NVENC, whose
 //! GPUs have two encoder engines) the video is split into keyframe-aligned
-//! segments that the sessions take in turn (see [`crate::segments`]), and
+//! segments that the sessions take in a fixed turn (see
+//! [`crate::segments`]), so the output does not depend on their speed, and
 //! the muxer stitches their packets back into frame order.
 //!
 //! The decode threads check every frame's PTS against the project's PTS
@@ -29,7 +30,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use blurrd_blur::{BlurBackend, PixelParams, prepare_boxes};
@@ -405,7 +406,10 @@ impl Transcoder {
         let (target, side) = (prepared.target, prepared.side);
 
         let session_count = u32::try_from(sessions.len()).unwrap_or(1);
-        let scheduler = Mutex::new(Scheduler::new(pts.len(), &source_keyframes, session_count));
+        let scheduler = Turns {
+            scheduler: Mutex::new(Scheduler::new(pts.len(), &source_keyframes, session_count)),
+            changed: Condvar::new(),
+        };
         let keyframes = Keyframes {
             source: &source_keyframes,
             match_source: match_keyframes,
@@ -421,7 +425,8 @@ impl Transcoder {
             // (finished or failed) disconnects its neighbours.
             let encoders: Vec<_> = sessions
                 .into_iter()
-                .map(|session| {
+                .zip(0u32..)
+                .map(|(session, index)| {
                     let (frame_tx, frame_rx) = bounded(FRAME_QUEUE);
                     let packet_tx = packet_tx.clone();
                     let Session {
@@ -435,6 +440,7 @@ impl Transcoder {
                         pts,
                         keyframes,
                         scheduler,
+                        session: index,
                     };
                     scope.spawn(move || control.guard(decode.run(&frame_tx, cancel, control)));
                     scope.spawn(move || {
@@ -729,15 +735,28 @@ struct Work {
     keyframe: bool,
 }
 
+/// The segment scheduler shared by the sessions' decode stages, and a
+/// signal for the session whose turn has come.
+struct Turns {
+    scheduler: Mutex<Scheduler>,
+    changed: Condvar,
+}
+
+/// How often a session waiting for its turn checks for an abort or a
+/// cancellation.
+const TURN_POLL: Duration = Duration::from_millis(10);
+
 /// The decode stage of a session: decodes the segments it gets from the
-/// scheduler, checks every frame and passes it on.
+/// scheduler on its turns, checks every frame and passes it on.
 struct DecodeStage<'a> {
     decoder: Decoder,
     /// A decoded frame not passed on yet (frame 0 of the first session).
     pending: Option<VideoFrame>,
     pts: &'a PtsTable,
     keyframes: Keyframes<'a>,
-    scheduler: &'a Mutex<Scheduler>,
+    scheduler: &'a Turns,
+    /// This session's number, for its turns.
+    session: u32,
 }
 
 impl DecodeStage<'_> {
@@ -749,7 +768,7 @@ impl DecodeStage<'_> {
     ) -> Result<(), VideoError> {
         // Presentation index of the next frame the decoder outputs.
         let mut position = self.pending.as_ref().map_or(0, VideoFrame::index);
-        while let Some(segment) = self.next_segment()? {
+        while let Some(segment) = self.next_segment(cancel, control)? {
             if position != segment.start {
                 self.pending = None;
                 self.decoder.seek(segment.start, self.pts)?;
@@ -789,11 +808,34 @@ impl DecodeStage<'_> {
         Ok(())
     }
 
-    fn next_segment(&self) -> Result<Option<Segment>, VideoError> {
-        self.scheduler
-            .lock()
-            .map(|mut scheduler| scheduler.next_segment())
-            .map_err(|_| VideoError::Unsupported(String::from("segment scheduler poisoned")))
+    /// This session's next segment: waits until it is the session's turn;
+    /// `None` when the video is handed out or another stage failed.
+    fn next_segment(
+        &self,
+        cancel: &(dyn Fn() -> bool + Sync),
+        control: &Control,
+    ) -> Result<Option<Segment>, VideoError> {
+        let poisoned = || VideoError::Unsupported(String::from("segment scheduler poisoned"));
+        let turns = self.scheduler;
+        let mut scheduler = turns.scheduler.lock().map_err(|_| poisoned())?;
+        loop {
+            if scheduler.is_done() || control.aborted() {
+                return Ok(None);
+            }
+            if scheduler.turn() == self.session {
+                let segment = scheduler.next_segment();
+                turns.changed.notify_all();
+                return Ok(segment);
+            }
+            if cancel() {
+                return Err(VideoError::Canceled);
+            }
+            scheduler = turns
+                .changed
+                .wait_timeout(scheduler, TURN_POLL)
+                .map_err(|_| poisoned())?
+                .0;
+        }
     }
 }
 

@@ -4,10 +4,15 @@
 //! With two NVENC sessions, each session decodes and encodes whole
 //! segments that start at a source keyframe, so every segment starts with
 //! an IDR frame and the sessions' packets can be stitched in frame order.
-//! Segments are handed out in order, one at a time, to whichever session
-//! is free; their length shrinks towards the end of the video, so both
-//! sessions finish at about the same time, and is capped, so the packets a
-//! session encodes ahead of the other stay within a few megabytes.
+//! Segments are handed out in order, one at a time, and the sessions take
+//! turns: segment `i` always goes to session `i % sessions`. An encoder's
+//! rate control carries state from one segment to the next, so a fixed
+//! assignment makes the output the same however fast each session runs
+//! (a streaming run that paces the render gets the same bytes as a render
+//! on its own). Segment lengths shrink towards the end of the video, so
+//! both sessions finish at about the same time, and are capped, so the
+//! packets a session encodes ahead of the other stay within a few
+//! megabytes.
 
 /// Frames a segment has at least (unless the video ends first).
 const MIN_SEGMENT: u32 = 120;
@@ -31,6 +36,8 @@ pub(crate) struct Scheduler {
     count: u32,
     cursor: u32,
     sessions: u32,
+    /// Segments handed out so far.
+    handed: u32,
 }
 
 impl Scheduler {
@@ -50,6 +57,7 @@ impl Scheduler {
             count,
             cursor: 0,
             sessions: sessions.max(1),
+            handed: 0,
         }
     }
 
@@ -59,7 +67,19 @@ impl Scheduler {
         count >= 2 * MIN_SEGMENT
     }
 
-    /// The next segment, or `None` when the whole video is handed out.
+    /// The session whose turn it is to take the next segment (`0` up to
+    /// `sessions - 1`).
+    pub(crate) fn turn(&self) -> u32 {
+        self.handed % self.sessions
+    }
+
+    /// Whether the whole video is handed out.
+    pub(crate) fn is_done(&self) -> bool {
+        self.cursor >= self.count
+    }
+
+    /// The next segment, or `None` when the whole video is handed out. It
+    /// belongs to the session [`Scheduler::turn`] named before the call.
     pub(crate) fn next_segment(&mut self) -> Option<Segment> {
         if self.cursor >= self.count {
             return None;
@@ -85,6 +105,7 @@ impl Scheduler {
             }
         };
         self.cursor = end;
+        self.handed += 1;
         Some(Segment { start, end })
     }
 }
@@ -140,6 +161,22 @@ mod tests {
             .collect();
         assert!(lengths.first() > lengths.last(), "{lengths:?}");
         assert!(lengths.len() >= 6, "{lengths:?}");
+    }
+
+    #[test]
+    fn sessions_take_turns() {
+        let keys: Vec<u32> = (0..3601).step_by(60).collect();
+        let mut scheduler = Scheduler::new(3601, &keys, 2);
+        let mut turns = Vec::new();
+        while !scheduler.is_done() {
+            turns.push(scheduler.turn());
+            assert!(scheduler.next_segment().is_some());
+        }
+        assert!(turns.len() >= 6, "{turns:?}");
+        for (i, &turn) in turns.iter().enumerate() {
+            assert_eq!(turn as usize, i % 2);
+        }
+        assert_eq!(scheduler.next_segment(), None);
     }
 
     #[test]
