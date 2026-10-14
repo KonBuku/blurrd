@@ -10,6 +10,7 @@ pub(crate) mod tracks;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use blurrd_blur::PixelParams;
 use blurrd_core::{
     AppError, BlurParams, DetectorInfo, ErrorKind, HudGeometry, JobEvent, JobId, JobKind,
     JobSummary, MediaInfo, Mode, Project, ProjectMedia, RegionSet, Sensitivity, Stage,
@@ -145,6 +146,18 @@ impl Engine {
         let fingerprint = cache::fingerprint(input)?;
         let info = blurrd_video::probe(input)?;
         let (geometry, wide) = assumed_geometry(info.width, info.height);
+        // The blur scales its blocks with the HUD; refuse videos whose HUD
+        // it cannot scale to before spending an analysis on them.
+        let colour = VideoColour::from_info(&info.color, info.height);
+        if let Err(error) =
+            PixelParams::new(&BlurParams::default(), geometry.sy, colour.yuv_colour())
+        {
+            return Err(AppError::new(
+                ErrorKind::UnsupportedMedia,
+                "The video is too small or too large to blur reliably.",
+            )
+            .with_detail(format!("{}x{}: {error}", info.width, info.height)));
+        }
         if !wide {
             job.warning(
                 WarningCode::CalibrationLow,
@@ -156,7 +169,7 @@ impl Engine {
                 None,
             );
         }
-        let converter = RgbConverter::new(VideoColour::from_info(&info.color, info.height));
+        let converter = RgbConverter::new(colour);
         if converter.is_tone_mapped() {
             job.warning(
                 WarningCode::HdrToneMapped,

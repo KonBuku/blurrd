@@ -387,6 +387,22 @@ fn analysis_writes_thumbnails_and_a_preview_proxy() {
 }
 
 #[test]
+fn videos_too_small_to_blur_are_refused() {
+    let work = Workdir::new("analysis-small");
+    let scene = synthetic::hud_scene(Layout::wide(320, 180), 10, 43);
+    let clip = work.path("clip.mkv");
+    synthetic::write_clip(&clip, &scene);
+    let error = engine(&work)
+        .analyze(
+            &request(clip, RegionSet::all()),
+            &Events::default(),
+            &CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnsupportedMedia);
+}
+
+#[test]
 fn a_missing_video_fails_with_not_found() {
     let work = Workdir::new("analysis-missing");
     let events = Events::default();
