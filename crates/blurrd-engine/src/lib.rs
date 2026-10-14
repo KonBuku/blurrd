@@ -10,6 +10,10 @@
 //!   order and turns their boxes into the project's tracks; pass 0 of the
 //!   verification reads the protected zones on an OCR worker. The project
 //!   and the PTS table go into the [`cache`].
+//! - [`Engine::render`]: the render job. It checks that the video is the
+//!   project's (fingerprint, timestamps from the cached PTS table,
+//!   keyframes), blurs every frame's boxes and encodes the export, named
+//!   `*_UNVERIFIED` while the project is not verified.
 //! - [`dictionary`]: pass 0 of the verification, the in-memory name
 //!   dictionary built by OCR over the protected zones of the source.
 //!
@@ -28,9 +32,11 @@ pub mod dictionary;
 mod engine;
 mod hud;
 mod job;
+mod render;
 mod resample;
 
 pub use analysis::{Analysis, AnalyzeReport, AnalyzeRequest, LOOKAHEAD_MAX};
 pub use dictionary::{DictionaryBuilder, Pass0Stats, ProtectedZone, ZoneKind, protected_zones};
 pub use engine::{Engine, EngineConfig, OcrSetup, PoolSizes, default_cache_dir};
 pub use job::{CancellationToken, ProgressSink};
+pub use render::{FallbackReport, RenderReport, RenderRequest, SkippedReport};

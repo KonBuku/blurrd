@@ -146,6 +146,20 @@ impl ProjectDir {
                 }
             })
     }
+
+    /// The cached PTS table, if there is a valid one.
+    pub(crate) fn read_pts(&self) -> Option<PtsTable> {
+        let path = self.pts();
+        path.is_file()
+            .then(|| PtsTable::read(&path))
+            .and_then(|table| match table {
+                Ok(table) => Some(table),
+                Err(error) => {
+                    tracing::warn!(%error, "ignoring an unreadable cached PTS table");
+                    None
+                }
+            })
+    }
 }
 
 /// Writes `project` to `path` atomically (a temporary file next to it,
