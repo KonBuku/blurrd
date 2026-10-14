@@ -90,6 +90,60 @@ impl SdrTables {
     }
 }
 
+impl SdrTables {
+    /// Converts an 8-bit crop `w` pixels wide (even): `luma` packed rows,
+    /// chroma as `(U, Some(V))` planes or one interleaved `(UV, None)`
+    /// plane of `w / 2` samples per row, each used for a 2 × 2 block. The
+    /// same arithmetic as [`SdrTables::rgb`], one chroma lookup per pixel
+    /// pair (the hot path of every analysed frame).
+    fn convert_8bit(
+        &self,
+        luma: &[u8],
+        (c0, c1): (&[u8], Option<&[u8]>),
+        w: usize,
+        out: &mut [u8],
+    ) {
+        let cw = w / 2;
+        let clamp = |x: i16| x.clamp(0, 255) as u8;
+        let pair = |px: &mut [u8; 6], ys: [u8; 2], u: u8, v: u8| {
+            let (u, v) = (usize::from(u), usize::from(v));
+            let (r, g, b) = (self.r_v[v], self.g_u[u] + self.g_v[v], self.b_u[u]);
+            let [y0, y1] = ys.map(|y| self.y[usize::from(y)]);
+            *px = [
+                clamp(y0 + r),
+                clamp(y0 + g),
+                clamp(y0 + b),
+                clamp(y1 + r),
+                clamp(y1 + g),
+                clamp(y1 + b),
+            ];
+        };
+        for (row, (line, ys)) in out
+            .chunks_exact_mut(3 * w)
+            .zip(luma.chunks_exact(w))
+            .enumerate()
+        {
+            let crow = row / 2;
+            let pixels = line
+                .as_chunks_mut::<6>()
+                .0
+                .iter_mut()
+                .zip(ys.as_chunks::<2>().0);
+            if let Some(c1) = c1 {
+                let (us, vs) = (&c0[crow * cw..][..cw], &c1[crow * cw..][..cw]);
+                for (((px, &ys), &u), &v) in pixels.zip(us).zip(vs) {
+                    pair(px, ys, u, v);
+                }
+            } else {
+                let uvs = &c0[crow * 2 * cw..][..2 * cw];
+                for ((px, &ys), &[u, v]) in pixels.zip(uvs.as_chunks::<2>().0) {
+                    pair(px, ys, u, v);
+                }
+            }
+        }
+    }
+}
+
 /// `(Kr, Kb)` of a matrix.
 fn weights(matrix: YuvMatrix) -> (f64, f64) {
     match matrix {
@@ -232,6 +286,10 @@ impl RgbConverter {
         out.data.resize(3 * w * h, 0);
         let (luma, (c0, c1)) = (roi.luma(), roi.chroma());
         let cw = w / 2;
+        if self.hdr.is_none() && roi.layout() != RoiLayout::P010 {
+            self.sdr.convert_8bit(luma, (c0, c1), w, &mut out.data);
+            return Ok(());
+        }
         // Samples as integers at their native depth: 8 bits, or 10 bits for
         // P010 (stored `<< 6`).
         let sample = |data: &[u8], i: usize| -> i32 {
@@ -320,6 +378,33 @@ mod tests {
         let full = SdrTables::new(YuvMatrix::Bt601, SampleRange::Full);
         assert_eq!(full.rgb(0, 128, 128), [0, 0, 0]);
         assert_eq!(full.rgb(255, 128, 128), [255, 255, 255]);
+    }
+
+    #[test]
+    fn pixel_pairs_convert_like_single_pixels() {
+        let c = SdrTables::new(YuvMatrix::Bt709, SampleRange::Limited);
+        let (w, h) = (6, 4);
+        let luma: Vec<u8> = (0..w * h).map(|i| (i * 37 % 256) as u8).collect();
+        let u: Vec<u8> = (0..w / 2 * h / 2)
+            .map(|i| (60 + i * 29 % 140) as u8)
+            .collect();
+        let v: Vec<u8> = (0..w / 2 * h / 2)
+            .map(|i| (200 - i * 23 % 150) as u8)
+            .collect();
+        let uv: Vec<u8> = u.iter().zip(&v).flat_map(|(&a, &b)| [a, b]).collect();
+        let expected: Vec<u8> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let ci = y / 2 * (w / 2) + x / 2;
+                c.rgb(luma[y * w + x], u[ci], v[ci])
+            })
+            .collect();
+        let mut planar = vec![0; 3 * w * h];
+        c.convert_8bit(&luma, (&u, Some(&v)), w, &mut planar);
+        assert_eq!(planar, expected);
+        let mut interleaved = vec![0; 3 * w * h];
+        c.convert_8bit(&luma, (&uv, None), w, &mut interleaved);
+        assert_eq!(interleaved, expected);
     }
 
     #[test]
