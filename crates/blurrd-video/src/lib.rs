@@ -88,7 +88,7 @@ pub use error::VideoError;
 pub use probe::{probe, pts_table};
 pub use proxy::{PROXY_HEIGHT, ProxyWriter};
 pub use pts::PtsTable;
-pub use rgb::{RgbConverter, RgbImage};
+pub use rgb::{PaperWhite, REFERENCE_WHITE_NITS, RgbConverter, RgbImage};
 pub use roi::{RoiLayout, YuvRoi};
 pub use seek::{FrameSeeker, SeekerOptions};
 pub use streams::SkippedStream;

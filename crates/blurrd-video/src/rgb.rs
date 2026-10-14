@@ -6,11 +6,16 @@
 //! for its 2×2 luma block, with swscale's truncation (bit-identical on real
 //! recordings). 10-bit SDR samples are rounded to 8 bits first.
 //!
-//! HDR video (PQ or HLG) is tone-mapped to SDR BT.709: linear light from
-//! the transfer function, a luminance-preserving extended Reinhard curve
-//! that maps SDR reference white (203 nits) to about 0.5 and a peak of
-//! 1000 nits to 1.0, a BT.2020 to BT.709 gamut conversion with clipping,
-//! and the BT.1886 (gamma 2.4) encoding.
+//! HDR video (PQ or HLG) is tone-mapped to SDR BT.709 before the detectors
+//! classify it (plan 7.3): linear light from the transfer function, a
+//! luminance-preserving curve that is linear up to the HUD's paper white
+//! (mapped to the SDR HUD white) and rolls the highlights off above it, a
+//! BT.2020 to BT.709 gamut conversion with clipping, and the BT.1886
+//! (gamma 2.4) encoding. The paper white is the luminance at which the game
+//! draws its white HUD text: the BT.2408 reference white (203 nits) unless
+//! measured from the video's HUD crops ([`PaperWhite`]). A measurement that
+//! is not confident leaves the default; the engine then reads the video
+//! with Safe geometry and warns (`HdrToneMapped`).
 
 #![allow(
     clippy::many_single_char_names,
@@ -23,12 +28,48 @@ use crate::VideoError;
 use crate::colour::{ColourTransfer, VideoColour};
 use crate::roi::{RoiLayout, YuvRoi};
 
-/// SDR reference white in nits (ITU-R BT.2408).
-const REFERENCE_WHITE_NITS: f32 = 203.0;
-/// Assumed mastering peak in nits for the tone curve.
+/// SDR reference white in nits (ITU-R BT.2408): the paper white unless
+/// measured.
+pub const REFERENCE_WHITE_NITS: f32 = 203.0;
+/// Display peak in nits assumed by HLG's system gamma.
 const PEAK_NITS: f32 = 1000.0;
 /// Entries of the transfer function look-up tables.
 const LUT_SIZE: usize = 4096;
+/// Linear SDR light the paper white maps to: BT.1886 encodes 0.82 as code
+/// 235, the white of HUD text in SDR recordings.
+const PAPER_WHITE_SDR: f32 = 0.82;
+/// Highlights above the paper white roll off into the remaining headroom:
+/// twice the paper white takes this share of it.
+const ROLL_OFF: f32 = 0.5;
+/// Bins of the paper-white histogram, logarithmic from
+/// [`PAPER_WHITE_MIN_NITS`] to [`PAPER_WHITE_MAX_NITS`].
+const PAPER_WHITE_BINS: usize = 256;
+/// A plausible paper white lies between these luminances in nits (the HDR
+/// settings of games and of the desktop range from about 80 to 1,000).
+const PAPER_WHITE_MIN_NITS: f32 = 40.0;
+/// See [`PAPER_WHITE_MIN_NITS`].
+const PAPER_WHITE_MAX_NITS: f32 = 4000.0;
+/// The paper white is measured among the brightest pixels of the HUD
+/// crops: this share of them (darker uniform panels, such as the chat box,
+/// lie below).
+const BRIGHT_SHARE: f64 = 0.25;
+/// White text is drawn at one luminance, game highlights spread over
+/// many: a peak of the bright pixels is the paper white if at least this
+/// many pixels have its luminance ...
+const MIN_WHITE_PIXELS: u32 = 400;
+/// ... and at least this share of the pixels at or above it lies within
+/// one bin of it ...
+const MIN_WHITE_SHARE: f64 = 0.25;
+/// ... and those bins hold at least this many times as many pixels per bin
+/// as the bins a few steps away on both sides ([`PEAK_FLANK`]): a peak,
+/// not the dense end of a smooth spread of game light.
+const MIN_PEAKEDNESS: f64 = 4.0;
+/// The flanks of the paper-white peak: bins this many steps away.
+const PEAK_FLANK: (usize, usize) = (3, 8);
+/// A pixel counts for the paper white only if its channels differ by at
+/// most this share of the largest in linear light: white text, not a team
+/// colour's bar.
+const NEUTRAL_SHARE: f32 = 0.1;
 
 /// A packed 8-bit RGB image (`R, G, B` per pixel, no row padding).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -276,10 +317,12 @@ struct HdrTables {
     oetf: Vec<u8>,
     hlg: bool,
     wide_gamut: bool,
+    /// Luminance in nits that maps to the SDR HUD white.
+    paper_white: f32,
 }
 
 impl HdrTables {
-    fn new(transfer: ColourTransfer, wide_gamut: bool) -> Self {
+    fn new(transfer: ColourTransfer, wide_gamut: bool, paper_white: f32) -> Self {
         let hlg = transfer == ColourTransfer::Hlg;
         let step = |i: usize| i as f32 / (LUT_SIZE - 1) as f32;
         let eotf = (0..LUT_SIZE)
@@ -299,6 +342,7 @@ impl HdrTables {
             oetf,
             hlg,
             wide_gamut,
+            paper_white,
         }
     }
 
@@ -307,21 +351,31 @@ impl HdrTables {
         table[(x.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as usize]
     }
 
+    /// Display light in nits of normalised non-linear BT.2020 R'G'B'.
+    fn linear(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let lin = rgb.map(|c| Self::lookup(&self.eotf, c));
+        if !self.hlg {
+            return lin;
+        }
+        // HLG: scene light (0..=1) to display light with the BT.2100 OOTF
+        // for a 1000-nit display (system gamma 1.2).
+        let gain = PEAK_NITS * luminance(lin).max(1e-6).powf(0.2);
+        lin.map(|c| c * gain)
+    }
+
     /// Normalised non-linear BT.2020 R'G'B' to 8-bit SDR RGB.
     fn map(&self, rgb: [f32; 3]) -> [u8; 3] {
-        let mut lin = rgb.map(|c| Self::lookup(&self.eotf, c));
-        if self.hlg {
-            // HLG: scene light (0..=1) to display light with the BT.2100
-            // OOTF for a 1000-nit display (system gamma 1.2).
-            let ys = 0.2627 * lin[0] + 0.6780 * lin[1] + 0.0593 * lin[2];
-            let gain = PEAK_NITS * ys.max(1e-6).powf(0.2);
-            lin = lin.map(|c| c * gain);
-        }
-        // Luminance-preserving extended Reinhard tone curve.
-        let white = PEAK_NITS / REFERENCE_WHITE_NITS;
-        let rel = lin.map(|c| c / REFERENCE_WHITE_NITS);
-        let l = 0.2627 * rel[0] + 0.6780 * rel[1] + 0.0593 * rel[2];
-        let mapped = l * (1.0 + l / (white * white)) / (1.0 + l);
+        // Luminance-preserving tone curve: linear up to the paper white,
+        // which lands on the SDR HUD white, then a roll-off into the
+        // remaining headroom.
+        let rel = self.linear(rgb).map(|c| c / self.paper_white);
+        let l = luminance(rel);
+        let mapped = if l <= 1.0 {
+            PAPER_WHITE_SDR * l
+        } else {
+            let over = l - 1.0;
+            PAPER_WHITE_SDR + (1.0 - PAPER_WHITE_SDR) * over / (over + ROLL_OFF.recip() - 1.0)
+        };
         let scale = if l > 1e-6 { mapped / l } else { 0.0 };
         let mut sdr = rel.map(|c| c * scale);
         if self.wide_gamut {
@@ -334,6 +388,98 @@ impl HdrTables {
             ];
         }
         sdr.map(|c| self.oetf[(c.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as usize])
+    }
+}
+
+/// BT.2020 luminance of linear RGB.
+fn luminance([r, g, b]: [f32; 3]) -> f32 {
+    0.2627 * r + 0.6780 * g + 0.0593 * b
+}
+
+/// The paper white of an HDR video, measured from its HUD crops: the
+/// luminance at which the game draws its white text.
+///
+/// White HUD text is drawn at one luminance in every frame, while game
+/// highlights spread over many: among the brightest quarter of the crops'
+/// neutral pixels, the fullest sharp peak is the paper white, if at least
+/// 400 pixels gather there, a quarter of the pixels at or above it, and
+/// four times as many per luminance step as a few steps away.
+#[derive(Debug, Clone)]
+pub struct PaperWhite {
+    histogram: Vec<u32>,
+}
+
+impl Default for PaperWhite {
+    fn default() -> Self {
+        Self {
+            histogram: vec![0; PAPER_WHITE_BINS],
+        }
+    }
+}
+
+impl PaperWhite {
+    /// An empty measurement.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The span of the histogram in natural-log units.
+    fn span() -> f32 {
+        (PAPER_WHITE_MAX_NITS / PAPER_WHITE_MIN_NITS).ln()
+    }
+
+    /// Adds a pixel of display luminance `nits`; luminances outside the
+    /// plausible range do not count.
+    pub fn add(&mut self, nits: f32) {
+        if (PAPER_WHITE_MIN_NITS..PAPER_WHITE_MAX_NITS).contains(&nits) {
+            let t = (nits / PAPER_WHITE_MIN_NITS).ln() / Self::span();
+            let bin = ((t * PAPER_WHITE_BINS as f32) as usize).min(PAPER_WHITE_BINS - 1);
+            self.histogram[bin] += 1;
+        }
+    }
+
+    /// The paper white in nits, or `None` if the measurement is not
+    /// confident.
+    pub fn estimate(&self) -> Option<f32> {
+        let hist = &self.histogram;
+        let count = |range: std::ops::Range<usize>| -> u64 {
+            hist[range.start..range.end.min(PAPER_WHITE_BINS)]
+                .iter()
+                .map(|&n| u64::from(n))
+                .sum()
+        };
+        let total = count(0..PAPER_WHITE_BINS);
+        let wanted = (total as f64 * BRIGHT_SHARE).ceil() as u64;
+        // The lowest bin of the brightest share.
+        let (mut from, mut seen) = (PAPER_WHITE_BINS, 0u64);
+        while from > 0 && seen < wanted {
+            from -= 1;
+            seen += u64::from(hist[from]);
+        }
+        // The fullest sharp peak there: a local maximum with enough pixels,
+        // well above its flanks, and a fair share of everything at or
+        // above it (highlights spread over many luminances).
+        let peak = |bin: usize| -> Option<u64> {
+            let around = count(bin.saturating_sub(1)..bin + 2);
+            let local_max = (bin.saturating_sub(1)..(bin + 2).min(PAPER_WHITE_BINS))
+                .all(|b| hist[b] <= hist[bin]);
+            let flank: Vec<u32> = (PEAK_FLANK.0..=PEAK_FLANK.1)
+                .flat_map(|d| [bin.checked_sub(d), Some(bin + d)])
+                .flatten()
+                .filter_map(|b| hist.get(b).copied())
+                .collect();
+            let flank_mean =
+                flank.iter().map(|&n| f64::from(n)).sum::<f64>() / flank.len().max(1) as f64;
+            let peaked = around as f64 / 3.0 >= MIN_PEAKEDNESS * flank_mean;
+            let gathered = around as f64
+                >= MIN_WHITE_SHARE * count(bin.saturating_sub(1)..PAPER_WHITE_BINS) as f64;
+            (hist[bin] >= MIN_WHITE_PIXELS && local_max && peaked && gathered).then_some(around)
+        };
+        let (bin, _) = (from..PAPER_WHITE_BINS)
+            .filter_map(|b| peak(b).map(|n| (b, n)))
+            .max_by_key(|&(_, n)| n)?;
+        let centre = bin as f32 + 0.5;
+        Some(PAPER_WHITE_MIN_NITS * (centre / PAPER_WHITE_BINS as f32 * Self::span()).exp())
     }
 }
 
@@ -369,15 +515,76 @@ pub struct RgbConverter {
 }
 
 impl RgbConverter {
-    /// A converter for a video with these colour properties.
+    /// A converter for a video with these colour properties; HDR video is
+    /// tone-mapped with the reference paper white
+    /// ([`REFERENCE_WHITE_NITS`]).
     pub fn new(colour: VideoColour) -> Self {
+        Self::with_paper_white(colour, REFERENCE_WHITE_NITS)
+    }
+
+    /// A converter that tone-maps HDR video with the paper white
+    /// `paper_white` in nits (measured with [`PaperWhite`]); SDR video is
+    /// converted as by [`RgbConverter::new`].
+    pub fn with_paper_white(colour: VideoColour, paper_white: f32) -> Self {
         let hdr = (colour.transfer != ColourTransfer::Sdr)
-            .then(|| HdrTables::new(colour.transfer, colour.wide_gamut));
+            .then(|| HdrTables::new(colour.transfer, colour.wide_gamut, paper_white));
         Self {
             colour,
             sdr: SdrTables::new(colour.matrix, colour.range),
             hdr,
         }
+    }
+
+    /// Adds the display luminance of the neutral pixels of `roi` to `into`,
+    /// for HDR video (SDR video adds nothing). HUD text is white; the
+    /// coloured bars behind it are uniform too and would otherwise pass for
+    /// the paper white (a pixel is neutral if its channels differ by at most
+    /// a tenth of the largest).
+    ///
+    /// # Errors
+    ///
+    /// [`VideoError::Unsupported`] when `roi` holds no copy yet.
+    pub fn measure_paper_white(
+        &self,
+        roi: &YuvRoi,
+        into: &mut PaperWhite,
+    ) -> Result<(), VideoError> {
+        let Some(hdr) = &self.hdr else {
+            return Ok(());
+        };
+        let rect = roi
+            .rect()
+            .ok_or_else(|| VideoError::Unsupported(String::from("empty crop")))?;
+        let (w, h) = (rect.width() as usize, rect.height() as usize);
+        let (luma, (c0, c1)) = (roi.luma(), roi.chroma());
+        let cw = w / 2;
+        let ten_bit = roi.layout() == RoiLayout::P010;
+        let sample = |data: &[u8], i: usize| -> i32 {
+            if ten_bit {
+                i32::from(u16::from_le_bytes([data[2 * i], data[2 * i + 1]]) >> 6)
+            } else {
+                i32::from(data[i])
+            }
+        };
+        for row in 0..h {
+            for col in 0..w {
+                let i = (row / 2) * cw + col / 2;
+                let (u, v) = match (roi.layout(), c1) {
+                    (RoiLayout::I420, Some(v)) => (sample(c0, i), sample(v, i)),
+                    _ => (sample(c0, 2 * i), sample(c0, 2 * i + 1)),
+                };
+                let y = sample(luma, row * w + col);
+                let light = hdr.linear(self.normalised(y, u, v, ten_bit));
+                let (max, min) = (
+                    light[0].max(light[1]).max(light[2]),
+                    light[0].min(light[1]).min(light[2]),
+                );
+                if max - min <= NEUTRAL_SHARE * max {
+                    into.add(luminance(light));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Whether the conversion tone-maps HDR to SDR.
@@ -488,8 +695,14 @@ impl RgbConverter {
 mod tests {
     use blurrd_blur::{SampleRange, YuvMatrix};
 
-    use super::{HdrTables, SdrTables, hlg_inverse_oetf, limited_luma_term, pq_eotf};
-    use crate::colour::ColourTransfer;
+    use blurrd_core::{ColorInfo, ColorRange, RectI};
+
+    use super::{
+        HdrTables, PAPER_WHITE_SDR, PaperWhite, RgbConverter, RgbImage, SdrTables,
+        hlg_inverse_oetf, limited_luma_term, pq_eotf,
+    };
+    use crate::colour::{ColourTransfer, VideoColour};
+    use crate::roi::{RoiLayout, YuvRoi};
 
     #[test]
     fn sdr_conversion_hits_reference_colours() {
@@ -616,7 +829,7 @@ mod tests {
     #[test]
     fn tone_mapping_is_monotonic_and_bounded() {
         for transfer in [ColourTransfer::Pq, ColourTransfer::Hlg] {
-            let t = HdrTables::new(transfer, true);
+            let t = HdrTables::new(transfer, true, super::REFERENCE_WHITE_NITS);
             assert_eq!(t.map([0.0; 3]), [0, 0, 0]);
             let mut last = 0;
             for i in 0..=100 {
@@ -631,9 +844,171 @@ mod tests {
             }
             assert!(last >= 250, "{transfer:?}: peak maps near white ({last})");
         }
-        // Reference white lands in the upper middle, not clipped.
-        let pq = HdrTables::new(ColourTransfer::Pq, true);
+        // The paper white lands on the SDR HUD white, below clipping.
+        let pq = HdrTables::new(ColourTransfer::Pq, true, super::REFERENCE_WHITE_NITS);
         let [w, ..] = pq.map([0.5807; 3]);
-        assert!((170..=215).contains(&w), "reference white -> {w}");
+        assert!((230..=240).contains(&w), "reference white -> {w}");
+    }
+
+    /// The PQ signal of `nits`.
+    fn pq_signal(nits: f32) -> f32 {
+        const M1: f32 = 2610.0 / 16384.0;
+        const M2: f32 = 2523.0 / 4096.0 * 128.0;
+        const C1: f32 = 3424.0 / 4096.0;
+        const C2: f32 = 2413.0 / 4096.0 * 32.0;
+        const C3: f32 = 2392.0 / 4096.0 * 32.0;
+        let y = (nits / 10000.0).powf(M1);
+        ((C1 + C2 * y) / (1.0 + C3 * y)).powf(M2)
+    }
+
+    #[test]
+    fn measures_the_paper_white_of_hud_text() {
+        // A HUD crop of an HDR video with its white text at 400 nits: the
+        // game behind it in dim to bright greys with a few highlights
+        // brighter than the text.
+        let mut pw = PaperWhite::new();
+        for i in 0..200_000u32 {
+            pw.add(5.0 + (i % 997) as f32 * 0.3);
+        }
+        for _ in 0..3_000 {
+            pw.add(400.0);
+        }
+        for i in 0..2_000u32 {
+            pw.add(450.0 + (i % 400) as f32 * 4.0);
+        }
+        let white = pw.estimate().unwrap();
+        assert!((white - 400.0).abs() < 400.0 * 0.03, "{white}");
+        // Text and game mapped with the measured paper white: the text on
+        // the SDR HUD white, the game below it.
+        let t = HdrTables::new(ColourTransfer::Pq, true, white);
+        let [text, ..] = t.map([pq_signal(400.0); 3]);
+        let [game, ..] = t.map([pq_signal(100.0); 3]);
+        assert!((230..=240).contains(&text), "text -> {text}");
+        assert!(game < 160, "game -> {game}");
+    }
+
+    /// Linear BT.2020 display light in nits of the SDR BT.709 colour
+    /// `sdr` in a video whose paper white is `paper_white`: the inverse of
+    /// the tone curve below the paper white.
+    fn hdr_light(sdr: [u8; 3], paper_white: f32) -> [f32; 3] {
+        let [r, g, b] =
+            sdr.map(|c| (f32::from(c) / 255.0).powf(2.4) / PAPER_WHITE_SDR * paper_white);
+        [
+            0.627_4 * r + 0.329_3 * g + 0.043_3 * b,
+            0.069_1 * r + 0.919_5 * g + 0.011_4 * b,
+            0.016_4 * r + 0.088_0 * g + 0.895_6 * b,
+        ]
+    }
+
+    /// A P010 BT.2020 PQ crop of `w × h` pixels whose 2 × 2 blocks have the
+    /// linear display light (nits) `light(bx, by)`.
+    fn pq_crop(w: usize, h: usize, light: impl Fn(usize, usize) -> [f32; 3]) -> YuvRoi {
+        let code = |v: f32| ((v.round().clamp(0.0, 1023.0) as u16) << 6).to_le_bytes();
+        let (mut y, mut uv) = (vec![0u8; 2 * w * h], vec![0u8; w * h]);
+        for by in 0..h / 2 {
+            for bx in 0..w / 2 {
+                let [r, g, b] = light(bx, by).map(pq_signal);
+                let luma = 0.2627 * r + 0.6780 * g + 0.0593 * b;
+                let (cb, cr) = ((b - luma) / 1.8814, (r - luma) / 1.4746);
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let i = (2 * by + dy) * w + 2 * bx + dx;
+                    y[2 * i..2 * i + 2].copy_from_slice(&code(64.0 + 876.0 * luma));
+                }
+                let i = by * (w / 2) + bx;
+                uv[4 * i..4 * i + 2].copy_from_slice(&code(512.0 + 896.0 * cb));
+                uv[4 * i + 2..4 * i + 4].copy_from_slice(&code(512.0 + 896.0 * cr));
+            }
+        }
+        let size = |n: usize| i32::try_from(n).unwrap();
+        let rect = RectI::new(0, 0, size(w), size(h)).unwrap();
+        YuvRoi::from_parts(rect, RoiLayout::P010, y, uv, Vec::new())
+    }
+
+    /// A kill-feed-like HDR crop: game light up to half the paper white
+    /// with a few highlights at three times it above, a teal and a red bar
+    /// below, white text strokes on the bars,
+    /// with the HUD's paper white at `paper_white` nits (or no text).
+    fn hud_crop(paper_white: f32, text: bool) -> YuvRoi {
+        const TEAL: [u8; 3] = [100, 186, 162];
+        const RED: [u8; 3] = [230, 98, 93];
+        pq_crop(256, 96, |bx, by| match by {
+            0..8 if bx % 23 == 0 => [3.0 * paper_white; 3],
+            0..8 => [2.0 + paper_white * (bx + 7 * by) as f32 / 400.0; 3],
+            _ if text && (12..20).contains(&(by % 24)) && bx % 4 == 1 => [paper_white; 3],
+            8..28 => hdr_light(TEAL, paper_white),
+            _ => hdr_light(RED, paper_white),
+        })
+    }
+
+    /// The SDR pixel `(x, y)` of `img`.
+    fn px(img: &RgbImage, x: usize, y: usize) -> [u8; 3] {
+        let i = 3 * (y * img.width as usize + x);
+        [img.data[i], img.data[i + 1], img.data[i + 2]]
+    }
+
+    #[test]
+    fn hdr_hud_crops_are_mapped_to_the_sdr_colours_the_detectors_know() {
+        let info = ColorInfo {
+            primaries: "bt2020".to_owned(),
+            transfer: "smpte2084".to_owned(),
+            matrix: "bt2020nc".to_owned(),
+            range: ColorRange::Limited,
+        };
+        let colour = VideoColour::from_info(&info, 2160);
+        let near =
+            |a: [u8; 3], b: [u8; 3], tol: u8| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= tol);
+        for paper_white in [120.0, 203.0, 400.0, 800.0] {
+            let crop = hud_crop(paper_white, true);
+            let mut measured = PaperWhite::new();
+            RgbConverter::new(colour)
+                .measure_paper_white(&crop, &mut measured)
+                .unwrap();
+            let white = measured.estimate().unwrap();
+            assert!(
+                (white / paper_white - 1.0).abs() < 0.03,
+                "{paper_white}: {white}"
+            );
+            let converter = RgbConverter::with_paper_white(colour, white);
+            assert!(converter.is_tone_mapped());
+            let mut img = RgbImage::default();
+            converter.convert(&crop, &mut img).unwrap();
+            // Text on the SDR HUD white, bars in their SDR colours, as the
+            // pixel classes expect them.
+            let (text, teal, red) = (px(&img, 2, 26), px(&img, 6, 26), px(&img, 6, 70));
+            assert!(near(text, [235; 3], 4), "{paper_white}: text {text:?}");
+            assert!(
+                near(teal, [100, 186, 162], 6),
+                "{paper_white}: teal {teal:?}"
+            );
+            assert!(near(red, [230, 98, 93], 6), "{paper_white}: red {red:?}");
+            if paper_white > 300.0 {
+                // The reference white alone would wash the bars out.
+                let mut reference = RgbImage::default();
+                RgbConverter::new(colour)
+                    .convert(&crop, &mut reference)
+                    .unwrap();
+                let teal = px(&reference, 6, 26);
+                assert!(!near(teal, [100, 186, 162], 20), "{paper_white}: {teal:?}");
+            }
+        }
+        // Without HUD text the paper white is not confident: the engine
+        // keeps the reference white, reads the video in Safe mode and
+        // warns (HdrToneMapped).
+        let mut measured = PaperWhite::new();
+        RgbConverter::new(colour)
+            .measure_paper_white(&hud_crop(400.0, false), &mut measured)
+            .unwrap();
+        assert_eq!(measured.estimate(), None);
+    }
+
+    #[test]
+    fn a_frame_without_white_text_is_not_confident() {
+        // Game light spread over every luminance: no HUD white.
+        let mut pw = PaperWhite::new();
+        for i in 0..200_000u32 {
+            pw.add(1.0 + (i % 9_973) as f32 * 0.2);
+        }
+        assert_eq!(pw.estimate(), None);
+        assert_eq!(PaperWhite::new().estimate(), None);
     }
 }

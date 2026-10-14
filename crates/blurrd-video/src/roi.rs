@@ -47,6 +47,24 @@ impl YuvRoi {
         Self::default()
     }
 
+    /// A crop from its samples (tests of the conversions).
+    #[cfg(test)]
+    pub(crate) const fn from_parts(
+        rect: RectI,
+        layout: RoiLayout,
+        y: Vec<u8>,
+        c0: Vec<u8>,
+        c1: Vec<u8>,
+    ) -> Self {
+        Self {
+            rect: Some(rect),
+            layout,
+            y,
+            c0,
+            c1,
+        }
+    }
+
     /// The part of the full frame this crop holds (even-aligned), or `None`
     /// before the first copy.
     pub fn rect(&self) -> Option<RectI> {
