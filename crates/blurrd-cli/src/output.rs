@@ -2,7 +2,7 @@
 //! with `--json`, or a progress line on stderr and a short summary on
 //! stdout for people.
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::sync::Mutex;
 
 use blurrd_core::{AppError, JobEvent, JobId, JobKind};
@@ -13,6 +13,8 @@ use serde::Serialize;
 #[derive(Debug)]
 pub(crate) struct Events {
     json: bool,
+    /// Whether stderr is a terminal (a progress line is drawn only there).
+    terminal: bool,
     state: Mutex<State>,
 }
 
@@ -29,6 +31,7 @@ impl Events {
     pub(crate) fn new(json: bool) -> Self {
         Self {
             json,
+            terminal: std::io::stderr().is_terminal(),
             state: Mutex::new(State {
                 label: "job",
                 progress_line: false,
@@ -69,8 +72,8 @@ impl Events {
 
 impl ProgressSink for Events {
     /// Prints an event: every event as a JSON line with `--json`;
-    /// otherwise progress as one updating line on stderr, warnings,
-    /// failures and cancellations as lines on stderr.
+    /// otherwise progress as one updating line on stderr when that is a
+    /// terminal, warnings, failures and cancellations as lines on stderr.
     fn emit(&self, event: JobEvent) {
         if self.json {
             write_json(&event);
@@ -91,7 +94,7 @@ impl ProgressSink for Events {
                 fps,
                 eta_ms,
                 ..
-            } => {
+            } if self.terminal => {
                 let mut stderr = std::io::stderr().lock();
                 // A failed write to the terminal is not worth failing the
                 // job.
