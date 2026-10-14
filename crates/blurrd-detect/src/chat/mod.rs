@@ -99,6 +99,9 @@ const NAME_PAD: (i32, i32, i32, i32) = (3, 4, 4, 2);
 /// The blur box reaches at least this far below the top of the text:
 /// descenders are not always part of the strokes found.
 const MIN_TEXT_ROWS: i32 = 16;
+/// A box band holds text if at least this many stroke pixels lie in it
+/// (one short word has about 150; [`ChatDetector::band_slots`]).
+const MIN_SLOT_STROKES: u32 = 60;
 
 /// A part of the dark chat box: rows where both box edges are visible.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -188,6 +191,30 @@ impl ChatDetector {
     /// The lines whose names were found in the last frame, top to bottom.
     pub fn lines(&self) -> &[ChatLine] {
         &self.lines
+    }
+
+    /// Appends the slot boxes of the box bands of the last frame that hold
+    /// text to `out`: the band over the box's width. Text inside the chat
+    /// box is a sender line, whether or not its name was read, so the
+    /// health check covers a failed span with these ([`crate::health`]).
+    /// An empty box (an open panel without messages) has no slot.
+    pub fn band_slots(&self, out: &mut Vec<RectI>) {
+        for band in &self.bands {
+            let rect = RectI {
+                x0: BOX_X.0,
+                y0: band.y0,
+                x1: BOX_X.1,
+                y1: band.y1,
+            };
+            let ink = RectI {
+                x0: INK_X.0,
+                x1: INK_X.1,
+                ..rect
+            };
+            if self.strokes_in(ink).is_some_and(|n| n >= MIN_SLOT_STROKES) {
+                out.push(rect);
+            }
+        }
     }
 
     /// The text stroke pixels inside `rect` (reference pixels) in the last

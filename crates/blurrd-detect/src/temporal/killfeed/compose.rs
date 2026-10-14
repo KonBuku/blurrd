@@ -1096,12 +1096,10 @@ fn lower_floor(a: i32, b: i32) -> i32 {
     }
 }
 
-/// Whether a frame found as `c` is escalated to the slot box (plan 7.3).
+/// Whether a frame found as `c` is escalated to the slot box (plan 7.3,
+/// [`Confidence::escalates`]).
 const fn uncertain(c: Confidence) -> bool {
-    matches!(
-        c,
-        Confidence::WeakHold | Confidence::GapFill | Confidence::PreRoll
-    )
+    c.escalates()
 }
 
 /// How uncertain a confidence is (higher: less certain).

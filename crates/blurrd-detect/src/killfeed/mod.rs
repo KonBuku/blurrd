@@ -183,6 +183,20 @@ impl KillFeedDetector {
         &self.rows
     }
 
+    /// Appends the slot boxes of the rows found in the last frame to
+    /// `out`: each row's text band over the searched width, from the left
+    /// end of the killer search to the victim portrait. The row structure
+    /// shows names whether or not they were read, so the health check
+    /// covers a failed span with these ([`crate::health`]).
+    pub fn row_slots(&self, out: &mut Vec<RectI>) {
+        out.extend(self.rows.iter().map(|r| RectI {
+            x0: FEED_X0,
+            y0: r.top + NAME_BAND.0,
+            x1: VICTIM_X1,
+            y1: r.top + NAME_BAND.1,
+        }));
+    }
+
     /// Detects the names in `crop`, the [`FEED_ROI`] of a frame in
     /// reference scale, and replaces the content of `out` with them.
     ///

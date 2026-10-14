@@ -351,6 +351,19 @@ impl SlotEvidence {
             && near_edge(self.location_edge)
     }
 
+    /// Whether the slot shows an entry's structure: the portrait and the
+    /// location line, whether or not the name was read. The health check
+    /// covers a failed span with the slot box ([`crate::health`]).
+    pub fn shows_entry(&self) -> bool {
+        self.portrait.min(self.location) >= ON_SCORE
+    }
+
+    /// The slot box of this slot: the whole name slot, from the portrait's
+    /// edge to the end of the slot.
+    pub fn slot_box(&self) -> RectI {
+        entry_detection(self.top, BOX_ROWS, SLOT_X1).rect
+    }
+
     /// Whether the slot shows an entry.
     pub fn is_entry(&self) -> bool {
         self.hit != SlotHit::None

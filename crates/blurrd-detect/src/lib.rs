@@ -30,6 +30,8 @@
 //! - [`ChatTracker`] ([`chat`]): follows the text-chat lines through
 //!   pushes and fades.
 //! - [`scene_cut`]: the HUD-aware scene cuts that end holds and backfills.
+//! - [`health`]: the per-region health check that covers spans where the
+//!   structure stays but no name is found with slot boxes.
 //!
 //! The building blocks every detector shares:
 //!
@@ -60,6 +62,7 @@ pub mod classes;
 pub mod components;
 mod detection;
 pub mod geometry;
+pub mod health;
 mod image;
 pub mod killfeed;
 pub mod morph;

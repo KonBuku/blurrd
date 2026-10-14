@@ -72,6 +72,19 @@ impl Confidence {
             Self::Tracked | Self::WeakHold | Self::PostRoll | Self::ColourPrior => 1.0,
         }
     }
+
+    /// Whether a box found with this confidence uses its name's slot box
+    /// in Tight mode (plan 7.3, escalation): held, interpolated,
+    /// pre-rolled, colour-prior and OCR-fix frames are not confirmed by the
+    /// frame itself, so they cover where the name can be, not only where
+    /// it was last seen. Only tracked and post-roll frames keep the tight
+    /// box.
+    pub const fn escalates(self) -> bool {
+        matches!(
+            self,
+            Self::WeakHold | Self::GapFill | Self::PreRoll | Self::ColourPrior | Self::OcrFix
+        )
+    }
 }
 
 /// One rectangle of a track, held for the frames `f0..=f1`.

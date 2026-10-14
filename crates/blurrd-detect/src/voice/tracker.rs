@@ -154,9 +154,14 @@ struct Geometry {
 }
 
 impl Geometry {
-    /// The box of a frame of the track.
+    /// The box of a frame of the track: the widest name seen, or the
+    /// whole name slot for frames not confirmed by their own reading
+    /// ([`Confidence::escalates`], plan 7.3) and before a name frame.
     fn boxed(&self, confidence: Confidence) -> VoiceBox {
-        let x1 = self.name_x1.unwrap_or(SLOT_X1);
+        let x1 = match self.name_x1 {
+            Some(x) if !confidence.escalates() => x,
+            _ => SLOT_X1,
+        };
         let d = entry_detection(self.top, self.rows, x1);
         VoiceBox {
             rect: d.rect,
@@ -701,12 +706,18 @@ mod tests {
         for s in &mut shows[12..20] {
             *s = Show::Portrait { p: 100 };
         }
-        let (_, c) = run(&shows, &[]);
+        let (boxes, c) = run(&shows, &[]);
         assert!(c[5..10].iter().all(|&c| c == Some(Confidence::WeakHold)));
         assert_eq!(c[10..12], [Some(Confidence::Tracked); 2]);
         assert!(c[12..20].iter().all(|&c| c == Some(Confidence::WeakHold)));
         assert_eq!(c[20], Some(Confidence::PostRoll));
         assert!(c[..5].iter().chain(&c[21..]).all(Option::is_none));
+        // Held frames are escalated to the whole name slot (plan 7.3);
+        // tracked and post-roll frames keep the name's width.
+        let x1 = |f: usize| boxes[f].boxes[0].rect.x1;
+        let slot = entry_detection(slot_top(0), BOX_ROWS, SLOT_X1).rect.x1;
+        assert!((5..10).chain(12..20).all(|f| x1(f) == slot));
+        assert!(x1(10) < slot && x1(20) == x1(10));
     }
 
     #[test]
