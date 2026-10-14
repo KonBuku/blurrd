@@ -48,7 +48,7 @@ mod ring;
 
 use std::collections::BTreeMap;
 
-use blurrd_core::{Confidence, NameKind, RectI, Region};
+use blurrd_core::{Confidence, Mode, NameKind, RectI, Region};
 
 use crate::detection::Detection;
 use crate::image::RgbView;
@@ -401,6 +401,8 @@ pub struct KillFeedTracker {
     /// The readings of the last frames handed out (frame index and
     /// readings), for the frames after them (`compose::cover_readings`).
     emitted: Vec<(u32, Vec<Detection>)>,
+    /// The box geometry ([`KillFeedTracker::set_mode`]).
+    mode: Mode,
 }
 
 impl Default for KillFeedTracker {
@@ -424,7 +426,16 @@ impl KillFeedTracker {
             next_frame: None,
             next_emit: 0,
             emitted: Vec::new(),
+            mode: Mode::Tight,
         }
+    }
+
+    /// Sets the box geometry. [`Mode::Safe`] gives every frame of every
+    /// name its slot box (the name's box widened towards the kill icon,
+    /// up to the row's other name), as Tight mode does for frames of low
+    /// confidence only (plan 7.3).
+    pub const fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
     }
 
     /// Adds the next frame.
@@ -830,7 +841,15 @@ impl KillFeedTracker {
     fn emit(&mut self, f: u32) {
         let mut boxes = Vec::new();
         let mut clearances = Vec::new();
-        compose::compose(f, &mut self.parts, &self.ring, &mut boxes, &mut clearances);
+        let safe = self.mode == Mode::Safe;
+        compose::compose(
+            f,
+            &mut self.parts,
+            &self.ring,
+            safe,
+            &mut boxes,
+            &mut clearances,
+        );
         compose::cover_readings(
             f,
             &self.ring,

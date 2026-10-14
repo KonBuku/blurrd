@@ -36,7 +36,7 @@
 
 use std::collections::VecDeque;
 
-use blurrd_core::{Confidence, RectI};
+use blurrd_core::{Confidence, Mode, RectI};
 
 use super::{BOX_ROWS, PortraitSignature, SLOT_X1, SLOTS, SlotEvidence, SlotHit, entry_detection};
 
@@ -156,10 +156,11 @@ struct Geometry {
 impl Geometry {
     /// The box of a frame of the track: the widest name seen, or the
     /// whole name slot for frames not confirmed by their own reading
-    /// ([`Confidence::escalates`], plan 7.3) and before a name frame.
-    fn boxed(&self, confidence: Confidence) -> VoiceBox {
+    /// ([`Confidence::escalates`], plan 7.3), before a name frame and in
+    /// Safe mode (`safe`).
+    fn boxed(&self, confidence: Confidence, safe: bool) -> VoiceBox {
         let x1 = match self.name_x1 {
-            Some(x) if !confidence.escalates() => x,
+            Some(x) if !confidence.escalates() && !safe => x,
             _ => SLOT_X1,
         };
         let d = entry_detection(self.top, self.rows, x1);
@@ -233,12 +234,21 @@ pub struct VoiceTracker {
     next_id: u32,
     /// Decided frames not yet drained.
     ready: Vec<VoiceFrameBoxes>,
+    /// The box geometry ([`VoiceTracker::set_mode`]).
+    mode: Mode,
 }
 
 impl VoiceTracker {
     /// An empty tracker.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets the box geometry. [`Mode::Safe`] boxes every frame over the
+    /// whole name slot, as Tight mode does for frames of low confidence
+    /// only (plan 7.3).
+    pub const fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
     }
 
     /// Adds the next frame.
@@ -531,6 +541,7 @@ impl VoiceTracker {
         let Some(front) = self.buffer.pop_front() else {
             return;
         };
+        let safe = self.mode == Mode::Safe;
         let boxes = front
             .cells
             .iter()
@@ -539,7 +550,7 @@ impl VoiceTracker {
                 self.tracks
                     .iter()
                     .find(|g| g.id == id)
-                    .map(|g| g.boxed(confidence))
+                    .map(|g| g.boxed(confidence, safe))
             })
             .collect();
         let open = self.open.map(|o| o.map(|o| o.id));

@@ -25,7 +25,7 @@
 
 use std::collections::VecDeque;
 
-use blurrd_core::{Confidence, RectI};
+use blurrd_core::{Confidence, Mode, RectI};
 
 use super::{BannerFrame, BannerName, CENTRE_X, NAME_BAND, NAME_PAD_X, Plate};
 use crate::killfeed::FEED_ROI;
@@ -174,12 +174,32 @@ pub struct BannerTracker {
     /// What frames `from..next` showed (only while an episode is open).
     pending: VecDeque<Seen>,
     episode: Option<Episode>,
+    /// The box geometry ([`BannerTracker::set_mode`]).
+    mode: Mode,
 }
 
 impl BannerTracker {
     /// A tracker before the first frame.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets the box geometry. [`Mode::Safe`] widens every box to at least
+    /// the fallback box ([`FALLBACK_HALF`] on each side of the banner's
+    /// centre), the width of the longest name (plan 7.3).
+    pub const fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+    }
+
+    /// In Safe mode, widens the boxes `out[from..]` to the fallback box.
+    fn widen_safe(&self, from: usize, out: &mut [BannerBox]) {
+        if self.mode != Mode::Safe {
+            return;
+        }
+        for b in out.iter_mut().skip(from) {
+            b.rect.x0 = b.rect.x0.min(CENTRE_X - FALLBACK_HALF);
+            b.rect.x1 = b.rect.x1.max(CENTRE_X + FALLBACK_HALF);
+        }
     }
 
     /// Every frame before this one is final: its boxes have been emitted.
@@ -194,6 +214,13 @@ impl BannerTracker {
     /// follow the previous one (a seek) ends the open episode first, as if
     /// the banner had disappeared.
     pub fn push(&mut self, frame: u32, seen: &BannerFrame, out: &mut Vec<BannerBox>) {
+        let from = out.len();
+        self.push_frame(frame, seen, out);
+        self.widen_safe(from, out);
+    }
+
+    /// [`BannerTracker::push`] in the tracker's own geometry.
+    fn push_frame(&mut self, frame: u32, seen: &BannerFrame, out: &mut Vec<BannerBox>) {
         if self.next.is_some_and(|next| next != frame) {
             self.end_episode(out);
         }
@@ -279,8 +306,10 @@ impl BannerTracker {
 
     /// Ends the video: emits the boxes of every remaining frame.
     pub fn finish(&mut self, out: &mut Vec<BannerBox>) {
+        let from = out.len();
         self.end_episode(out);
         self.next = None;
+        self.widen_safe(from, out);
     }
 
     /// Ends the open episode at its last gated frame and emits the boxes of

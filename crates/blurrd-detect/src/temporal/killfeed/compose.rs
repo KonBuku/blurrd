@@ -413,19 +413,21 @@ struct Candidate {
 }
 
 /// Composes the boxes of frame `f` from `parts` into `out`, reading the
-/// frame (and the next one) from `ring`. `clearances` receives the box of
+/// frame (and the next one) from `ring`; with `safe`, every box is its
+/// slot box (Safe mode). `clearances` receives the box of
 /// every name with the killer-portrait clearance of its row (also of the
 /// names dropped as read on the portrait art).
 pub(super) fn compose(
     f: u32,
     parts: &mut [Part],
     ring: &Ring,
+    safe: bool,
     out: &mut Vec<FeedBox>,
     clearances: &mut Vec<Clearance>,
 ) {
     let mut candidates = Vec::new();
     for (owner, part) in parts.iter_mut().enumerate() {
-        part_candidates(f, owner, part, ring, &mut candidates);
+        part_candidates(f, owner, part, ring, safe, &mut candidates);
     }
     // A companion's extent was read once, in its part's reference frame,
     // and an uncertain position is a guess: a part that follows the name
@@ -743,7 +745,14 @@ fn covered_columns(lo: i32, text: RectI, boxes: &[FeedBox]) -> i32 {
 }
 
 /// The candidates of one part (index `owner`) in frame `f`.
-fn part_candidates(f: u32, owner: usize, part: &mut Part, ring: &Ring, out: &mut Vec<Candidate>) {
+fn part_candidates(
+    f: u32,
+    owner: usize,
+    part: &mut Part,
+    ring: &Ring,
+    safe: bool,
+    out: &mut Vec<Candidate>,
+) {
     let frame = ring.frame(f);
     let frame = frame.as_ref();
     let detections = ring.get(f).map_or(&[][..], |s| &s.detections);
@@ -771,7 +780,8 @@ fn part_candidates(f: u32, owner: usize, part: &mut Part, ring: &Ring, out: &mut
     // Escalated frames come in segments: a confident match within
     // [`ESCALATE_BRIDGE`] frames of an uncertain frame is escalated too,
     // so the slot box does not flicker on and off.
-    let escalate = uncertain(confidence)
+    let escalate = safe
+        || uncertain(confidence)
         || confidence == Confidence::Tracked
             && (1..=ESCALATE_BRIDGE).any(|k| {
                 [f.checked_sub(k), f.checked_add(k)]

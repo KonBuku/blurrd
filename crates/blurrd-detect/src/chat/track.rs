@@ -60,7 +60,7 @@
 
 use std::collections::VecDeque;
 
-use blurrd_core::RectI;
+use blurrd_core::{Mode, RectI};
 
 use crate::detection::Detection;
 
@@ -470,12 +470,21 @@ pub struct ChatTracker {
     /// Lines that ended but are still covered in a pending frame: one read
     /// again at its place resumes.
     ended: Vec<Track>,
+    /// The box geometry ([`ChatTracker::set_mode`]).
+    mode: Mode,
 }
 
 impl ChatTracker {
     /// An empty tracker.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets the box geometry. [`Mode::Safe`] gives every line the Safe
+    /// geometry of an uncertain name end: at least 160 px from the name's
+    /// start, the width of the longest name plus a margin (plan 7.3).
+    pub const fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
     }
 
     /// Adds the state of `detector` after it read frame `frame`. Frames
@@ -1093,13 +1102,14 @@ impl ChatTracker {
         let Some(pending) = self.pending.pop_front() else {
             return;
         };
+        let safe = self.mode == Mode::Safe;
         let detections = pending
             .lines
             .iter()
             .filter_map(|covered| {
                 let model = self.model(covered.id)?;
                 let mut text = model.text(covered.shift);
-                if covered.safe {
+                if covered.safe || safe {
                     text.x1 = text.x1.max(text.x0 + SAFE_NAME_WIDTH as i32);
                 }
                 if let Some(own) = covered.own {
