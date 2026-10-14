@@ -74,6 +74,17 @@ const ICON_MAX_H: i32 = 30;
 const ICON_MARGIN: i32 = 3;
 /// The victim text starts this far right of the colour boundary.
 const VICTIM_START: i32 = 2;
+/// Victim text starting at most this far right of [`VICTIM_START`] touches
+/// the colour boundary (a correct boundary lies a slanted bar edge before
+/// the name).
+const BOUNDARY_TOUCH: i32 = 3;
+/// A victim name that touches the boundary is read again from this far
+/// left of it: a 16-character name is about 160 px wide.
+const NAME_REACH: i32 = 160;
+/// A colour boundary at least this far left of the victim name's start is
+/// misplaced for the weapon search (see [`killer`]): the victim text
+/// starts [`VICTIM_START`] right of a correct boundary.
+const MISPLACED_BOUNDARY: i32 = 20;
 /// A killer name ends at most this far left of the weapon.
 const MAX_KILLER_TO_WEAPON: i32 = 48;
 /// The killer text search stops this far left of the weapon.
@@ -411,10 +422,20 @@ pub(super) fn analyze_row(
         s.clusters = clusters;
         return;
     }
+    if clusters
+        .first()
+        .is_some_and(|c| c.x0 <= xb + VICTIM_START + BOUNDARY_TOUCH)
+    {
+        s.clusters = clusters;
+        let victim_x0 = touching_victim(classes, top, xb, s, &mut emit);
+        killer(classes, top, xb, victim_x0, s, &mut emit);
+        return;
+    }
     // Words of one name are close together; a further group in the victim
     // colour (a self-kill row with the icon between two names) is another
     // name and must have two big glyphs.
     let mut first = 0;
+    let mut victim_x0 = None;
     for i in 0..clusters.len() {
         let last_of_group =
             i + 1 == clusters.len() || clusters[i + 1].x0 - clusters[i].x1 > GAP_WORDS;
@@ -428,6 +449,7 @@ pub(super) fn analyze_row(
             end: clusters[i].end,
         };
         if i + 1 == clusters.len() || multi_glyph(&group, &s.comps) {
+            victim_x0.get_or_insert(group.x0);
             emit(
                 NameKind::Victim,
                 bounds(group.x0, group.x1, &s.comps[group.start..group.end]),
@@ -436,7 +458,53 @@ pub(super) fn analyze_row(
         first = i + 1;
     }
     s.clusters = clusters;
-    killer(classes, top, xb, s, &mut emit);
+    killer(classes, top, xb, victim_x0, s, &mut emit);
+}
+
+/// The victim of a row whose victim text starts right at the colour
+/// boundary `xb`: the boundary may lie inside the name. Under a filter
+/// that pales the victim side's gradient (gamma 2.0), the walk from the
+/// portrait meets killer-coloured columns in the name's first word
+/// (measured: the first word of a two-word victim unblurred for 29
+/// frames). The name is read again from up to [`NAME_REACH`] left of the
+/// boundary and reported as the words chained to the right-aligned end
+/// with gaps of at most [`GAP_WORDS`]; the killer side's weapon and icons
+/// end the chain. Returns the name's left end.
+fn touching_victim(
+    classes: &PixelClasses,
+    top: i32,
+    xb: i32,
+    s: &mut Scratch,
+    emit: &mut impl FnMut(NameKind, RectI),
+) -> Option<i32> {
+    text_comps(
+        classes,
+        top,
+        (xb - NAME_REACH).max(FEED_X0),
+        VICTIM_TEXT_X1,
+        xb + VICTIM_START,
+        s,
+    );
+    let line = line_top(&s.comps, top);
+    s.comps.retain(|c| on_line(c, line));
+    let mut clusters = std::mem::take(&mut s.clusters);
+    cluster(&mut s.comps, GAP_VICTIM, &mut clusters);
+    clusters.retain(|c| is_text(c, &s.comps));
+    let mut x0 = None;
+    if let Some(last) = clusters.last().filter(|c| c.x1 >= RIGHT_ALIGN) {
+        let mut first = clusters.len() - 1;
+        while first > 0 && clusters[first].x0 - clusters[first - 1].x1 <= GAP_WORDS {
+            first -= 1;
+        }
+        let chain = &clusters[first];
+        x0 = Some(chain.x0);
+        emit(
+            NameKind::Victim,
+            bounds(chain.x0, last.x1, &s.comps[chain.start..last.end]),
+        );
+    }
+    s.clusters = clusters;
+    x0
 }
 
 /// Profile column of reference column `x`.
@@ -589,14 +657,29 @@ fn one_colour_row(
 /// The killer name: the text just left of the weapon, or without a weapon
 /// blob (knife, small ability icon) the rightmost multi-glyph text left of
 /// the icon zone.
+///
+/// The weapon is searched left of the colour boundary `xb`. A boundary
+/// found far left of the victim name (`victim_x0`) is misplaced: under a
+/// colour filter the pale end of a gradient killer bar next to the weapon
+/// matches neither team colour, and the walk from the victim side stops at
+/// the dark killer bar around the killer name. The weapon is then searched
+/// left of the victim name instead (measured: a colour balance tint left
+/// the killer name of a new row unblurred for 78 frames).
 fn killer(
     classes: &PixelClasses,
     top: i32,
     xb: i32,
+    victim_x0: Option<i32>,
     s: &mut Scratch,
     emit: &mut impl FnMut(NameKind, RectI),
 ) {
-    let weapon = weapon_x(classes, top, xb, s);
+    let mut weapon = weapon_x(classes, top, xb, s);
+    if weapon.is_none()
+        && let Some(vx) = victim_x0
+        && vx - VICTIM_START - xb >= MISPLACED_BOUNDARY
+    {
+        weapon = weapon_x(classes, top, vx - VICTIM_START, s);
+    }
     let mut clusters = std::mem::take(&mut s.clusters);
     if let Some(xw) = weapon {
         killer_comps(classes, top, xw - WEAPON_GAP, xw, s);

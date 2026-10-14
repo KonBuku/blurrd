@@ -15,7 +15,7 @@ use blurrd_core::RectI;
 
 use super::tones::{self, Sample, Tone};
 use super::{
-    BarEvidence, FEED_ROI, FEED_Y_TOP, FeedRow, INNER_MARGIN, ROW_H, RowAnchor, SCORE_X,
+    BarEvidence, FEED_ROI, FEED_Y_TOP, FeedRow, INNER_MARGIN, ROW_H, ROW_PITCH, RowAnchor, SCORE_X,
     VICTIM_COLOUR_X0, VICTIM_TEXT_X1,
 };
 use crate::classes::{Class, ClassParams, PixelClasses};
@@ -82,6 +82,16 @@ const FLAT_STEP: u8 = 4;
 /// percentile), the bright sky and walls behind the victim text columns
 /// that pass as a text line 0.63 to 0.70.
 const MIN_FLAT: f32 = 0.75;
+/// A luminance anchor whose band is less flat, down to this share, is
+/// accepted only where it stacks on another row: another accepted row, or
+/// another such anchor, one [`ROW_PITCH`] away. Measured on downscaled
+/// greyscale recordings (720p, scaled back up): the soft edges of the
+/// weapon icon, the victim name and of a death-recap panel overlapping
+/// the row lower real bands to 0.57 to 0.74 (5th percentile 0.735).
+const MIN_FLAT_STACKED: f32 = 0.5;
+/// Two rows stack if their tops are one [`ROW_PITCH`] apart, within this
+/// tolerance (text-line anchors land up to two rows off).
+const STACK_TOLERANCE: i32 = 3;
 /// A luminance anchor's band needs at least this many such pairs (of
 /// about 4,250).
 const MIN_FLAT_PAIRS: u32 = 200;
@@ -115,6 +125,8 @@ pub(super) struct RowScratch {
     tops: Vec<(i32, RowAnchor, BarEvidence)>,
     /// Text-line anchors (crop rows, clamped) before acceptance.
     lines: Vec<i32>,
+    /// Luminance anchors that need a stacked row ([`MIN_FLAT_STACKED`]).
+    stacked: Vec<i32>,
     /// `min(R, G, B)` of two neighbouring portrait rows (wall guard).
     portrait: [Vec<u8>; 2],
 }
@@ -272,6 +284,7 @@ pub(super) fn find_rows(
     // band without a known bar colour still counts if its luminance looks
     // like a bar next to a portrait.
     s.tops.clear();
+    s.stacked.clear();
     for i in 0..s.lines.len() {
         let y = s.lines[i];
         if !far_from(&s.tops, y) {
@@ -279,10 +292,20 @@ pub(super) fn find_rows(
         }
         let evidence = if s.mean(y, y + ROW_H) >= MIN_ANCHOR_INNER {
             s.colour_evidence(y, MIN_ANCHOR_INNER)
-        } else if is_flat_band(classes, y) && has_portrait(crop, y + FEED_ROI.y0, &mut s.portrait) {
-            BarEvidence::Luminance
         } else {
-            continue;
+            match flatness(classes, y) {
+                Some(flat)
+                    if flat >= MIN_FLAT_STACKED
+                        && has_portrait(crop, y + FEED_ROI.y0, &mut s.portrait) =>
+                {
+                    if flat < MIN_FLAT {
+                        s.stacked.push(y);
+                        continue;
+                    }
+                    BarEvidence::Luminance
+                }
+                _ => continue,
+            }
         };
         s.tops.push((y, RowAnchor::TextLine, evidence));
     }
@@ -297,6 +320,7 @@ pub(super) fn find_rows(
             s.tops.push((y, RowAnchor::BarEdge, evidence));
         }
     }
+    accept_stacked(s);
     s.tops.sort_unstable_by_key(|&(y, ..)| y);
     // The feed is a stack from the top.
     for &(y, anchor, evidence) in &s.tops {
@@ -407,13 +431,32 @@ fn score_rows(classes: &PixelClasses, tones: &[Tone], s: &mut RowScratch) {
     }
 }
 
-/// Whether the band of the row at crop row `y` is vertically flat in
-/// luminance, as an opaque bar is: at least [`MIN_FLAT`] of the vertically
-/// neighbouring pixel pairs of its inner band in the score columns differ
-/// in value by at most [`FLAT_STEP`]. Text pixels (the name) are left out;
-/// white pixels are not, because a light bar passes as white in greyscale
-/// video.
-fn is_flat_band(classes: &PixelClasses, y: i32) -> bool {
+/// Accepts the luminance anchors of [`RowScratch::stacked`] that stack on
+/// an accepted row or on each other, until no more are accepted.
+fn accept_stacked(s: &mut RowScratch) {
+    let stacks = |a: i32, b: i32| ((a - b).abs() - ROW_PITCH).abs() <= STACK_TOLERANCE;
+    loop {
+        let found = s.stacked.iter().position(|&y| {
+            far_from(&s.tops, y)
+                && (s.tops.iter().any(|&(t, ..)| stacks(t, y))
+                    || s.stacked.iter().any(|&z| z != y && stacks(z, y)))
+        });
+        let Some(i) = found else {
+            return;
+        };
+        let y = s.stacked.swap_remove(i);
+        s.tops
+            .push((y, RowAnchor::TextLine, BarEvidence::Luminance));
+    }
+}
+
+/// How flat the band of the row at crop row `y` is in luminance, as an
+/// opaque bar is: the share of the vertically neighbouring pixel pairs of
+/// its inner band in the score columns that differ in value by at most
+/// [`FLAT_STEP`]; `None` with fewer than [`MIN_FLAT_PAIRS`] pairs. Text
+/// pixels (the name) are left out; white pixels are not, because a light
+/// bar passes as white in greyscale video.
+fn flatness(classes: &PixelClasses, y: i32) -> Option<f32> {
     let inner = RectI {
         x0: SCORE_X.0,
         y0: y + FEED_ROI.y0 + INNER_MARGIN,
@@ -423,9 +466,7 @@ fn is_flat_band(classes: &PixelClasses, y: i32) -> bool {
     let skip = Class::Text.bit();
     let (mut pairs, mut flat) = (0u32, 0u32);
     let mut rows = tones::plane_rows(classes, inner);
-    let Some(mut above) = rows.next() else {
-        return false;
-    };
+    let mut above = rows.next()?;
     for row in rows {
         for i in 0..row.flags.len() {
             if (above.flags[i] | row.flags[i]) & skip == 0 {
@@ -435,7 +476,7 @@ fn is_flat_band(classes: &PixelClasses, y: i32) -> bool {
         }
         above = row;
     }
-    pairs >= MIN_FLAT_PAIRS && flat as f32 >= MIN_FLAT * pairs as f32
+    (pairs >= MIN_FLAT_PAIRS).then(|| flat as f32 / pairs as f32)
 }
 
 /// Whether the row at reference row `top` has the textured art of a
@@ -481,4 +522,47 @@ fn has_portrait(crop: &RgbView<'_>, top: i32, buffers: &mut [Vec<u8>; 2]) -> boo
 fn far_from(tops: &[(i32, RowAnchor, BarEvidence)], y: i32) -> bool {
     tops.iter()
         .all(|&(t, ..)| (y - t).abs() >= MIN_ROW_DISTANCE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RowScratch, accept_stacked};
+    use crate::killfeed::{BarEvidence, ROW_PITCH, RowAnchor};
+
+    fn tops(s: &RowScratch) -> Vec<i32> {
+        let mut t: Vec<i32> = s.tops.iter().map(|&(y, ..)| y).collect();
+        t.sort_unstable();
+        t
+    }
+
+    #[test]
+    fn weak_luminance_anchors_count_where_they_stack() {
+        // A chain below an accepted row, two rows off by up to two rows.
+        let mut s = RowScratch::default();
+        s.tops
+            .push((16, RowAnchor::TextLine, BarEvidence::Luminance));
+        s.stacked = vec![16 + ROW_PITCH + 2, 16 + 2 * ROW_PITCH + 1, 200];
+        accept_stacked(&mut s);
+        assert_eq!(tops(&s), [16, 57, 95]);
+        assert_eq!(s.stacked, [200]);
+        assert!(
+            s.tops
+                .iter()
+                .all(|&(_, a, e)| a == RowAnchor::TextLine && e == BarEvidence::Luminance)
+        );
+        // Two weak anchors one pitch apart support each other.
+        let mut s = RowScratch {
+            stacked: vec![30, 30 + ROW_PITCH],
+            ..RowScratch::default()
+        };
+        accept_stacked(&mut s);
+        assert_eq!(tops(&s), [30, 30 + ROW_PITCH]);
+        // A lone weak anchor, or one off the pitch, does not count.
+        let mut s = RowScratch::default();
+        s.tops
+            .push((16, RowAnchor::BarEdge, BarEvidence::DefaultColour));
+        s.stacked = vec![16 + ROW_PITCH + 5, 150];
+        accept_stacked(&mut s);
+        assert_eq!(tops(&s), [16]);
+    }
 }
