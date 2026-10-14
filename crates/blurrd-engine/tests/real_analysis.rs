@@ -10,8 +10,8 @@
 //!
 //! `BLURRD_ANALYSIS_CLIPS=<n>` limits the throughput run to the first `n`
 //! clips of the manifest (default: all), `BLURRD_ANALYSIS_GPU=1` lets the
-//! decoder choice use the GPU (default: software decoding, the choice
-//! without OCR on H.264 8-bit sources, plan 8).
+//! decoder choice use the GPU as the product does (NVDEC on NVIDIA GPUs;
+//! default: software decoding, so the test needs no GPU).
 
 #![allow(
     clippy::unwrap_used,

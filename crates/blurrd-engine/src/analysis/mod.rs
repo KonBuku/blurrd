@@ -134,11 +134,13 @@ pub(crate) struct Prepared {
 impl Engine {
     /// Probes `input` and prepares its analysis: geometry, colour
     /// conversion, decoder, OCR. Emits the warnings that apply to the
-    /// whole video.
+    /// whole video. `beside_render` tells that a render decodes the same
+    /// video at the same time (a streaming run).
     pub(crate) fn prepare_analysis(
         &self,
         input: &std::path::Path,
         verify: bool,
+        beside_render: bool,
         job: &Job<'_>,
     ) -> Result<Prepared, AppError> {
         job.stage(Stage::Probe);
@@ -183,7 +185,11 @@ impl Engine {
         };
         let config = self.config();
         let hw = if config.gpu {
-            let purpose = if pass0.is_some() {
+            // The detectors, not the decoder, bound an analysis, so it
+            // leaves the CPU to them and OCR where the GPU decodes fast
+            // enough. Beside a render without OCR the analysis takes the
+            // fastest decoder and the render the other one.
+            let purpose = if pass0.is_some() || !beside_render {
                 DecodePurpose::SpareCpu
             } else {
                 DecodePurpose::Throughput
@@ -255,7 +261,7 @@ impl Engine {
     }
 
     fn analyze_job(&self, req: &AnalyzeRequest, job: &Job<'_>) -> Result<Analysis, AppError> {
-        let prepared = self.prepare_analysis(&req.input, req.verify, job)?;
+        let prepared = self.prepare_analysis(&req.input, req.verify, false, job)?;
         let expected = expected_frames(&prepared.info);
         job.started(JobKind::Analyze, expected);
         self.run_analysis(req, prepared, job, Some(expected), &mut |_, _| {})

@@ -245,7 +245,7 @@ impl Engine {
             // run goes straight to the output.
             previews: false,
         };
-        let prepared = self.prepare_analysis(&req.input, req.verify, job)?;
+        let prepared = self.prepare_analysis(&req.input, req.verify, true, job)?;
         let dir = ProjectDir::new(&self.config().cache_dir, &prepared.fingerprint);
         if dir.read_project().is_some_and(|p| !p.overrides.is_empty()) {
             let expected = expected_frames(&prepared.info);

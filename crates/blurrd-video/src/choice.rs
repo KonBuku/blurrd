@@ -34,8 +34,8 @@ const MAX_ENTRIES: usize = 64;
 pub enum DecodePurpose {
     /// Decode as fast as possible.
     Throughput,
-    /// Other work (OCR) needs the CPU: prefer the GPU decoder whenever it
-    /// reaches at least half the software speed.
+    /// Other work (detectors, OCR) needs the CPU: prefer the GPU decoder
+    /// whenever it reaches at least half the software speed.
     SpareCpu,
 }
 
