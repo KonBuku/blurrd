@@ -491,9 +491,13 @@ impl VoiceTracker {
         };
         let crossed = open.barrier.is_some_and(|b| b <= n);
         if open.counts && open.holding && !crossed {
+            // A fading portrait (measured: an upscaled 720p entry over its
+            // last frames) can stop matching while the entry's two text
+            // lines still start at their edge: the entry is still shown.
             let holds = n - open.last_hit <= HOLD
                 && evidence.portrait >= HOLD_PORTRAIT
-                && evidence.signature.distance(&open.recent_signature) <= SAME_PORTRAIT;
+                && (evidence.signature.distance(&open.recent_signature) <= SAME_PORTRAIT
+                    || evidence.aligned());
             if holds {
                 self.cover(n, k, open.id, Confidence::WeakHold);
                 open.recent_signature = evidence.signature;
@@ -590,6 +594,9 @@ mod tests {
         Structure { p: u8 },
         /// Portrait `p` visible, but no entry detected.
         Portrait { p: u8 },
+        /// Portrait `p` visible and both text lines at their edge, but no
+        /// entry detected (a fading entry).
+        Lines { p: u8 },
         /// A portrait between portraits 1 (`t` = 0) and 2 (`t` = 30),
         /// no entry detected.
         Between { t: u8 },
@@ -632,6 +639,13 @@ mod tests {
             },
             Show::Portrait { p } => SlotEvidence {
                 portrait: 3.0,
+                signature: signature(p),
+                ..base
+            },
+            Show::Lines { p } => SlotEvidence {
+                portrait: 0.9,
+                name_edge: Some(58),
+                location_edge: Some(58),
                 signature: signature(p),
                 ..base
             },
@@ -729,6 +743,26 @@ mod tests {
         let slot = entry_detection(slot_top(0), BOX_ROWS, SLOT_X1).rect.x1;
         assert!((5..10).chain(12..20).all(|f| x1(f) == slot));
         assert!(x1(10) < slot && x1(20) == x1(10));
+    }
+
+    #[test]
+    fn holds_through_a_fading_portrait_while_the_lines_show() {
+        // The fading portrait no longer matches, but the name and location
+        // lines still start at their edge: the entry is still shown.
+        let mut shows = vec![NAME, NAME];
+        shows.extend([Show::Lines { p: 7 }; 3]);
+        shows.extend([Show::Empty; 6]);
+        let (_, c) = run(&shows, &[]);
+        assert!(
+            c[2..5].iter().all(|&c| c == Some(Confidence::WeakHold)),
+            "{c:?}"
+        );
+        assert_eq!(c[5], Some(Confidence::PostRoll));
+        // Without the lines, another portrait ends the hold at once.
+        let mut shows = vec![NAME, NAME];
+        shows.extend([Show::Portrait { p: 7 }; 3]);
+        let (_, c) = run(&shows, &[]);
+        assert_eq!(c[2], Some(Confidence::PostRoll));
     }
 
     #[test]
