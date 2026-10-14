@@ -30,7 +30,7 @@ policy and the commit conventions.
 | `crates/blurrd-video`   | FFmpeg probing, decoding, seeking and the render (encode, mux); the only `unsafe` crate. |
 | `crates/blurrd-detect`  | HUD and screen detectors with their temporal models, pixel classes, morphology.          |
 | `crates/blurrd-ocr`     | OCR for the verification: PP-OCRv5 detection and recognition on ONNX Runtime.            |
-| `crates/blurrd-engine`  | The jobs shared by the CLI and the desktop app (so far: the OCR name dictionary).        |
+| `crates/blurrd-engine`  | Jobs of the CLI and the app: analysis pipeline, tracks, OCR name dictionary, cache.      |
 | `crates/blurrd-cli`     | The `blurrd` command-line tool (see [cli.md](cli.md)).                                   |
 | `crates/blurrd-testkit` | Development only: synthetic HUD fixtures with ground truth, quality metrics, proposals.  |
 | `xtask`                 | Developer tasks, run with `cargo xtask <task>` (`cargo xtask help` lists them).          |

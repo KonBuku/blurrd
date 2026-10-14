@@ -230,6 +230,12 @@ impl I420Frame {
         }
     }
 
+    /// The Y, U and V planes, each packed without padding (chroma planes
+    /// are `width.div_ceil(2)` samples wide), for writing test clips.
+    pub fn planes(&self) -> [&[u8]; 3] {
+        [&self.y, &self.u, &self.v]
+    }
+
     /// A writable view for [`blurrd_blur::BlurBackend::blur`].
     pub fn as_frame_mut(&mut self) -> YuvFrameMut<'_> {
         let (cw, ch) = (self.width.div_ceil(2), self.height.div_ceil(2));

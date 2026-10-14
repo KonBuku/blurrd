@@ -25,6 +25,7 @@ use blurrd_ocr::{
     CropDedup, NameDictionary, OcrEngine, OcrError, OcrRead, RgbView, Whitelist, ZoneId, ZoneSpec,
     fold,
 };
+use serde::Serialize;
 
 /// The left HUD panel (voice chat and text chat) of plan 5.4, in reference
 /// pixels of a 1920 × 1080 frame.
@@ -113,7 +114,7 @@ pub fn protected_zones(geometry: &HudGeometry, width: u32, height: u32) -> Vec<P
 }
 
 /// Counters of pass 0. They hold no text and nothing derived from text.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
 pub struct Pass0Stats {
     /// Whole frames passed to [`DictionaryBuilder::push_frame`].
     pub frames: u64,

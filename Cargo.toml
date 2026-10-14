@@ -19,6 +19,8 @@ publish = false
 # Text rendering of the synthetic HUD fixtures (blurrd-testkit).
 ab_glyph = "=0.2.32"
 anyhow = "=1.0.104"
+# Video fingerprints for the project cache (blurrd-engine).
+blake3 = "=1.8.7"
 blurrd-blur = { path = "crates/blurrd-blur" }
 blurrd-core = { path = "crates/blurrd-core" }
 blurrd-detect = { path = "crates/blurrd-detect" }
@@ -51,6 +53,8 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 sha2 = "=0.11.0"
 thiserror = "=2.0.21"
+# `CancellationToken` for jobs (blurrd-engine).
+tokio-util = { version = "=0.7.19", default-features = false }
 toml = "=1.1.6"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = [
@@ -130,4 +134,9 @@ opt-level = 2
 # detector suites run hundreds of frames, so keep them fast in debug
 # builds as well.
 [profile.dev.package.blurrd-detect]
+opt-level = 2
+
+# The analysis cuts, converts and resamples the HUD crops of every frame;
+# its tests analyse whole synthetic recordings.
+[profile.dev.package.blurrd-engine]
 opt-level = 2
