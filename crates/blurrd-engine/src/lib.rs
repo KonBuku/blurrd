@@ -14,6 +14,10 @@
 //!   project's (fingerprint, timestamps from the cached PTS table,
 //!   keyframes), blurs every frame's boxes and encodes the export, named
 //!   `*_UNVERIFIED` while the project is not verified.
+//! - [`Engine::run`]: analysis and render in one streaming job. The render
+//!   decoder trails the analysis decoder and blurs each frame once its
+//!   boxes are final, so the output equals an analysis followed by a
+//!   render.
 //! - [`dictionary`]: pass 0 of the verification, the in-memory name
 //!   dictionary built by OCR over the protected zones of the source.
 //!
@@ -34,9 +38,11 @@ mod hud;
 mod job;
 mod render;
 mod resample;
+mod run;
 
 pub use analysis::{Analysis, AnalyzeReport, AnalyzeRequest, LOOKAHEAD_MAX};
 pub use dictionary::{DictionaryBuilder, Pass0Stats, ProtectedZone, ZoneKind, protected_zones};
 pub use engine::{Engine, EngineConfig, OcrSetup, PoolSizes, default_cache_dir};
 pub use job::{CancellationToken, ProgressSink};
 pub use render::{FallbackReport, RenderReport, RenderRequest, SkippedReport};
+pub use run::{RunReport, RunRequest};

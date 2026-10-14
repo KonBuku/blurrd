@@ -223,3 +223,36 @@ pub fn boxes_on_portraits(
     }
     out
 }
+
+/// The SHA-256 of the video stream of `path`: every packet's timestamps,
+/// keyframe flag and data, in file order. Two files with the same digest
+/// hold the same encoded video, whatever their container headers say.
+pub fn video_stream_digest(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let mut input = format::input(path).unwrap();
+    let index = input
+        .streams()
+        .best(ffmpeg_the_third::media::Type::Video)
+        .unwrap()
+        .index();
+    let mut hash = Sha256::new();
+    let mut packets = 0u32;
+    for (stream, packet) in input.packets().map(Result::unwrap) {
+        if stream.index() != index {
+            continue;
+        }
+        packets += 1;
+        hash.update(packet.pts().unwrap_or(i64::MIN).to_le_bytes());
+        hash.update(packet.dts().unwrap_or(i64::MIN).to_le_bytes());
+        hash.update([u8::from(packet.is_key())]);
+        hash.update(packet.data().unwrap_or_default());
+    }
+    hash.update(packets.to_le_bytes());
+    hash.finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, b| {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
+}

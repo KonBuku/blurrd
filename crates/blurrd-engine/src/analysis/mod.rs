@@ -4,7 +4,7 @@ mod frame;
 mod pass0;
 mod pipeline;
 mod stages;
-mod tracks;
+pub(crate) mod tracks;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -22,6 +22,7 @@ use serde::Serialize;
 use self::frame::Cropper;
 use self::pass0::Pass0;
 use self::pipeline::Pipeline;
+use self::tracks::TrackBuilder;
 use crate::cache::{self, ProjectDir};
 use crate::dictionary::Pass0Stats;
 use crate::engine::Engine;
@@ -232,6 +233,22 @@ impl Engine {
 
     fn analyze_job(&self, req: &AnalyzeRequest, job: &Job<'_>) -> Result<Analysis, AppError> {
         let prepared = self.prepare_analysis(&req.input, req.verify, job)?;
+        let expected = expected_frames(&prepared.info);
+        job.started(JobKind::Analyze, expected);
+        self.run_analysis(req, prepared, job, Some(expected), &mut |_, _| {})
+    }
+
+    /// Runs the prepared analysis of `req` and saves the project and the
+    /// PTS table in the cache. `progress` and `on_frame` as for
+    /// [`Pipeline`].
+    pub(crate) fn run_analysis(
+        &self,
+        req: &AnalyzeRequest,
+        prepared: Prepared,
+        job: &Job<'_>,
+        progress: Option<u32>,
+        on_frame: &mut dyn FnMut(u32, &TrackBuilder),
+    ) -> Result<Analysis, AppError> {
         let Prepared {
             info,
             fingerprint,
@@ -242,8 +259,6 @@ impl Engine {
             pass0,
         } = prepared;
         let decoder = decoder_name(decode.hw);
-        let expected = expected_frames(&info);
-        job.started(JobKind::Analyze, expected);
         job.stage(Stage::Detect);
         let pipeline = Pipeline {
             input: &req.input,
@@ -253,9 +268,9 @@ impl Engine {
             sources: stages::sources(req.regions),
             pass0,
             pools: self.config().pools,
-            expected_frames: expected,
+            progress,
         };
-        let output = pipeline.run(job)?;
+        let output = pipeline.run(job, on_frame)?;
         if let Some(reason) = &output.pass0_error {
             job.warning(
                 WarningCode::OcrUnavailable,

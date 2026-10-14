@@ -14,7 +14,10 @@
 
 use std::collections::HashMap;
 
-use blurrd_core::{Confidence, NameKind, RectI, Region, Segment, Track, TrackId, TrackSource};
+use blurrd_core::{
+    BlurBox, BlurPlan, Confidence, NameKind, RectI, Region, RegionSet, Segment, Track, TrackId,
+    TrackSource,
+};
 
 /// Smallest overlap (intersection over union) with which a box continues
 /// an overlap-linked track of the previous frame.
@@ -223,6 +226,53 @@ impl TrackBuilder {
         }
     }
 
+    /// The boxes the finished plan has on the last frame pushed, in its
+    /// order, for the `enabled` regions (written into `out`, cleared
+    /// first).
+    pub(crate) fn boxes_at(&self, enabled: RegionSet, out: &mut Vec<BlurBox>) {
+        out.clear();
+        if self.frame.is_none() {
+            return;
+        }
+        // A one-frame plan of the active tracks, each reduced to its box on
+        // this frame with the same block grid origin: `frame_table` then
+        // derives every box exactly as it will from the full tracks.
+        let tracks = self
+            .active
+            .iter()
+            .filter_map(|&t| {
+                let track = &self.tracks[t];
+                let state = &self.states[t];
+                let segment = track.segments.last()?;
+                let grid = (
+                    state.anchor.0 + i32::from(segment.text_offset.0),
+                    state.anchor.1 + i32::from(segment.text_offset.1),
+                );
+                Some(Track {
+                    id: track.id,
+                    region: track.region,
+                    kind: track.kind,
+                    source: track.source,
+                    segments: vec![Segment {
+                        f0: 0,
+                        f1: 0,
+                        text_offset: (
+                            clamp_i16(grid.0 - segment.rect.x0),
+                            clamp_i16(grid.1 - segment.rect.y0),
+                        ),
+                        ..*segment
+                    }],
+                })
+            })
+            .collect();
+        let plan = BlurPlan {
+            frame_count: 1,
+            tracks,
+            overrides: Vec::new(),
+        };
+        out.extend_from_slice(plan.frame_table(&enabled).boxes(0));
+    }
+
     /// The tracks, in id order.
     pub(crate) fn finish(self) -> Vec<Track> {
         self.tracks
@@ -317,9 +367,14 @@ mod tests {
 
     #[test]
     fn tracks_follow_identities_episodes_and_overlaps() {
+        let enabled = RegionSet::all();
         let mut builder = TrackBuilder::new();
+        let mut streamed = Vec::new();
+        let mut boxes = Vec::new();
         for frame in 0..60 {
             builder.push(frame, &scene(frame));
+            builder.boxes_at(enabled, &mut boxes);
+            streamed.push(boxes.clone());
         }
         let plan = BlurPlan {
             frame_count: 60,
@@ -327,9 +382,11 @@ mod tests {
             overrides: Vec::new(),
         };
         assert_eq!(plan.validate(1920, 1080), Ok(()));
-        // Every frame of the plan blurs exactly the boxes pushed for it.
-        let table = plan.frame_table(&RegionSet::all());
-        for frame in 0..60 {
+        // Every frame of the plan blurs exactly the boxes pushed for it, and
+        // exactly the boxes the builder gave while streaming.
+        let table = plan.frame_table(&enabled);
+        for (frame, boxes) in (0..).zip(&streamed) {
+            assert_eq!(table.boxes(frame), boxes.as_slice(), "frame {frame}");
             let mut planned: Vec<RectI> = table.boxes(frame).iter().map(|b| b.rect).collect();
             let mut pushed: Vec<RectI> = scene(frame).iter().map(|b| b.rect).collect();
             planned.sort_by_key(|r| (r.x0, r.y0, r.x1, r.y1));

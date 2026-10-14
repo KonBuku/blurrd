@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use blurrd_blur::{CpuBlur, PixelParams};
 use blurrd_core::{
-    AppError, EncoderInfo, EncoderSetting, ErrorKind, ExportSettings, JobEvent, JobId, JobKind,
-    JobSummary, MediaInfo, Project, Stage, VerifyState, WarningCode,
+    AppError, BlurParams, EncoderInfo, EncoderSetting, ErrorKind, ExportSettings, JobEvent, JobId,
+    JobKind, JobSummary, MediaInfo, Project, Stage, VerifyState, WarningCode,
 };
 use blurrd_video::{
     BoxSource, DecodeOptions, DecodePurpose, DecoderChoice, EncodeOptions, HwDecode, MoovLayout,
@@ -107,6 +107,22 @@ pub struct RenderReport {
     pub moov: &'static str,
 }
 
+/// What a render writes and how.
+pub(crate) struct RenderTarget<'a> {
+    /// The output path as requested (before `_UNVERIFIED` naming).
+    pub(crate) output: &'a Path,
+    /// The export settings.
+    pub(crate) export: &'a ExportSettings,
+    /// Whether the boxes are verified (or the user accepted them).
+    pub(crate) verified: bool,
+    /// The blur parameters.
+    pub(crate) blur: &'a BlurParams,
+    /// The HUD scale of the video (block sizes scale with it).
+    pub(crate) sy: f32,
+    /// What the decoder choice optimises for.
+    pub(crate) decode: DecodePurpose,
+}
+
 /// A render, ready to run: the transcoder is open (encoder chosen), the
 /// blur parameters are known.
 pub(crate) struct PreparedRender {
@@ -146,6 +162,17 @@ impl Engine {
     }
 
     fn render_job(&self, req: &RenderRequest, job: &Job<'_>) -> Result<RenderReport, AppError> {
+        self.render_project(req, job, Some(JobKind::Render))
+    }
+
+    /// Checks and renders `req`, announcing the job as `started` (if
+    /// given) once the frame count is known.
+    pub(crate) fn render_project(
+        &self,
+        req: &RenderRequest,
+        job: &Job<'_>,
+        started: Option<JobKind>,
+    ) -> Result<RenderReport, AppError> {
         job.stage(Stage::Probe);
         let probe = self.start_encoder_probe(&req.export);
         let fingerprint = cache::fingerprint(&req.input)?;
@@ -161,7 +188,18 @@ impl Engine {
             .project
             .plan()
             .frame_table(&req.project.detector.regions);
-        let prepared = self.prepare_render(req, &info, Arc::new(pts), probe, job)?;
+        if let Some(kind) = started {
+            job.started(kind, pts.len());
+        }
+        let target = RenderTarget {
+            output: &req.output,
+            export: &req.export,
+            verified: is_verified(&req.project) || req.accept_unverified,
+            blur: &req.project.blur,
+            sy: req.project.geometry.sy,
+            decode: DecodePurpose::Throughput,
+        };
+        let prepared = self.prepare_render(&target, &info, Arc::new(pts), probe, job)?;
         transcode(prepared, &table, job)
     }
 
@@ -190,64 +228,58 @@ impl Engine {
         Ok(blurrd_video::pts_table(input)?)
     }
 
-    /// Checks the request, names the output and opens the transcoder for
-    /// a video `info` with the PTS table `pts`.
+    /// Checks `target`, names the output and opens the transcoder for a
+    /// video `info` with the PTS table `pts`.
     pub(crate) fn prepare_render(
         &self,
-        req: &RenderRequest,
+        target: &RenderTarget<'_>,
         info: &MediaInfo,
         pts: Arc<PtsTable>,
         probe: Option<std::thread::JoinHandle<Vec<EncoderInfo>>>,
         job: &Job<'_>,
     ) -> Result<PreparedRender, AppError> {
-        if let Some(problem) = req.export.problem() {
+        if let Some(problem) = target.export.problem() {
             return Err(AppError::new(
                 ErrorKind::InvalidProject,
                 "The export settings are invalid.",
             )
             .with_detail(problem));
         }
-        self.check_output(&req.output)?;
-        let verified = is_verified(&req.project) || req.accept_unverified;
-        let output = if verified {
-            req.output.clone()
+        self.check_output(target.output)?;
+        let output = if target.verified {
+            target.output.to_path_buf()
         } else {
-            unverified_name(&req.output)
+            unverified_name(target.output)
         };
         let config = self.config();
-        let mut encode = EncodeOptions::from_export(&req.export);
+        let mut encode = EncodeOptions::from_export(target.export);
         encode.gpu = config.gpu;
         if let Some(probe) = probe {
             encode.probed = probe.join().unwrap_or_default();
         }
         let mut decode = DecodeOptions::with_hw(if config.gpu {
-            DecoderChoice::resolve(info, &self.caps_dir(), DecodePurpose::Throughput)
+            DecoderChoice::resolve(info, &self.caps_dir(), target.decode)
         } else {
             HwDecode::Software
         });
         decode.threads = config.decoder_threads;
         let colour = VideoColour::from_info(&info.color, info.height);
-        let params = PixelParams::new(
-            &req.project.blur,
-            req.project.geometry.sy,
-            colour.yuv_colour(),
-        )
-        .map_err(|e| {
-            AppError::new(
-                ErrorKind::InvalidProject,
-                "The project's blur settings are invalid.",
-            )
-            .with_detail(e.to_string())
-        })?;
+        let params =
+            PixelParams::new(target.blur, target.sy, colour.yuv_colour()).map_err(|e| {
+                AppError::new(
+                    ErrorKind::InvalidProject,
+                    "The project's blur settings are invalid.",
+                )
+                .with_detail(e.to_string())
+            })?;
         let total = pts.len();
-        job.started(JobKind::Render, total);
         let transcoder = Transcoder::open(
             info,
             pts,
             &output,
             &decode,
             &encode,
-            MuxOptions::from_export(&req.export),
+            MuxOptions::from_export(target.export),
         )?;
         for fallback in transcoder.fallbacks() {
             job.warning(
@@ -262,7 +294,7 @@ impl Engine {
         Ok(PreparedRender {
             transcoder,
             params,
-            verified,
+            verified: target.verified,
             total,
         })
     }

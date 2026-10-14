@@ -70,8 +70,10 @@ pub(crate) struct Pipeline<'a> {
     pub(crate) pass0: Option<Pass0>,
     /// Pool and queue sizes.
     pub(crate) pools: PoolSizes,
-    /// Frames the video is expected to have (for progress).
-    pub(crate) expected_frames: u32,
+    /// Report progress, with the number of frames the video is expected
+    /// to have; `None` when another part of the job reports it (the
+    /// render of a streaming run).
+    pub(crate) progress: Option<u32>,
 }
 
 /// The first error of any thread, and the flag that stops them all.
@@ -129,8 +131,14 @@ fn send<T>(tx: &Sender<T>, mut value: T, control: &Control) -> bool {
 }
 
 impl Pipeline<'_> {
-    /// Runs the pipeline to the end of the video.
-    pub(crate) fn run(self, job: &Job<'_>) -> Result<PipelineOutput, AppError> {
+    /// Runs the pipeline to the end of the video. `on_frame` is called on
+    /// the calling thread for every frame, in order, as soon as its boxes
+    /// are final, with the track builder that holds them.
+    pub(crate) fn run(
+        self,
+        job: &Job<'_>,
+        on_frame: &mut dyn FnMut(u32, &TrackBuilder),
+    ) -> Result<PipelineOutput, AppError> {
         let Self {
             input,
             decode,
@@ -139,7 +147,7 @@ impl Pipeline<'_> {
             sources,
             pass0,
             pools,
-            expected_frames,
+            progress,
         } = self;
         let control = Control::default();
         let workers = pools.crop_workers.max(1);
@@ -188,7 +196,7 @@ impl Pipeline<'_> {
             drop((emit_tx, signal_tx));
             let pass0 = pass0
                 .map(|pass0| scope.spawn(move || pass0.run(&pass0_rx, &signal_rx, hud_stages)));
-            let collected = collect(&emit_rx, sources, expected_frames, job, control);
+            let collected = collect(&emit_rx, sources, progress, job, control, on_frame);
             let pts = decoder.join().unwrap_or_default();
             let pass0 = pass0.map(|handle| {
                 handle
@@ -196,14 +204,16 @@ impl Pipeline<'_> {
                     .unwrap_or_else(|_| Err(String::from("the OCR worker panicked")))
             });
             let (tracks, max_delay) =
-                collected.finish(u32::try_from(pts.len()).unwrap_or(u32::MAX));
+                collected.finish(u32::try_from(pts.len()).unwrap_or(u32::MAX), on_frame);
             (pts, tracks, max_delay, pass0)
         });
         if let Some(error) = control.into_error() {
             return Err(error);
         }
-        let frames = u32::try_from(pts.len()).unwrap_or(u32::MAX);
-        job.progress(frames, frames);
+        if progress.is_some() {
+            let frames = u32::try_from(pts.len()).unwrap_or(u32::MAX);
+            job.progress(frames, frames);
+        }
         let (pass0, pass0_error) = match pass0_result {
             Some(Ok(stats)) => (Some(stats), None),
             Some(Err(reason)) => (None, Some(reason)),
@@ -333,8 +343,8 @@ impl Collector {
         }
     }
 
-    /// Hands every frame before `until` to the builder.
-    fn advance(&mut self, until: u32) {
+    /// Hands every frame before `until` to the builder and `on_frame`.
+    fn advance(&mut self, until: u32, on_frame: &mut dyn FnMut(u32, &TrackBuilder)) {
         while self.next < until {
             let frame = self.next;
             self.boxes.clear();
@@ -344,6 +354,7 @@ impl Collector {
                 }
             }
             self.builder.push(frame, &self.boxes);
+            on_frame(frame, &self.builder);
             self.next += 1;
         }
     }
@@ -360,8 +371,12 @@ impl Collector {
     }
 
     /// Flushes the remaining frames of a `frames`-frame video.
-    fn finish(mut self, frames: u32) -> (Vec<Track>, u32) {
-        self.advance(frames);
+    fn finish(
+        mut self,
+        frames: u32,
+        on_frame: &mut dyn FnMut(u32, &TrackBuilder),
+    ) -> (Vec<Track>, u32) {
+        self.advance(frames, on_frame);
         (self.builder.finish(), self.max_delay)
     }
 }
@@ -371,9 +386,10 @@ impl Collector {
 fn collect(
     emitted: &Receiver<Emitted>,
     sources: [bool; SOURCES],
-    expected_frames: u32,
+    progress: Option<u32>,
     job: &Job<'_>,
     control: &Control,
+    on_frame: &mut dyn FnMut(u32, &TrackBuilder),
 ) -> Collector {
     let mut collector = Collector {
         sources,
@@ -393,8 +409,10 @@ fn collect(
         // the end of the video flushes them.
         let until = collector.until();
         if until != u32::MAX {
-            collector.advance(until);
-            job.progress(collector.next, expected_frames.max(collector.next));
+            collector.advance(until, on_frame);
+            if let Some(expected) = progress {
+                job.progress(collector.next, expected.max(collector.next));
+            }
         }
     }
     if job.is_canceled() {
