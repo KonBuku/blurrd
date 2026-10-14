@@ -442,7 +442,7 @@ impl Transcoder {
                         scheduler,
                         session: index,
                     };
-                    scope.spawn(move || control.guard(decode.run(&frame_tx, cancel, control)));
+                    scope.spawn(move || control.guard(decode.finish(&frame_tx, cancel, control)));
                     scope.spawn(move || {
                         let stage = EncodeStage {
                             encoder,
@@ -452,7 +452,7 @@ impl Transcoder {
                             blur,
                             params,
                         };
-                        control.guard(stage.run(&frame_rx, &packet_tx, control))
+                        control.guard(stage.finish(&frame_rx, &packet_tx, control))
                     })
                 })
                 .collect();
@@ -729,6 +729,24 @@ fn check_frame(frame: &VideoFrame, pts: &PtsTable) -> Result<(), VideoError> {
     }
 }
 
+/// Frees a session's decoder or encoder. After a cancellation or a
+/// failure it is freed on a thread of its own: closing a GPU decoder or
+/// encoder session takes tens of milliseconds, and the job should end as
+/// soon as its stages stopped (plan M14: cancel in under 100 ms). The
+/// output file does not depend on it, so nothing is left behind.
+fn release<T: Send + 'static>(resource: T, stopped_early: bool) {
+    if !stopped_early {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name(String::from("blurrd-release"))
+        .spawn(move || drop(resource));
+    if let Err(error) = spawned {
+        // The resource went down with the failed spawn's closure.
+        tracing::debug!(%error, "freed a session on the job's thread");
+    }
+}
+
 /// A frame for the encoder, and whether it must become a keyframe.
 struct Work {
     frame: VideoFrame,
@@ -760,8 +778,20 @@ struct DecodeStage<'a> {
 }
 
 impl DecodeStage<'_> {
-    fn run(
+    /// Runs the stage, then frees its decoder.
+    fn finish(
         mut self,
+        frames: &Sender<Work>,
+        cancel: &(dyn Fn() -> bool + Sync),
+        control: &Control,
+    ) -> Result<(), VideoError> {
+        let result = self.run(frames, cancel, control);
+        release(self.decoder, result.is_err() || control.aborted());
+        result
+    }
+
+    fn run(
+        &mut self,
         frames: &Sender<Work>,
         cancel: &(dyn Fn() -> bool + Sync),
         control: &Control,
@@ -851,9 +881,21 @@ struct EncodeStage<'a> {
 }
 
 impl EncodeStage<'_> {
+    /// Runs the stage, then frees its encoder.
+    fn finish(
+        mut self,
+        frames: &Receiver<Work>,
+        packets: &Sender<EncodedPacket>,
+        control: &Control,
+    ) -> Result<BlurStats, VideoError> {
+        let result = self.run(frames, packets, control);
+        release(self.encoder, result.is_err() || control.aborted());
+        result
+    }
+
     /// Encodes every frame from `frames`.
     fn run(
-        mut self,
+        &mut self,
         frames: &Receiver<Work>,
         packets: &Sender<EncodedPacket>,
         control: &Control,
@@ -894,6 +936,11 @@ impl EncodeStage<'_> {
             if !self.drain(packets)? {
                 return Ok(blurred);
             }
+        }
+        // The decode stage also ends the queue when it stopped early; the
+        // frames still inside the encoder are not wanted then.
+        if control.aborted() {
+            return Ok(blurred);
         }
         self.encoder.flush()?;
         self.drain(packets)?;
