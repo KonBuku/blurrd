@@ -14,18 +14,20 @@
 //! render reaches the frame. The render never blurs a frame whose boxes
 //! are not final: it waits for them (back-pressure), so it trails the
 //! analysis by at least the look-ahead. The output is therefore exactly
-//! the output of an analysis followed by a render of its project.
+//! the output of an analysis followed by a render of its project. The
+//! render reads the PTS table and opens its decoders and encoders on its
+//! own thread, so the analysis starts right away.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use blurrd_core::{
-    AppError, BlurBox, BlurParams, ErrorKind, ExportSettings, JobEvent, JobId, JobKind, JobSummary,
-    RegionSet, VerifyState,
+    AppError, BlurBox, BlurParams, EncoderInfo, ErrorKind, ExportSettings, JobEvent, JobId,
+    JobKind, JobSummary, MediaInfo, RegionSet, VerifyState,
 };
-use blurrd_video::{BoxSource, DecodePurpose, HwDecode, VideoError};
+use blurrd_video::{BoxSource, DecodePurpose, HwDecode, PtsTable, VideoError};
 use serde::Serialize;
 
 use crate::analysis::{AnalyzeReport, AnalyzeRequest, expected_frames};
@@ -96,7 +98,6 @@ pub struct RunReport {
 /// The boxes of the frames the analysis made final, until the render
 /// takes them. Frames without boxes are not stored.
 struct BoxStore<'a> {
-    frames: u32,
     state: Mutex<StoreState>,
     changed: Condvar,
     cancel: &'a CancellationToken,
@@ -112,9 +113,8 @@ struct StoreState {
 }
 
 impl<'a> BoxStore<'a> {
-    fn new(frames: u32, cancel: &'a CancellationToken) -> Self {
+    fn new(cancel: &'a CancellationToken) -> Self {
         Self {
-            frames,
             state: Mutex::new(StoreState::default()),
             changed: Condvar::new(),
             cancel,
@@ -141,11 +141,26 @@ impl<'a> BoxStore<'a> {
     }
 }
 
-impl BoxSource for BoxStore<'_> {
+/// The box store as the render's box source, for a video of `frames`
+/// frames (known once the render read the PTS table).
+struct StoreSource<'s, 'a> {
+    store: &'s BoxStore<'a>,
+    frames: u32,
+}
+
+impl BoxSource for StoreSource<'_, '_> {
     fn frame_count(&self) -> u32 {
         self.frames
     }
 
+    fn boxes_into(&self, frame: u32, out: &mut Vec<BlurBox>) -> Result<(), VideoError> {
+        self.store.boxes_into(frame, out)
+    }
+}
+
+impl BoxStore<'_> {
+    /// The boxes of `frame`, once it is final; fails when the analysis
+    /// ended before it or the job was canceled.
     fn boxes_into(&self, frame: u32, out: &mut Vec<BlurBox>) -> Result<(), VideoError> {
         out.clear();
         let mut state = self.state.lock().map_err(|_| VideoError::Canceled)?;
@@ -255,12 +270,6 @@ impl Engine {
         }
 
         let probe = self.start_encoder_probe(&req.export);
-        // The render needs the PTS table before the analysis has decoded
-        // the video: one pass over the container's packets. The render
-        // checks every decoded frame against it, and the analysis' own
-        // table must equal it.
-        let pts = Arc::new(blurrd_video::pts_table(&req.input)?);
-        job.started(JobKind::Run, pts.len());
         let info = prepared.info.clone();
         // The render decoder takes the other decoder than the analysis
         // where that is not much slower, to share the work between CPU and
@@ -280,11 +289,12 @@ impl Engine {
             sy: prepared.geometry.sy,
             decode,
         };
-        let render = self.prepare_render(&target, &info, Arc::clone(&pts), probe, job)?;
-        let store = BoxStore::new(pts.len(), inner);
+        let store = BoxStore::new(inner);
         let (analysis, rendered) = std::thread::scope(|scope| {
+            // The render reads the PTS table and opens its decoders and
+            // encoders while the analysis already runs.
             let render_thread = scope.spawn(|| {
-                let rendered = transcode(render, &store, job);
+                let rendered = self.render_streamed(&req.input, &target, &info, probe, &store, job);
                 if rendered.is_err() {
                     inner.cancel();
                 }
@@ -303,10 +313,10 @@ impl Engine {
             };
             (analysis, rendered)
         });
-        let (analysis, rendered) = match (analysis, rendered) {
+        let (analysis, (rendered, pts)) = match (analysis, rendered) {
             (Ok(analysis), Ok(rendered)) => (analysis, rendered),
             (analysis, rendered) => {
-                if let Ok(rendered) = &rendered {
+                if let Ok((rendered, _)) = &rendered {
                     // The analysis failed after the last frame (saving the
                     // project): no output without its project.
                     let _ = std::fs::remove_file(&rendered.output);
@@ -334,6 +344,31 @@ impl Engine {
             elapsed_ms: elapsed_ms(job),
         })
     }
+
+    /// The render side of a streaming run. It reads the PTS table from
+    /// the container, as the analysis has not decoded the video yet (the
+    /// render checks every decoded frame against it, and the run compares
+    /// it with the analysis' own table), starts the job with its frame
+    /// count (the analysis reports no progress in a run), opens the render
+    /// and blurs each frame as soon as its boxes are final.
+    fn render_streamed(
+        &self,
+        input: &Path,
+        target: &RenderTarget<'_>,
+        info: &MediaInfo,
+        probe: Option<std::thread::JoinHandle<Vec<EncoderInfo>>>,
+        store: &BoxStore<'_>,
+        job: &Job<'_>,
+    ) -> Result<(RenderReport, Arc<PtsTable>), AppError> {
+        let pts = Arc::new(blurrd_video::pts_table(input)?);
+        job.started(JobKind::Run, pts.len());
+        let render = self.prepare_render(target, info, Arc::clone(&pts), probe, job)?;
+        let source = StoreSource {
+            store,
+            frames: pts.len(),
+        };
+        Ok((transcode(render, &source, job)?, pts))
+    }
 }
 
 /// The error to report when the analysis or the render failed: a real
@@ -358,7 +393,7 @@ mod tests {
     use blurrd_core::{AppError, BlurBox, ErrorKind, RectI, Region};
     use blurrd_video::{BoxSource, VideoError};
 
-    use super::{BoxStore, first_error};
+    use super::{BoxStore, StoreSource, first_error};
     use crate::CancellationToken;
 
     fn boxed(x: i32) -> BlurBox {
@@ -374,7 +409,7 @@ mod tests {
     #[test]
     fn the_store_hands_out_final_frames_and_waits_for_the_rest() {
         let cancel = CancellationToken::new();
-        let store = BoxStore::new(3, &cancel);
+        let store = BoxStore::new(&cancel);
         let mut out = vec![boxed(99)];
         std::thread::scope(|scope| {
             let render = scope.spawn(|| {
@@ -392,8 +427,14 @@ mod tests {
             let got = render.join().unwrap();
             assert_eq!(got, [vec![boxed(1)], vec![], vec![boxed(2), boxed(3)]]);
         });
+        // The render reads it as a box source of the video's length.
+        let source = StoreSource {
+            store: &store,
+            frames: 3,
+        };
+        assert_eq!(source.frame_count(), 3);
         // Taken frames are gone; frames after the end never come.
-        store.boxes_into(0, &mut out).unwrap();
+        source.boxes_into(0, &mut out).unwrap();
         assert_eq!(out, []);
         store.close();
         assert!(matches!(
@@ -401,7 +442,7 @@ mod tests {
             Err(VideoError::Canceled)
         ));
         let cancel = CancellationToken::new();
-        let store = BoxStore::new(3, &cancel);
+        let store = BoxStore::new(&cancel);
         cancel.cancel();
         assert!(matches!(
             store.boxes_into(0, &mut out),
