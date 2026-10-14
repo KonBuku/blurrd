@@ -962,6 +962,37 @@ fn finds_open_chat_names_too_faint_to_see_in_greyscale() {
 }
 
 #[test]
+fn finds_dim_open_chat_names_with_a_grey_message() {
+    // Greyscale and a darkening filter over the open chat: coloured names
+    // and prefixes drop below the stroke contrast, and the message is a
+    // mid grey, no longer as bright as the line's whitest strokes. The
+    // colon still ends the name (measured on a real open chat: a dim name
+    // unblurred for 20 frames).
+    for (b, background) in BACKGROUNDS.into_iter().enumerate() {
+        for brightness in [-0.1, -0.2] {
+            let mut rng = Rng::new(995 + b as u64);
+            let fonts = FontSet::latin();
+            let fx = Scene::new(Layout::reference(), background, Palette::DEFAULT, 200)
+                .with_chat(&fonts, open_chat(&mut rng, Language::English))
+                .render(160);
+            let grey = Filter::Saturation(0.0).region(&fx.frame, LEFT_PANEL_ROI);
+            let dark = Filter::Levels {
+                brightness,
+                contrast: 1.0,
+            };
+            let fx = Fixture {
+                frame: dark.region(&grey, LEFT_PANEL_ROI),
+                ..fx
+            };
+            let check = check_frame(&fx);
+            let context = format!("background {b}, brightness {brightness}");
+            check.assert_clean(&context);
+            assert_eq!(check.detections.len(), 8, "{context}");
+        }
+    }
+}
+
+#[test]
 fn tracker_covers_the_open_chat() {
     // Every history line is covered from the frame the chat opens until it
     // closes, through the pushes of new messages; the typed text is not.

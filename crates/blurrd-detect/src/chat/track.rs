@@ -96,9 +96,13 @@ const FADE_STEP: f32 = 0.2;
 /// for the widest name.
 pub const HOLD_MAX: u32 = 30;
 /// Frames a line stays covered after its part of the box was last seen.
-/// The text outlasts the box edge by at most 3 frames on recordings; this
-/// also bridges frames where a bright background hides the box edge.
-pub const POST_ROLL: u32 = 6;
+/// The text outlasts the box edge by at most 3 frames on unfiltered
+/// recordings; filters that raise the contrast of faint text (sharpening,
+/// saturation, colour balance) keep it readable up to 4 frames after a
+/// post-roll of 6 (measured on the full OCR sweep), so the post-roll is
+/// 10. It also bridges frames where a bright background hides the box
+/// edge.
+pub const POST_ROLL: u32 = 10;
 /// Frames the text of a line can outlast its part of the box while both
 /// fade (the whole fade takes up to 23 frames on recordings): the line is
 /// held while its text is seen for this long after the box.

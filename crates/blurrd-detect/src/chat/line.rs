@@ -17,6 +17,9 @@ const INK_MIN: u8 = 40;
 /// coloured names lose most of their contrast in greyscale and darkened
 /// video, while the white message keeps it and finds the line.
 const READ_MIN: u8 = 24;
+/// Faint lines are read only in box bands at most this bright relative to
+/// the frame next to them: the solid box (about 0.66), not a fading one.
+const FAINT_BAND_RATIO: f32 = 0.8;
 /// A text row has at least this many stroke pixels.
 const ROW_MIN_INK: u32 = 3;
 /// Rows of a line before trimming.
@@ -169,6 +172,8 @@ pub(super) struct LineScratch {
     /// The top-hat of every pixel of the ink area, row after row.
     levels: Vec<u8>,
     profile: Vec<u32>,
+    /// Stroke pixels per row above [`READ_MIN`] (faint lines).
+    faint: Vec<u32>,
 }
 
 impl Default for LineScratch {
@@ -178,6 +183,7 @@ impl Default for LineScratch {
             area: ink_rect(SEARCH_Y.1),
             levels: Vec::new(),
             profile: Vec::new(),
+            faint: Vec::new(),
         }
     }
 }
@@ -202,6 +208,17 @@ impl LineScratch {
         self.area = ink_rect(top.clamp(SEARCH_Y.0, SEARCH_Y.1 - 1));
         self.strokes
             .stroke_levels(crop, origin, self.area, &mut self.levels);
+    }
+
+    /// Replaces `out` with the stroke pixels of each row of the ink area:
+    /// pixels with a top-hat above `min`.
+    fn row_strokes(&self, min: u8, out: &mut Vec<u32>) {
+        out.clear();
+        out.extend(
+            self.levels
+                .chunks_exact(self.area.width() as usize)
+                .map(|row| row.iter().map(|&v| u32::from(v > min)).sum::<u32>()),
+        );
     }
 
     /// Top-hat levels of row `y` (ink-area coordinates).
@@ -245,14 +262,13 @@ pub(super) fn find_names<F>(
     let area = scratch.area;
     // Taken out of the scratch while the line test borrows the ink.
     let mut profile = std::mem::take(&mut scratch.profile);
-    profile.clear();
-    let width = area.width() as usize;
-    profile.extend(
-        scratch
-            .levels
-            .chunks_exact(width)
-            .map(|row| row.iter().map(|&v| u32::from(v > INK_MIN)).sum::<u32>()),
-    );
+    // Lines of faint strokes only (a coloured name and prefix whose message
+    // wrapped to the next line, in greyscale and downscaled video): rows
+    // with stroke pixels above READ_MIN that the INK_MIN rows miss, inside
+    // a band the box edges confirmed.
+    let mut faint = std::mem::take(&mut scratch.faint);
+    scratch.row_strokes(INK_MIN, &mut profile);
+    scratch.row_strokes(READ_MIN, &mut faint);
     let mut prev_top = i32::MIN / 2;
     // The name found in the last line, with the index of its band: emitted
     // once the next line shows whether it continues that line.
@@ -263,8 +279,9 @@ pub(super) fn find_names<F>(
         }
     };
     let mut parts = Vec::new();
-    let candidates = runs(profile.iter().map(|&p| p >= ROW_MIN_INK));
-    for run in candidates.into_iter().filter(|r| r.len() >= MIN_RUN) {
+    let candidates = line_candidates(&profile, &faint, area, bands);
+    for (run, is_faint) in candidates.into_iter().filter(|(r, _)| r.len() >= MIN_RUN) {
+        let profile: &[u32] = if is_faint { &faint } else { &profile };
         let (mut a, mut b) = (run.start, run.end - 1);
         let peak = profile[a as usize..=b as usize]
             .iter()
@@ -279,11 +296,17 @@ pub(super) fn find_names<F>(
             b -= 1;
         }
         parts.clear();
-        split_lines(&profile, a, b, &mut parts);
+        split_lines(profile, a, b, &mut parts);
         let joined = parts.len() > 2;
         for &(a, b) in &parts {
             let rows = b - a + 1;
             if !(LINE_ROWS.0..=LINE_ROWS.1).contains(&rows) {
+                continue;
+            }
+            // A faint line counts only with its prefix's opening
+            // parenthesis: texture behind the panel and the faint rows of
+            // other lines have none.
+            if is_faint && opening_paren(&LineInk::new(scratch, crop, origin, a, b)).is_none() {
                 continue;
             }
             let top = area.y0 + a as i32;
@@ -351,6 +374,40 @@ pub(super) fn find_names<F>(
     }
     flush(&mut pending);
     scratch.profile = profile;
+    scratch.faint = faint;
+}
+
+/// The runs of text rows of the ink area `area`, top to bottom, each
+/// with whether it is faint: the runs of `profile` (stroke pixels above
+/// [`INK_MIN`] per row) and the runs of `faint` (above [`READ_MIN`]) that
+/// no row of `profile` reaches and that lie in a band of the solid box
+/// (edge ratio at most [`FAINT_BAND_RATIO`]; a fading line's band fades
+/// with it, and its faint remains end with the line's post-roll).
+fn line_candidates(
+    profile: &[u32],
+    faint: &[u32],
+    area: RectI,
+    bands: &[super::BoxBand],
+) -> Vec<(Run, bool)> {
+    let confirmed = |run: &Run| {
+        let centre = area.y0 as f32 + (run.start + run.end - 1) as f32 / 2.0;
+        bands.iter().any(|band| {
+            band.ratio <= FAINT_BAND_RATIO
+                && band.y0 as f32 <= centre
+                && centre <= (band.y1 - 1) as f32
+        })
+    };
+    let faint_runs = runs(faint.iter().map(|&p| p >= ROW_MIN_INK))
+        .into_iter()
+        .filter(|r| (r.start..r.end).all(|y| profile[y as usize] < ROW_MIN_INK) && confirmed(r))
+        .map(|r| (r, true));
+    let mut candidates: Vec<(Run, bool)> = runs(profile.iter().map(|&p| p >= ROW_MIN_INK))
+        .into_iter()
+        .map(|r| (r, false))
+        .chain(faint_runs)
+        .collect();
+    candidates.sort_by_key(|(r, _)| r.start);
+    candidates
 }
 
 /// Appends the lines of the run of text rows `a..=b` to `out`, top to
@@ -733,13 +790,23 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
 
 /// Reads a line whose prefix and name are too faint to be seen (a coloured
 /// name on a bright background in greyscale video): its first glyph is the
-/// colon, followed by the white message, with at most specks of texture
+/// colon, followed by the message, with at most specks of texture
 /// ([`COLON_COLUMNS`] columns in all) before it. The name is covered from
 /// the text start to the colon, which lies at most as far in as the
 /// widest prefix and name reach.
+///
+/// The message only has to be neutral, not as bright as the line's
+/// whitest strokes: with no visible name before the colon there is no
+/// darker name glyph to tell from the message, and the message itself is
+/// the whitest text (measured: a dim name in an open chat panel under
+/// greyscale and brightness -0.1, unblurred for 20 frames because its
+/// grey message did not count as white). A candidate followed by another
+/// narrow glyph that a space separates from the message is the name's dim
+/// last letter, and the colon is that glyph (measured at 720p in
+/// greyscale: a final "s" read as the colon cut the name's box short).
 fn faint_name(line: &LineInk<'_>) -> Option<NameRead> {
-    let colours = LineColours::new(line, (0, 0));
-    let ends_name = |c: u32| colours.ends_name(line, c);
+    let neutral = |c: [u8; 3]| hue_saturation(c).1 < MIN_SATURATION;
+    let ends_name = |c: u32| LineColours::followed_by(line, c, neutral);
     let mut specks = 0;
     let mut colon = None;
     for (k, glyph) in line.strong_segments.iter().enumerate() {
@@ -747,7 +814,17 @@ fn faint_name(line: &LineInk<'_>) -> Option<NameRead> {
             return None;
         }
         if is_colon_glyph(line, k, &ends_name) {
-            colon = Some(*glyph);
+            // The dim last letter of the name can look like a colon; then
+            // the real colon is the narrow glyph after it, which a space
+            // separates from the message.
+            let segments = &line.strong_segments;
+            let after = segments.get(k + 1).filter(|next| {
+                next.len() <= COLON_COLUMNS + 1
+                    && segments
+                        .get(k + 2)
+                        .is_none_or(|word| word.start - next.end > WORD_GAP)
+            });
+            colon = Some(*after.unwrap_or(glyph));
             break;
         }
         specks += glyph.len();
@@ -807,6 +884,13 @@ impl LineColours {
     /// the name, which has the prefix colour or, in greyscale video and on
     /// bright backgrounds, is darker than the message.
     fn ends_name(&self, line: &LineInk<'_>, colon: u32) -> bool {
+        Self::followed_by(line, colon, |c| self.is_white(c))
+    }
+
+    /// Whether a space follows the colon candidate in column `colon` and
+    /// the colour of the first glyph after it passes `message` (no glyph
+    /// passes too).
+    fn followed_by(line: &LineInk<'_>, colon: u32, message: impl Fn([u8; 3]) -> bool) -> bool {
         // A space follows the colon: inside a word, the next glyph is at
         // most WORD_GAP columns away (a blurred letter of a faint name can
         // look like a colon in its high-contrast strokes).
@@ -822,7 +906,7 @@ impl LineColours {
             && (colon + COLON_COLUMNS + 1..line.width)
                 .find(|&x| (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK)
                 .and_then(|x| line.colour(x, x + GLYPH_COLUMNS))
-                .is_none_or(|c| self.is_white(c))
+                .is_none_or(message)
     }
 
     /// Where the prefix colour ends after the name start `nx0`: the last
