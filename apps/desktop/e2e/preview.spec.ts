@@ -24,6 +24,9 @@ test.describe("preview", () => {
   test("shows the selected recording blurred, before and split", async ({ page }) => {
     await openRecording(page, "D:\\Recordings\\match_ascent_01.mp4");
     expect(await canvasFrame(page)).toBe(0);
+    // The real backend serves videos from other origins (asset protocol,
+    // loopback media server): the element asks for CORS so WebGL may read it.
+    await expect(page.locator("video")).toHaveAttribute("crossorigin", "anonymous");
     // Seek to a frame with kill-feed plates through the controller's video.
     await page.evaluate(() => {
       const video = document.querySelector("video");

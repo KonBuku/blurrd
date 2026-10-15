@@ -123,6 +123,10 @@ export function VideoStage({ data, children, onStatus }: VideoStageProps) {
         ref={setVideo}
         key={source.url}
         src={source.url}
+        // The asset protocol and the loopback media server are other
+        // origins than the page; CORS keeps the frames usable as WebGL
+        // textures.
+        crossOrigin="anonymous"
         preload="auto"
         playsInline
         disablePictureInPicture
