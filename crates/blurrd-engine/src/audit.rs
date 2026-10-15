@@ -30,7 +30,7 @@ use crate::dictionary::DictionaryBuilder;
 use crate::engine::Engine;
 use crate::hud::HudMap;
 use crate::job::{Job, canceled};
-use crate::render::{check_media, unverified_name};
+use crate::render::{UNVERIFIED_SUFFIX, check_media, unverified_name};
 use crate::verify::{self, Context, PixelSetup, Pixels, StructureLog};
 
 /// What to audit.
@@ -309,7 +309,7 @@ fn read_source(
 fn name_output(output: &Path, state: VerifyState) -> Result<(PathBuf, bool), AppError> {
     let already = output
         .file_stem()
-        .is_some_and(|s| s.to_string_lossy().ends_with("_UNVERIFIED"));
+        .is_some_and(|s| s.to_string_lossy().ends_with(UNVERIFIED_SUFFIX));
     if state != VerifyState::LeaksRemain || already {
         return Ok((output.to_path_buf(), false));
     }

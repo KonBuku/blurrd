@@ -470,19 +470,26 @@ pub(crate) fn check_media(
     Ok(())
 }
 
-/// Whether the project's last verification is clean and current.
-pub(crate) fn is_verified(project: &Project) -> bool {
+/// What the render adds to the file stem of an output whose project is
+/// not verified (see [`unverified_name`]).
+pub const UNVERIFIED_SUFFIX: &str = "_UNVERIFIED";
+
+/// Whether the project's last verification is clean and current: the
+/// render names its output [`unverified_name`] otherwise (unless the
+/// request accepts unverified output).
+pub fn is_verified(project: &Project) -> bool {
     project.verify.state == VerifyState::Clean
         && project.verify.plan_revision == project.revision
         && project.verify.unverified_ranges.is_empty()
 }
 
-/// `name_UNVERIFIED.ext` next to `name.ext`.
-pub(crate) fn unverified_name(output: &Path) -> PathBuf {
+/// `name_UNVERIFIED.ext` next to `name.ext`: the name of an output whose
+/// project is not verified.
+pub fn unverified_name(output: &Path) -> PathBuf {
     let stem = output.file_stem().unwrap_or_default().to_string_lossy();
     let name = match output.extension() {
-        Some(ext) => format!("{stem}_UNVERIFIED.{}", ext.to_string_lossy()),
-        None => format!("{stem}_UNVERIFIED"),
+        Some(ext) => format!("{stem}{UNVERIFIED_SUFFIX}.{}", ext.to_string_lossy()),
+        None => format!("{stem}{UNVERIFIED_SUFFIX}"),
     };
     output.with_file_name(name)
 }

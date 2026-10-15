@@ -66,6 +66,9 @@ pub use dictionary::{
 };
 pub use engine::{Engine, EngineConfig, OcrSetup, PoolSizes, default_cache_dir};
 pub use job::{CancellationToken, ProgressSink};
-pub use render::{FallbackReport, RenderReport, RenderRequest, SkippedReport};
+pub use render::{
+    FallbackReport, RenderReport, RenderRequest, SkippedReport, UNVERIFIED_SUFFIX, is_verified,
+    unverified_name,
+};
 pub use reverify::{Reverify, ReverifyRequest, ReverifySummary};
 pub use run::{RunReport, RunRequest};
