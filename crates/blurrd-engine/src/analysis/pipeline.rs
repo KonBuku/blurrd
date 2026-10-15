@@ -89,20 +89,40 @@ pub(crate) struct Pipeline<'a> {
     pub(crate) progress: Option<u32>,
 }
 
-/// The first error of any thread, and the flag that stops them all.
+/// How often the watcher looks at the job's cancellation.
+const CANCEL_POLL: Duration = Duration::from_millis(2);
+
+/// The first error of any thread, and what stops them all: a flag that
+/// working threads check, and a channel whose closing wakes the threads
+/// that wait on a full queue at once.
 struct Control<'a> {
-    stop: AtomicBool,
+    /// Shared with the OCR worker, which may outlive a stopped pipeline.
+    stop: Arc<AtomicBool>,
     error: Mutex<Option<AppError>>,
+    /// Dropped on the first error: closes `halted`.
+    halt: Mutex<Option<Sender<()>>>,
+    /// Never receives a value; disconnects when the threads stop.
+    halted: Receiver<()>,
     /// The job, whose cancellation stops every thread too.
     job: &'a Job<'a>,
+    /// How far crop workers may run ahead of the dispatcher.
+    window: Window,
 }
 
 impl<'a> Control<'a> {
-    fn new(job: &'a Job<'a>) -> Self {
+    /// The control of a pipeline of `job` with `workers` crop workers.
+    fn new(job: &'a Job<'a>, workers: usize) -> Self {
+        let (halt, halted) = bounded(0);
+        let window = u32::try_from(workers)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(REORDER_PER_WORKER);
         Self {
-            stop: AtomicBool::new(false),
+            stop: Arc::new(AtomicBool::new(false)),
             error: Mutex::new(None),
+            halt: Mutex::new(Some(halt)),
+            halted,
             job,
+            window: Window::new(window),
         }
     }
 
@@ -112,6 +132,13 @@ impl<'a> Control<'a> {
         if let Ok(mut slot) = self.error.lock() {
             slot.get_or_insert(error);
         }
+        drop(
+            self.halt
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+        );
+        self.window.wake();
     }
 
     /// Whether the threads stop: after an error, or once the job was
@@ -125,6 +152,14 @@ impl<'a> Control<'a> {
             return true;
         }
         false
+    }
+
+    /// Turns a cancellation of the job into a stop of every thread, even
+    /// those that wait, until the threads stop or `finished` is set.
+    fn watch(&self, finished: &AtomicBool) {
+        while !finished.load(Ordering::Relaxed) && !self.stopped() {
+            std::thread::sleep(CANCEL_POLL);
+        }
     }
 
     /// Runs `work`, recording its error.
@@ -163,12 +198,12 @@ impl Window {
         }
     }
 
-    /// Waits until frame `index` is inside the window; false when the
-    /// pipeline stops first.
-    fn enter(&self, index: u32, control: &Control<'_>) -> bool {
+    /// Waits until frame `index` is inside the window; false when
+    /// `stopped` says the pipeline stops first.
+    fn enter(&self, index: u32, stopped: impl Fn() -> bool) -> bool {
         let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
         while index >= next.saturating_add(self.size) {
-            if control.stopped() {
+            if stopped() {
                 return false;
             }
             next = self
@@ -185,20 +220,23 @@ impl Window {
         *self.next.lock().unwrap_or_else(PoisonError::into_inner) = next;
         self.moved.notify_all();
     }
+
+    /// Wakes the waiting workers (to see that the pipeline stops).
+    fn wake(&self) {
+        let _next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
+        self.moved.notify_all();
+    }
 }
 
 /// Sends `value`, waiting while the queue is full, until the receiver is
 /// gone or the pipeline stops; returns whether it was sent.
-fn send<T>(tx: &Sender<T>, mut value: T, control: &Control<'_>) -> bool {
-    loop {
-        if control.stopped() {
-            return false;
-        }
-        match tx.send_timeout(value, POLL) {
-            Ok(()) => return true,
-            Err(crossbeam_channel::SendTimeoutError::Timeout(back)) => value = back,
-            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => return false,
-        }
+fn send<T>(tx: &Sender<T>, value: T, control: &Control<'_>) -> bool {
+    if control.stopped() {
+        return false;
+    }
+    crossbeam_channel::select! {
+        send(tx, value) -> sent => sent.is_ok(),
+        recv(control.halted) -> _ => false,
     }
 }
 
@@ -222,13 +260,9 @@ impl Pipeline<'_> {
             pools,
             progress,
         } = self;
-        let control = Control::new(job);
         let workers = pools.crop_workers.max(1);
-        let window = Window::new(
-            u32::try_from(workers)
-                .unwrap_or(u32::MAX)
-                .saturating_mul(REORDER_PER_WORKER),
-        );
+        let control = Control::new(job, workers);
+        let finished = AtomicBool::new(false);
         let (frame_tx, frame_rx) = bounded::<VideoFrame>(pools.frame_queue.max(1));
         let (crop_tx, crop_rx) = bounded::<Result<FrameCrops, AppError>>(workers * 2);
         let (emit_tx, emit_rx) = unbounded::<Emitted>();
@@ -244,7 +278,8 @@ impl Pipeline<'_> {
         let previews_tx = previews.is_some().then_some(previews_tx);
 
         let (pts, tracks, max_delay, pass0_result, previews) = std::thread::scope(|scope| {
-            let (control, window) = (&control, &window);
+            let (control, finished) = (&control, &finished);
+            scope.spawn(move || control.watch(finished));
             let decoder = scope.spawn(move || {
                 control
                     .guard(|| decode_frames(input, &decode, &frame_tx, control))
@@ -253,13 +288,12 @@ impl Pipeline<'_> {
             for _ in 0..workers {
                 let (frame_rx, crop_tx, mut cropper) =
                     (frame_rx.clone(), crop_tx.clone(), cropper.clone());
-                scope
-                    .spawn(move || crop_frames(&frame_rx, &crop_tx, &mut cropper, window, control));
+                scope.spawn(move || crop_frames(&frame_rx, &crop_tx, &mut cropper, control));
             }
             drop((frame_rx, crop_tx));
             scope.spawn(move || {
                 let sides: Vec<_> = pass0_tx.iter().chain(&previews_tx).collect();
-                control.guard(|| dispatch(&crop_rx, &to_stages, &sides, window, control));
+                control.guard(|| dispatch(&crop_rx, &to_stages, &sides, control));
             });
             for (stage, rx) in stages.into_iter().zip(stage_inputs) {
                 let (emit_tx, signal_tx) = (emit_tx.clone(), signal_tx.clone());
@@ -269,25 +303,21 @@ impl Pipeline<'_> {
                 });
             }
             drop((emit_tx, signal_tx));
-            let pass0 = pass0.map(|pass0| {
-                scope.spawn(move || {
-                    pass0.run(&pass0_rx, &signal_rx, hud_stages, &|| control.stopped())
-                })
+            let pass0 =
+                pass0.map(|pass0| spawn_pass0(pass0, pass0_rx, signal_rx, hud_stages, control));
+            let previews = previews.map(|previews| {
+                scope.spawn(move || previews.run(&previews_rx, &|| control.stopped()))
             });
-            let previews = previews.map(|previews| scope.spawn(move || previews.run(&previews_rx)));
             let collected = collect(&emit_rx, sources, progress, job, control, on_frame);
             let pts = decoder.join().unwrap_or_default();
-            let pass0 = pass0.map(|handle| {
-                handle
-                    .join()
-                    .unwrap_or_else(|_| Err(String::from("the OCR worker panicked")))
-            });
+            let pass0 = pass0.map(|worker| finish_pass0(worker, control));
             let previews = previews.map(|handle| match handle.join() {
                 Ok(output) => output,
                 Err(panic) => std::panic::resume_unwind(panic),
             });
             let (tracks, max_delay) =
                 collected.finish(u32::try_from(pts.len()).unwrap_or(u32::MAX), on_frame);
+            finished.store(true, Ordering::Relaxed);
             (pts, tracks, max_delay, pass0, previews)
         });
         if let Some(error) = control.into_error() {
@@ -324,16 +354,62 @@ fn decode_frames(
     let mut pts = Vec::new();
     loop {
         if control.stopped() {
-            return Ok(pts);
+            break;
         }
         let Some(frame) = decoder.next_frame()? else {
             return Ok(pts);
         };
         pts.push(frame.pts());
         if !send(frames, frame, control) {
-            return Ok(pts);
+            break;
         }
     }
+    // Stopped early: closing a GPU decoder takes tens of milliseconds,
+    // and the job ends as soon as its threads stopped (plan M14: cancel
+    // in under 100 ms), so the decoder closes on a thread of its own.
+    let spawned = std::thread::Builder::new()
+        .name(String::from("blurrd-release"))
+        .spawn(move || drop(decoder));
+    if let Err(error) = spawned {
+        tracing::debug!(%error, "closed the decoder on the job's thread");
+    }
+    Ok(pts)
+}
+
+/// The OCR worker of pass 0, or why it could not start.
+type Pass0Worker = Result<std::thread::JoinHandle<Result<Pass0Stats, String>>, String>;
+
+/// Starts pass 0 on its own thread, outside the pipeline's scope: an OCR
+/// call cannot be interrupted, and closing the OCR sessions takes a few
+/// hundred milliseconds, so a stopping pipeline does not wait for them.
+fn spawn_pass0(
+    pass0: Pass0,
+    frames: Receiver<Arc<FrameCrops>>,
+    structure: Receiver<(u32, bool)>,
+    hud_stages: usize,
+    control: &Control<'_>,
+) -> Pass0Worker {
+    let stop = Arc::clone(&control.stop);
+    std::thread::Builder::new()
+        .name(String::from("blurrd-pass0"))
+        .spawn(move || {
+            pass0.run(&frames, &structure, hud_stages, &|| {
+                stop.load(Ordering::Relaxed)
+            })
+        })
+        .map_err(|e| format!("the OCR worker could not start: {e}"))
+}
+
+/// The result of pass 0 once the pipeline ended: waits for the worker,
+/// unless the pipeline stopped (then the worker ends on its own).
+fn finish_pass0(worker: Pass0Worker, control: &Control<'_>) -> Result<Pass0Stats, String> {
+    let worker = worker?;
+    if control.stopped() {
+        return Err(String::from("the analysis stopped"));
+    }
+    worker
+        .join()
+        .unwrap_or_else(|_| Err(String::from("the OCR worker panicked")))
 }
 
 /// Cuts the crops of the frames from `frames` into `crops`, inside the
@@ -342,11 +418,10 @@ fn crop_frames(
     frames: &Receiver<VideoFrame>,
     crops: &Sender<Result<FrameCrops, AppError>>,
     cropper: &mut Cropper,
-    window: &Window,
     control: &Control<'_>,
 ) {
     for frame in frames {
-        if !window.enter(frame.index(), control) {
+        if !control.window.enter(frame.index(), || control.stopped()) {
             return;
         }
         if !send(crops, cropper.crops(frame), control) {
@@ -361,7 +436,6 @@ fn dispatch(
     crops: &Receiver<Result<FrameCrops, AppError>>,
     stages: &[Sender<Arc<FrameCrops>>],
     sides: &[&Sender<Arc<FrameCrops>>],
-    window: &Window,
     control: &Control<'_>,
 ) -> Result<(), AppError> {
     let mut waiting: BTreeMap<u32, FrameCrops> = BTreeMap::new();
@@ -383,7 +457,7 @@ fn dispatch(
             }
             next += 1;
         }
-        window.advance(next);
+        control.window.advance(next);
     }
     if waiting.is_empty() || control.stopped() {
         Ok(())

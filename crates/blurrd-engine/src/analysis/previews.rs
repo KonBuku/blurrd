@@ -112,9 +112,14 @@ impl Previews {
         }
     }
 
-    /// Takes the frames from `frames` until it closes; returns what was
-    /// made.
-    pub(crate) fn run(mut self, frames: &Receiver<Arc<FrameCrops>>) -> PreviewOutput {
+    /// Takes the frames from `frames` until it closes, or until `stopped`
+    /// says the analysis stops (then no proxy is written); returns what
+    /// was made.
+    pub(crate) fn run(
+        mut self,
+        frames: &Receiver<Arc<FrameCrops>>,
+        stopped: &dyn Fn() -> bool,
+    ) -> PreviewOutput {
         let mut proxy = self.proxy.take().and_then(|plan| {
             match ProxyWriter::create(&plan.info, &plan.path, &plan.options) {
                 Ok((writer, fallbacks)) => {
@@ -131,7 +136,15 @@ impl Previews {
             }
         });
         for crops in frames {
+            if stopped() {
+                break;
+            }
             self.push(&crops.frame, &mut proxy);
+        }
+        if stopped() {
+            // The analysis stops: no proxy (an unfinished one leaves no
+            // file).
+            return self.output;
         }
         if let Some(proxy) = proxy {
             match proxy.finish() {

@@ -313,17 +313,20 @@ fn a_canceled_analysis_stops_and_writes_nothing() {
         after: 1,
         seen: Mutex::new(0),
     };
-    let error = engine(&work)
-        .analyze(&request(clip, RegionSet::all()), &sink, &token)
-        .unwrap_err();
+    // With the previews on: a canceled analysis writes no proxy either.
+    let mut req = request(clip, RegionSet::all());
+    req.previews = true;
+    let error = engine(&work).analyze(&req, &sink, &token).unwrap_err();
     assert_eq!(error.kind, ErrorKind::Canceled);
-    assert!(
-        !work.path("cache").join("projects").exists() || {
-            std::fs::read_dir(work.path("cache").join("projects"))
-                .unwrap()
-                .all(|d| !d.unwrap().path().join("project.json").exists())
-        }
-    );
+    let projects = work.path("cache").join("projects");
+    let written: Vec<_> = std::fs::read_dir(&projects)
+        .into_iter()
+        .flatten()
+        .flat_map(|d| std::fs::read_dir(d.unwrap().path()).unwrap())
+        .map(|f| f.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("project") || name.contains("proxy"))
+        .collect();
+    assert_eq!(written, Vec::<String>::new());
 }
 
 /// ONNX Runtime and the models from the environment, or `None` when they
