@@ -237,7 +237,9 @@ differ by more than the 1 % tolerance, so small changes would be missed.)
 
 The window has no native title bar (`decorations: false`); the frontend
 draws its own with window controls. `src-tauri/capabilities/default.json`
-grants the main window only the window calls of that title bar, the log
+grants the main window the app's engine commands (declared in
+`src-tauri/build.rs`, so each one needs a permission), the window calls of
+that title bar, the log
 plugin's `log` command, reading and writing the settings store that the
 Rust side opens at start (the frontend cannot open other store files), and
 the open dialog for adding recordings. The app writes JSON lines to
@@ -246,6 +248,26 @@ also print to stdout) and remembers the window size and position. Starting
 it a second time focuses the running window and hands the files on the
 second command line to it (event `second-instance`), which adds them to
 the queue.
+
+### Engine commands
+
+`src-tauri/src/commands.rs` exposes the engine to the frontend (plan 9.1);
+the typed wrappers are `src/ipc/commands.ts`, `jobs.ts` and `presets.ts`,
+and their payloads are generated bindings. The commands take only paths
+the user chose: the open and save dialogs and drops onto the window add
+them to the asset protocol scope, and `src-tauri/src/paths.rs` refuses
+anything outside it. Projects (`projects.rs`) are read from and written to
+the engine's cache folder on every call, so a finished analysis shows at
+once and edits are checked against the project revision.
+
+Jobs (`jobs.rs`) wait in one queue and run one at a time on its worker
+thread. Each reports over the `Channel<JobEvent>` passed with its command;
+progress reaches the channel in frame order and at most 20 times per
+second, whatever engine thread reports it. Pausing holds the queue and the
+running job at its next progress report; cancelling ends a waiting job at
+once and a running one at the engine's next frame. Closing the app cancels
+every job, so no partial output is left behind. The engine's `tracing`
+events go to the app log through the `log` facade.
 
 ### Window shell
 

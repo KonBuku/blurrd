@@ -1,16 +1,32 @@
 //! The blurrd desktop app: a thin Tauri shell around the blurrd engine.
 //!
 //! The React frontend in `apps/desktop/src` talks to this crate over Tauri
-//! IPC. The crate owns the window, the plugins and, in later milestones, the
-//! commands that start engine jobs.
+//! IPC. The crate owns the window and the plugins, and exposes the
+//! engine through its commands (module `commands`): probing and opening
+//! videos, reading and editing projects, presets and the saved queue, and
+//! jobs that report over per-job channels (module `jobs`).
 
+mod capabilities;
+mod commands;
+mod jobs;
 mod logging;
+mod media;
+mod output;
+mod paths;
+mod presets;
+mod projects;
+mod session;
+mod state;
+mod tasks;
 
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_store::StoreBuilder;
+
+use crate::paths::UserPaths;
+use crate::state::AppState;
 
 /// Label of the main window in `tauri.conf.json`.
 const MAIN_WINDOW: &str = "main";
@@ -63,9 +79,56 @@ pub fn run() -> Result<(), tauri::Error> {
         .setup(|app| {
             tauri_plugin_log::log::info!("blurrd {} started", env!("CARGO_PKG_VERSION"));
             open_settings(app.handle());
+            let state = app_state(app.handle())?;
+            state.probe_capabilities();
+            app.manage(state);
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .invoke_handler(tauri::generate_handler![
+            commands::probe_media,
+            commands::get_capabilities,
+            commands::get_session,
+            commands::save_session,
+            commands::open_project,
+            commands::get_tracks,
+            commands::get_pts,
+            commands::get_timeline_density,
+            commands::get_verify_report,
+            commands::set_overrides,
+            commands::get_output_preview,
+            commands::accept_report,
+            commands::start_analysis,
+            commands::start_render,
+            commands::start_reverify,
+            commands::start_run,
+            commands::cancel_job,
+            commands::pause_queue,
+            commands::resume_queue,
+            commands::list_presets,
+            commands::save_preset,
+            commands::delete_preset,
+            commands::import_preset,
+            commands::export_preset,
+        ])
+        .build(tauri::generate_context!())?
+        .run(|app, event| {
+            if let RunEvent::Exit = event
+                && let Some(state) = app.try_state::<AppState>()
+            {
+                // Cancelled jobs remove their partial outputs.
+                state.jobs.shutdown();
+            }
+        });
+    Ok(())
+}
+
+/// The commands' state: the engine, the project registry, the job queue
+/// and the stores, with paths checked against the asset protocol scope
+/// that the dialogs and the drop handler fill.
+fn app_state(app: &AppHandle) -> Result<AppState, Box<dyn std::error::Error>> {
+    let config_dir = app.path().app_config_dir()?;
+    let paths = UserPaths::new(Box::new(app.asset_protocol_scope()));
+    Ok(AppState::new(&config_dir, paths)?)
 }
 
 /// Opens the settings file in the store plugin, so the frontend can reach
@@ -97,13 +160,27 @@ fn focus_main_window(app: &AppHandle) {
 }
 
 /// Sends the file arguments of a second start (for example files dropped
-/// on the app icon) to the frontend. Nothing is sent without file
-/// arguments; the backend validates the paths when the frontend probes
-/// them.
+/// on the app icon) to the frontend and lets the commands use them.
+/// Nothing is sent without file arguments; the backend probes the paths
+/// when the frontend adds them to the queue.
 fn forward_files(app: &AppHandle, argv: &[String], cwd: &str) {
     let paths = file_arguments(argv, Path::new(cwd));
     if paths.is_empty() {
         return;
+    }
+    // The user chose these files (dropped on the app icon, "Open with"),
+    // like files dropped onto the window: the commands may use them.
+    let scope = app.asset_protocol_scope();
+    for path in &paths {
+        let path = Path::new(path);
+        let allowed = if path.is_dir() {
+            scope.allow_directory(path, true)
+        } else {
+            scope.allow_file(path)
+        };
+        if let Err(error) = allowed {
+            tauri_plugin_log::log::warn!("could not allow a file of a second start: {error}");
+        }
     }
     if let Err(error) = app.emit(SECOND_INSTANCE_EVENT, SecondInstance { paths }) {
         tauri_plugin_log::log::warn!("could not forward the files of a second start: {error}");
