@@ -219,6 +219,8 @@ impl Engine {
                 frames: report.render.frames,
                 elapsed_ms: report.elapsed_ms,
                 output: Some(report.render.output.clone()),
+                // The project's state, whether or not the user accepted
+                // an unverified result.
                 verify: Some(if report.render.verified {
                     VerifyState::Clean
                 } else {
@@ -284,7 +286,8 @@ impl Engine {
             export: &req.export,
             // A fresh analysis is not verified yet (verification arrives
             // with M17).
-            verified: req.accept_unverified,
+            verified: false,
+            accept_unverified: req.accept_unverified,
             blur: &req.blur,
             sy: prepared.geometry.sy,
             decode,

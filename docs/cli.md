@@ -130,11 +130,17 @@ line, in the form the desktop app receives them
   "elapsed_ms": 3909,
   "fps": 921.2,
   "verified": true,
+  "accepted_unverified": false,
   "fallbacks": [],
   "skipped_streams": [],
   "moov": "reserved"
 }
 ```
+
+`verified` says whether the project was verified; `accepted_unverified`
+is true when it was not and `--accept-unverified` named the output
+normally. The `Finished` event's `verify` likewise reports the project's
+own state, never `Clean` for an accepted unverified project.
 
 An analysis reports `project_file` (the project in the cache), `frames`,
 `tracks`, `decoder`, `elapsed_ms`, `fps`, `max_delay` (the largest number of

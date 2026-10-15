@@ -249,6 +249,18 @@ fn renders_unverified_projects_under_a_marked_name() {
     assert!(output.is_file());
     let summary = String::from_utf8_lossy(&accepted.stdout);
     assert!(summary.starts_with("wrote "), "{summary}");
+
+    // Accepting names the output normally but does not make the result
+    // verified.
+    std::fs::remove_file(&output).unwrap();
+    let accepted = blurrd(&dir, &[&args[..], &["--accept-unverified"]].concat(), &[]);
+    assert_eq!(accepted.status.code(), Some(0), "{accepted:?}");
+    let lines = json_lines(&accepted);
+    let finished = lines.iter().find(|l| l["type"] == "Finished").unwrap();
+    assert_ne!(finished["summary"]["verify"], "Clean");
+    let report = lines.last().unwrap();
+    assert_eq!(report["verified"], false);
+    assert_eq!(report["accepted_unverified"], true);
 }
 
 #[test]

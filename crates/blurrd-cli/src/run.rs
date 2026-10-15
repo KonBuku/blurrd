@@ -60,7 +60,7 @@ pub(crate) fn run(
         match engine.run(&req, events, cancel) {
             Ok(report) => {
                 outcome = outcome.and(Outcome::Done {
-                    unverified: !report.render.verified,
+                    unverified: !report.render.verified && !report.render.accepted_unverified,
                 });
                 reports.push(report);
             }

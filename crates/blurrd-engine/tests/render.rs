@@ -153,7 +153,10 @@ fn accepted_renders_keep_their_name_and_other_videos_are_refused() {
         .render(&req, &sink(), &CancellationToken::new())
         .unwrap();
     assert_eq!(report.output, work.path("accepted.mkv"));
-    assert!(report.verified);
+    // Accepting an unverified project must not report it as verified;
+    // the acceptance is reported on its own.
+    assert!(report.accepted_unverified);
+    assert!(!report.verified, "an accepted project is still unverified");
 
     // Another recording of the same length and timing is not the
     // project's video.

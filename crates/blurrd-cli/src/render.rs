@@ -35,7 +35,7 @@ pub(crate) fn render(
         Ok(report) => {
             events.report(&report, &summary(&report));
             Outcome::Done {
-                unverified: !report.verified,
+                unverified: !report.verified && !report.accepted_unverified,
             }
         }
         Err(error) => Outcome::from_error(&error),
@@ -54,7 +54,9 @@ pub(crate) fn summary(report: &RenderReport) -> String {
         report.elapsed_ms as f64 / 1000.0,
         report.fps,
     );
-    if !report.verified {
+    if report.accepted_unverified {
+        summary.push_str("\nthe result is not verified (accepted with --accept-unverified)");
+    } else if !report.verified {
         summary.push_str(
             "\nthe result is not verified: check the output before publishing it, \
              or pass --accept-unverified",

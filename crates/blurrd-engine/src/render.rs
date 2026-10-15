@@ -96,8 +96,11 @@ pub struct RenderReport {
     pub elapsed_ms: u64,
     /// Frames per second over the whole job.
     pub fps: f64,
-    /// Whether the project was verified (or the user accepted it).
+    /// Whether the project was verified.
     pub verified: bool,
+    /// Whether the user accepted an unverified project (the output is
+    /// then named normally although `verified` is false).
+    pub accepted_unverified: bool,
     /// Encoders that failed before the one used.
     pub fallbacks: Vec<FallbackReport>,
     /// Streams of the input that are not in the output.
@@ -113,8 +116,10 @@ pub(crate) struct RenderTarget<'a> {
     pub(crate) output: &'a Path,
     /// The export settings.
     pub(crate) export: &'a ExportSettings,
-    /// Whether the boxes are verified (or the user accepted them).
+    /// Whether the boxes are verified.
     pub(crate) verified: bool,
+    /// Whether the user accepts unverified boxes.
+    pub(crate) accept_unverified: bool,
     /// The blur parameters.
     pub(crate) blur: &'a BlurParams,
     /// The HUD scale of the video (block sizes scale with it).
@@ -129,6 +134,7 @@ pub(crate) struct PreparedRender {
     pub(crate) transcoder: Transcoder,
     pub(crate) params: PixelParams,
     pub(crate) verified: bool,
+    pub(crate) accepted_unverified: bool,
     pub(crate) total: u32,
 }
 
@@ -194,7 +200,8 @@ impl Engine {
         let target = RenderTarget {
             output: &req.output,
             export: &req.export,
-            verified: is_verified(&req.project) || req.accept_unverified,
+            verified: is_verified(&req.project),
+            accept_unverified: req.accept_unverified,
             blur: &req.project.blur,
             sy: req.project.geometry.sy,
             decode: DecodePurpose::Throughput,
@@ -246,7 +253,7 @@ impl Engine {
             .with_detail(problem));
         }
         self.check_output(target.output)?;
-        let output = if target.verified {
+        let output = if target.verified || target.accept_unverified {
             target.output.to_path_buf()
         } else {
             unverified_name(target.output)
@@ -295,6 +302,7 @@ impl Engine {
             transcoder,
             params,
             verified: target.verified,
+            accepted_unverified: !target.verified && target.accept_unverified,
             total,
         })
     }
@@ -333,6 +341,7 @@ pub(crate) fn transcode(
         transcoder,
         params,
         verified,
+        accepted_unverified,
         total,
     } = prepared;
     job.stage(Stage::BlurEncode);
@@ -342,11 +351,16 @@ pub(crate) fn transcode(
         tracing::warn!(stream = skipped.index, codec = %skipped.codec,
             reason = %skipped.reason, "stream not in the output");
     }
-    Ok(render_report(&report, verified, job))
+    Ok(render_report(&report, verified, accepted_unverified, job))
 }
 
 /// The report of a finished transcode.
-fn render_report(report: &TranscodeReport, verified: bool, job: &Job<'_>) -> RenderReport {
+fn render_report(
+    report: &TranscodeReport,
+    verified: bool,
+    accepted_unverified: bool,
+    job: &Job<'_>,
+) -> RenderReport {
     let elapsed = job.elapsed();
     RenderReport {
         output: report.output.clone(),
@@ -357,6 +371,7 @@ fn render_report(report: &TranscodeReport, verified: bool, job: &Job<'_>) -> Ren
         elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
         fps: f64::from(report.frames) / elapsed.as_secs_f64().max(1e-9),
         verified,
+        accepted_unverified,
         fallbacks: report
             .fallbacks
             .iter()
@@ -397,10 +412,11 @@ pub(crate) fn finished(
             frames: report.frames,
             elapsed_ms: report.elapsed_ms,
             output: Some(report.output.clone()),
-            verify: Some(if report.verified {
-                VerifyState::Clean
-            } else {
-                project.verify.state
+            // The project's own state; a clean verification of an older
+            // revision (or with unverified ranges) no longer counts.
+            verify: Some(match project.verify.state {
+                VerifyState::Clean if !report.verified => VerifyState::Unverified,
+                state => state,
             }),
             warnings,
         },
