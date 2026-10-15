@@ -46,7 +46,7 @@ const MAX_RATIO: f32 = 0.95;
 /// next to the edges darkens a few rows by 5 to 10 % by chance.
 const STRONG_RATIO: f32 = 0.85;
 /// The first row of the closed chat's box (port spec `CHAT_Y0`).
-const CLOSED_Y0: i32 = 930;
+pub(super) const CLOSED_Y0: i32 = 930;
 /// Added to both strip means so that black backgrounds give no ratio
 /// spikes.
 const RATIO_BIAS: f32 = 2.0;

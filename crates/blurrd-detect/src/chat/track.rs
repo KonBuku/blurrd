@@ -20,8 +20,10 @@
 //!   enough to count is learned per video, so filters that lighten the box
 //!   do not hide pushes. A rise that no line read confirmed is undone when
 //!   a pushed line is read at its old place soon after (the top part of
-//!   the box was only missed for a frame or two). A fading line that is no
-//!   longer read thus stays covered where it went.
+//!   the box was only missed for a frame or two); until then the pushed
+//!   lines are also covered at their old places, further rises add up, and
+//!   a line the rise pushed out comes back with the undo. A fading line
+//!   that is no longer read thus stays covered where it went.
 //! - **Hold**: a line that is not read in a frame is covered with the
 //!   extent it was read with while it lies in a box band, while the box's
 //!   edge ratio at its rows stays below 0.97 as the band fades (plan 7.3)
@@ -64,7 +66,7 @@ use blurrd_core::{Mode, RectI};
 
 use crate::detection::Detection;
 
-use super::{ChatDetector, ChatLine, INK_X, NameEnd, NameStart, SEARCH_Y, name_detection};
+use super::{ChatDetector, ChatLine, INK_X, NameEnd, NameStart, SEARCH_Y, band, name_detection};
 
 /// A line not read for more than [`HOLD_MAX`] frames is covered for at
 /// least this many pixels from its start: the widest name (16 characters,
@@ -128,6 +130,13 @@ const RESUME_MAX: u32 = 15;
 /// Frames before a line's part of the box appears that are still covered
 /// when it pops in: the box takes a frame or two to show.
 const POP_IN: u32 = 2;
+/// A line first read at most this many frames after a message arrived
+/// (the older lines moved up) is covered back to that frame, also where
+/// its part of the box is not seen: a dark box on a dark background is
+/// not found (measured under a brightness -0.20 filter: a new system
+/// message first read 3 frames after it pushed the older line up, its box
+/// never seen).
+const ARRIVAL_REACH: u32 = 10;
 /// Distance between the tops of two one-line messages.
 const LINE_PITCH: i32 = 29;
 /// Extra height of a wrapped message (its continuation line).
@@ -142,9 +151,10 @@ const STEP_TOLERANCE: i32 = 6;
 /// box part appearing with a new message can take two frames to be found.
 const PUSH_WINDOW: u32 = 3;
 /// A push that no line read confirmed is undone if, within this many
-/// frames, a pushed line is read at its place before the push before any
-/// is read at its new place: the box top only seemed to rise (an object
-/// at the box edge hid the top part of the box for a frame or two).
+/// frames of its latest rise, a pushed line is read at its place before
+/// the push before any is read at its new place: the box top only seemed
+/// to rise (an object at the box edge hid the top part of the box for a
+/// frame or two).
 const CONFIRM_WINDOW: u32 = 10;
 /// A box band is solid if its darkness (1 minus its edge ratio) is at
 /// least this fraction of the darkness of a fully visible box: about 0.34
@@ -188,6 +198,9 @@ struct Model {
     /// first read in, with how often each was read.
     tops: Vec<(i32, u32)>,
     bottoms: Vec<(i32, u32)>,
+    /// The end of the line whose place this line took, if it lay further
+    /// right ([`Model::cover_end`]).
+    replaced_end: Option<i32>,
 }
 
 impl Model {
@@ -197,6 +210,7 @@ impl Model {
             ends: Default::default(),
             tops: Vec::new(),
             bottoms: Vec::new(),
+            replaced_end: None,
         };
         model.add(line, 0);
         model
@@ -229,6 +243,21 @@ impl Model {
         let x0 = majority(&self.starts, i32::MAX, i32::min);
         let x1 = majority(&self.ends, i32::MIN, i32::max);
         (x0, x1)
+    }
+
+    /// The last column to cover: [`columns`](Self::columns), or the end of
+    /// the line whose place this one took while the colon is not yet
+    /// confident. A broken glyph inside a name can look like a colon and
+    /// make an old line look replaced by a new message with a shorter name
+    /// (measured in 720p greyscale video: the second word of a two-word
+    /// name left unboxed); a real new message is covered a little too far
+    /// for a few frames only.
+    fn cover_end(&self) -> i32 {
+        let x1 = self.columns().1;
+        match self.replaced_end {
+            Some(end) if !self.end_confident() => x1.max(end),
+            _ => x1,
+        }
     }
 
     /// Whether the colon was seen in most of at least [`CONFIDENT_READS`]
@@ -288,6 +317,35 @@ impl Model {
     /// start is found a few pixels off.
     fn ends_alike(&self, line: &ChatLine) -> bool {
         (line.name.x1 - self.columns().1).abs() <= SAME_END
+    }
+
+    /// [`ends_alike`](Self::ends_alike), or, for an end found at the colon
+    /// or the prefix colour, near where that way found the end most often,
+    /// in at least [`CONFIDENT_READS`] readings: the line moved there. Frames that fell
+    /// back to Safe geometry can make up most readings and widen the
+    /// covered columns, and a line read with its colon one grid step
+    /// higher then showed no move (measured under a brightness -0.20
+    /// filter: a system message pushed the line up unnoticed and was left
+    /// unboxed). Only the push evidence of the closed chat uses it: a
+    /// broken glyph read as a colon now and then is no end of the line, nor
+    /// is another line's colon read into the model while a push was wrong
+    /// (measured under a colour balance filter: two such readings pushed a
+    /// fading line out of the chat while it was still readable), lines
+    /// matched by such ends would merge with other messages, and the open
+    /// chat's history repeats names, and their colons.
+    fn moved_alike(&self, line: &ChatLine) -> bool {
+        let precise = match line.end {
+            NameEnd::Colon => Some(&self.ends[0]),
+            NameEnd::Colour => Some(&self.ends[1]),
+            NameEnd::Safe => None,
+        };
+        let usual = precise.and_then(|ends| {
+            let x = most_frequent(ends);
+            ends.iter()
+                .any(|&(v, n)| v == x && n >= CONFIDENT_READS)
+                .then_some(x)
+        });
+        self.ends_alike(line) || usual.is_some_and(|x| (line.name.x1 - x).abs() <= SAME_END)
     }
 }
 
@@ -368,6 +426,8 @@ struct Track {
     last_seen: u32,
     /// Last frame it moved up in.
     moved: u32,
+    /// The frame it was first read in.
+    first: u32,
     /// The edge ratio at its place in the last frame ([`presence`]).
     ratio: f32,
 }
@@ -385,6 +445,7 @@ impl Track {
             last_box: frame,
             last_seen: frame,
             moved: 0,
+            first: frame,
             ratio,
         }
     }
@@ -399,15 +460,35 @@ struct Rise {
     step: i32,
 }
 
-/// A push of the live lines by a rise of the box top.
+/// A push of the live lines by a rise of the box top. Rises that follow
+/// one another before any is confirmed add up: a dark frame can join the
+/// gameplay above the box to it step by step.
 #[derive(Debug, Clone)]
 struct Push {
-    /// The frame the lines moved up in.
+    /// The frame the lines first moved up in.
     frame: u32,
-    /// How far they moved.
+    /// How far they moved in all.
     step: i32,
+    /// Each rise: the frame the lines moved up in and how far.
+    rises: Vec<(u32, i32)>,
     /// The lines that moved.
     ids: Vec<u32>,
+}
+
+impl Push {
+    /// How far the lines had moved by frame `frame`.
+    fn step_by(&self, frame: u32) -> i32 {
+        self.rises
+            .iter()
+            .filter(|&&(f, _)| f <= frame)
+            .map(|&(_, step)| step)
+            .sum()
+    }
+
+    /// The frame of the latest rise.
+    fn last(&self) -> u32 {
+        self.rises.last().map_or(self.frame, |&(f, _)| f)
+    }
 }
 
 /// A frame's own reading of a line.
@@ -497,7 +578,7 @@ impl ChatTracker {
         if self
             .unconfirmed
             .as_ref()
-            .is_some_and(|push| frame.saturating_sub(push.frame) > CONFIRM_WINDOW)
+            .is_some_and(|push| frame.saturating_sub(push.last()) > CONFIRM_WINDOW)
         {
             self.unconfirmed = None;
         }
@@ -554,7 +635,7 @@ impl ChatTracker {
             };
             if !nearest.is_some_and(|i| alike(self, i))
                 && replaced.is_none()
-                && self.undo_push(line)
+                && self.undo_push(line, &mut read)
             {
                 nearest = self.nearest_unread(&read, line.top);
             }
@@ -589,6 +670,7 @@ impl ChatTracker {
                 *track = Track {
                     shift: track.shift,
                     moved: track.moved,
+                    first: track.first,
                     last_alike,
                     ..Track::new(track.id, frame, presence(detector.edge_ratios(), line.top))
                 };
@@ -600,7 +682,12 @@ impl ChatTracker {
             } else {
                 let id = self.next_id;
                 self.next_id = self.next_id.wrapping_add(1);
-                self.models.push((id, Model::new(line)));
+                let mut model = Model::new(line);
+                model.replaced_end = replaced
+                    .and_then(|r| self.model(r))
+                    .map(|m| m.columns().1)
+                    .filter(|&x1| x1 > line.name.x1);
+                self.models.push((id, model));
                 let ratio = presence(detector.edge_ratios(), line.top);
                 self.backfill(id, line.top, ratio, arrived, replaced);
                 self.tracks.push(Track::new(id, frame, ratio));
@@ -641,6 +728,9 @@ impl ChatTracker {
     ) {
         let edges = detector.edge_ratios();
         let mut alive = Vec::with_capacity(self.tracks.len());
+        // Old places of pushed lines, added after every line was decided:
+        // a guess at an old place does not take a line's place.
+        let mut old_places = Vec::new();
         for (i, &was_read) in read.iter().enumerate() {
             if was_read {
                 alive.push(true);
@@ -666,6 +756,25 @@ impl ChatTracker {
                 && self
                     .model(track.id)
                     .is_some_and(|m| line_visible(detector, m.text(track.shift)));
+            // A push that no line read has confirmed may be a box edge that
+            // only seemed to rise (a dark frame joins gameplay above the box
+            // to it): until a reading confirms or undoes it, the pushed line
+            // is also covered at its old place, unless another line is
+            // covered there (measured: under a brightness -0.20 filter a
+            // wrapped message was covered one step too high for 4 frames in
+            // which no line was read). The old places are added after every
+            // line was decided: a guess does not take a held line's place
+            // (measured under a Freestyle filter: it ended the bottom line).
+            let before_push = self
+                .unconfirmed
+                .as_ref()
+                .filter(|push| push.ids.contains(&track.id))
+                .map(|push| push.step)
+                .filter(|step| {
+                    !lines
+                        .iter()
+                        .any(|c| (self.covered_top(c) - (top + step)).abs() <= MATCH_ROWS)
+                });
             let track = &mut self.tracks[i];
             track.ratio = ratio;
             if in_band {
@@ -684,15 +793,34 @@ impl ChatTracker {
                 && track.last_seen >= track.moved
                 && frame.saturating_sub(track.last_seen) <= POST_ROLL;
             if held {
+                let safe = frame.saturating_sub(track.last_read) > HOLD_MAX;
                 lines.push(Covered {
                     id: track.id,
                     shift: track.shift,
                     own: None,
-                    safe: frame.saturating_sub(track.last_read) > HOLD_MAX,
+                    safe,
                 });
+                if let Some(step) = before_push {
+                    old_places.push(Covered {
+                        id: track.id,
+                        shift: track.shift - step,
+                        own: None,
+                        safe,
+                    });
+                }
             }
             alive.push(held);
         }
+        let free: Vec<Covered> = old_places
+            .into_iter()
+            .filter(|c| {
+                let top = self.covered_top(c);
+                !lines
+                    .iter()
+                    .any(|l| l.id != c.id && (self.covered_top(l) - top).abs() <= MATCH_ROWS)
+            })
+            .collect();
+        lines.extend(free);
         let mut alive = alive.into_iter();
         let ended = &mut self.ended;
         self.tracks.retain(|track| {
@@ -718,12 +846,19 @@ impl ChatTracker {
     /// show the move.
     fn follow_box_top(&mut self, frame: u32, detector: &ChatDetector) -> bool {
         let rise = self.box_rise(frame, detector);
+        // The usual colon tells a move only in the closed chat: the open
+        // chat's history repeats names, and their colons, line after line.
+        let closed = detector.bands().iter().all(|b| b.y0 >= band::CLOSED_Y0);
         let read_at = |track: &Track, top: i32| {
             self.model(track.id).is_some_and(|model| {
-                detector
-                    .lines()
-                    .iter()
-                    .any(|l| (l.top - top).abs() <= MATCH_ROWS && model.ends_alike(l))
+                detector.lines().iter().any(|l| {
+                    (l.top - top).abs() <= MATCH_ROWS
+                        && if closed {
+                            model.moved_alike(l)
+                        } else {
+                            model.ends_alike(l)
+                        }
+                })
             })
         };
         let evidence = |shift: i32| {
@@ -747,10 +882,22 @@ impl ChatTracker {
             if stayed > moved || (moved == 0 && detector.bands().len() > 1) {
                 return false;
             }
-            self.unconfirmed = (moved == 0).then(|| Push {
-                frame,
-                step: rise.step,
-                ids: self.tracks.iter().map(|t| t.id).collect(),
+            let earlier = self.unconfirmed.take();
+            self.unconfirmed = (moved == 0).then(|| {
+                let mut push = earlier.unwrap_or(Push {
+                    frame,
+                    step: 0,
+                    rises: Vec::new(),
+                    ids: Vec::new(),
+                });
+                push.step += rise.step;
+                push.rises.push((frame, rise.step));
+                for t in &self.tracks {
+                    if !push.ids.contains(&t.id) {
+                        push.ids.push(t.id);
+                    }
+                }
+                push
             });
             // Later rises are measured from the grown box.
             self.restart_box_tops();
@@ -787,15 +934,16 @@ impl ChatTracker {
         let Some(since) = since else {
             return true;
         };
-        self.cover_moved(since, shift)
+        let ids: Vec<u32> = self.tracks.iter().map(|t| t.id).collect();
+        self.cover_moved(since, shift, &ids)
     }
 
-    /// Covers the live lines, which moved up by `shift` rows, at their new
+    /// Covers the lines `ids`, which moved up by `shift` rows, at their new
     /// places in the pending frames after `since`: those frames already
     /// showed the new message, which arrived in the first of them. Returns
     /// whether it arrived in the current frame instead (no pending frame
     /// follows `since`).
-    fn cover_moved(&mut self, since: u32, shift: i32) -> bool {
+    fn cover_moved(&mut self, since: u32, shift: i32, ids: &[u32]) -> bool {
         let Some(first) = self.pending.iter().position(|p| p.frame > since) else {
             return true;
         };
@@ -804,7 +952,7 @@ impl ChatTracker {
             let moved: Vec<Covered> = self.pending[k]
                 .lines
                 .iter()
-                .filter(|c| self.tracks.iter().any(|t| t.id == c.id))
+                .filter(|c| ids.contains(&c.id))
                 .map(|c| Covered {
                     id: c.id,
                     shift: c.shift + shift,
@@ -897,8 +1045,14 @@ impl ChatTracker {
     /// Undoes the last push that no line read confirmed if `line` is one of
     /// the pushed lines, read at its place before the push with its name
     /// end: the lines move back down and are also covered there in the
-    /// frames since the push. Returns whether the push was undone.
-    fn undo_push(&mut self, line: &ChatLine) -> bool {
+    /// frames since the push. A pushed line that ended because the push
+    /// moved it where neither its box nor its text was seen (it was seen
+    /// up to the push) is live again: the push was all that ended it
+    /// (measured: under a sharpening filter a box edge rise ended a fading
+    /// line that stayed readable for 4 more frames). Its entry in `read`
+    /// (the live lines read in this frame) is added. Returns whether the
+    /// push was undone.
+    fn undo_push(&mut self, line: &ChatLine, read: &mut Vec<bool>) -> bool {
         let Some(push) = &self.unconfirmed else {
             return false;
         };
@@ -922,12 +1076,13 @@ impl ChatTracker {
             }
         }
         for pending in self.pending.iter_mut().filter(|p| p.frame >= push.frame) {
+            let step = push.step_by(pending.frame);
             let back: Vec<Covered> = pending
                 .lines
                 .iter()
                 .filter(|c| push.ids.contains(&c.id))
                 .map(|c| Covered {
-                    shift: c.shift - push.step,
+                    shift: c.shift - step,
                     own: None,
                     ..*c
                 })
@@ -939,6 +1094,27 @@ impl ChatTracker {
                 })
                 .collect();
             pending.lines.extend(back);
+        }
+        let mut k = 0;
+        while k < self.ended.len() {
+            let track = self.ended[k];
+            if push.ids.contains(&track.id) && track.last_seen + 1 >= push.frame {
+                self.ended.swap_remove(k);
+                self.tracks.push(track);
+                read.push(false);
+                for pending in self.pending.iter_mut().filter(|p| p.frame >= push.frame) {
+                    if !pending.lines.iter().any(|c| c.id == track.id) {
+                        pending.lines.push(Covered {
+                            id: track.id,
+                            shift: track.shift,
+                            own: None,
+                            safe: false,
+                        });
+                    }
+                }
+            } else {
+                k += 1;
+            }
         }
         true
     }
@@ -977,8 +1153,12 @@ impl ChatTracker {
     /// message arrives at the bottom; a line read above another one is no
     /// new message, also in the open chat), its name ends at a colon
     /// elsewhere than the colon the track's readings know, the track was
-    /// not read in the frame before (a colon misread in one frame of a line
-    /// read throughout does not split it), and its part of the box is solid
+    /// not read with that colon in the frame before (a colon misread in one
+    /// frame of a line read throughout does not split it; a reading of the
+    /// whole line, without a colon, does not tell: measured under a
+    /// brightness -0.20 filter, where a new message read as whole lines for
+    /// two frames kept the old line below it, uncovered once it moved up),
+    /// and its part of the box is solid
     /// (a broken glyph of a fading line can look like a colon, but a new
     /// message is not faded).
     fn is_replaced(
@@ -989,7 +1169,7 @@ impl ChatTracker {
         detector: &ChatDetector,
     ) -> bool {
         detector.lines().iter().all(|other| other.top <= line.top)
-            && frame.saturating_sub(track.last_read) > 1
+            && frame.saturating_sub(track.last_alike) > 1
             && line.end == NameEnd::Colon
             && self.is_solid(1.0 - line.band.ratio)
             && self
@@ -1011,14 +1191,20 @@ impl ChatTracker {
             return;
         }
         let since = self.tracks[i].last_alike;
-        for track in &mut self.tracks {
+        // A line first read after the message arrived was read where the
+        // message had already pushed it (measured under a hue filter: the
+        // older line, read at its new place for three frames before the new
+        // message was, was pushed up once more and left unboxed).
+        let mut ids = Vec::new();
+        for track in self.tracks.iter_mut().filter(|t| t.first <= since) {
             track.shift += shift;
             track.moved = frame;
+            ids.push(track.id);
         }
         // The box top may still be growing with the new message: later
         // rises are measured from here, so the push is not counted twice.
         self.restart_box_tops();
-        self.cover_moved(since, shift);
+        self.cover_moved(since, shift, &ids);
     }
 
     /// Covers the line `id`, first read at row `top` with edge ratio
@@ -1027,12 +1213,21 @@ impl ChatTracker {
     /// to [`POP_IN`] frames before its part of the box appeared: going back
     /// in time, the box is there while its edge ratio stays below
     /// [`PRESENT_RATIO`] without a jump up (a fading box was darker
-    /// before). The line `replaced`, whose place the new line took, is not
-    /// in the way.
+    /// before), or back to the frame a message arrived in at most
+    /// [`ARRIVAL_REACH`] frames before. The line `replaced`, whose place the
+    /// new line took, is not in the way.
     fn backfill(&mut self, id: u32, top: i32, ratio: f32, arrived: bool, replaced: Option<u32>) {
         let mut arrived = arrived;
         let mut absent = 0;
         let mut later = ratio;
+        let newest = self.pending.back().map_or(0, |p| p.frame);
+        // The frame a message arrived in shortly before: back to it, the
+        // line is covered also where its part of the box is not seen.
+        let arrival = self
+            .pending
+            .iter()
+            .rposition(|p| p.arrived)
+            .filter(|&k| newest.saturating_sub(self.pending[k].frame) < ARRIVAL_REACH);
         for k in (0..self.pending.len()).rev() {
             let pending = &self.pending[k];
             if arrived
@@ -1048,7 +1243,7 @@ impl ChatTracker {
                 absent = 0;
             } else {
                 absent += 1;
-                if absent > POP_IN {
+                if absent > POP_IN && arrival.is_none_or(|a| k < a) {
                     break;
                 }
             }
@@ -1113,6 +1308,7 @@ impl ChatTracker {
             .filter_map(|covered| {
                 let model = self.model(covered.id)?;
                 let mut text = model.text(covered.shift);
+                text.x1 = model.cover_end();
                 if covered.safe || safe {
                     text.x1 = text.x1.max(text.x0 + SAFE_NAME_WIDTH as i32);
                 }
@@ -1224,5 +1420,93 @@ fn union(a: RectI, b: RectI) -> RectI {
         y0: a.y0.min(b.y0),
         x1: a.x1.max(b.x1),
         y1: a.y1.max(b.y1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use blurrd_core::RectI;
+
+    use super::{CONFIDENT_READS, Model, Push};
+    use crate::chat::{BoxBand, ChatLine, NameEnd, NameStart};
+
+    /// A line read at row 1008 from x 60 to `x1`, its end found as `end`.
+    fn line(x1: i32, end: NameEnd) -> ChatLine {
+        ChatLine {
+            top: 1008,
+            bottom: 1022,
+            band: BoxBand {
+                y0: 1000,
+                y1: 1029,
+                ratio: 0.66,
+            },
+            name: RectI {
+                x0: 60,
+                y0: 1008,
+                x1,
+                y1: 1022,
+            },
+            start: NameStart::Parenthesis,
+            end,
+            message: None,
+        }
+    }
+
+    fn model(readings: &[(i32, NameEnd, u32)]) -> Model {
+        let mut all = readings
+            .iter()
+            .flat_map(|&(x1, end, n)| std::iter::repeat_n(line(x1, end), n as usize));
+        let mut model = Model::new(&all.next().unwrap());
+        for l in all {
+            model.add(&l, 0);
+        }
+        model
+    }
+
+    #[test]
+    fn moves_are_told_by_the_usual_colon_behind_wider_safe_readings() {
+        let m = model(&[(300, NameEnd::Safe, 60), (110, NameEnd::Colon, 12)]);
+        assert_eq!(m.columns().1, 300);
+        assert!(m.moved_alike(&line(111, NameEnd::Colon)));
+        assert!(!m.ends_alike(&line(111, NameEnd::Colon)));
+        assert!(m.moved_alike(&line(300, NameEnd::Safe)));
+        assert!(!m.moved_alike(&line(150, NameEnd::Colon)));
+        assert!(!m.moved_alike(&line(110, NameEnd::Safe)));
+        // A colon read a few times is no evidence, nor one read less often
+        // than another colon.
+        let m = model(&[(300, NameEnd::Safe, 60), (110, NameEnd::Colon, 2)]);
+        assert!(!m.moved_alike(&line(110, NameEnd::Colon)));
+        let m = model(&[
+            (139, NameEnd::Colon, 40),
+            (101, NameEnd::Colon, 12),
+            (200, NameEnd::Safe, 9),
+        ]);
+        assert!(!m.moved_alike(&line(100, NameEnd::Colon)));
+        assert!(m.moved_alike(&line(139, NameEnd::Colon)));
+    }
+
+    #[test]
+    fn covers_the_replaced_end_until_the_colon_is_confident() {
+        let mut m = model(&[(93, NameEnd::Colon, 1)]);
+        m.replaced_end = Some(161);
+        assert_eq!(m.cover_end(), 161);
+        for _ in 0..CONFIDENT_READS {
+            m.add(&line(93, NameEnd::Colon), 0);
+        }
+        assert_eq!(m.cover_end(), 93);
+    }
+
+    #[test]
+    fn unconfirmed_rises_add_up_by_frame() {
+        let push = Push {
+            frame: 10,
+            step: 58,
+            rises: vec![(10, 29), (12, 29)],
+            ids: vec![1],
+        };
+        assert_eq!(push.step_by(9), 0);
+        assert_eq!(push.step_by(11), 29);
+        assert_eq!(push.step_by(12), 58);
+        assert_eq!(push.last(), 12);
     }
 }
