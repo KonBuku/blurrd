@@ -25,7 +25,7 @@ use tauri::ipc::Channel;
 use uuid::Uuid;
 
 use crate::jobs::EventOut;
-use crate::media::asset_url;
+use crate::media::{asset_url, video_url};
 use crate::output;
 use crate::projects::{OpenProject, is_verified};
 use crate::session::SessionEntry;
@@ -191,7 +191,13 @@ fn summary(state: &AppState, project: &OpenProject) -> ProjectSummary {
         state.paths.add_file(&proxy);
         asset_url(&proxy)
     });
-    project.summary(asset_url(project.source()), proxy_url)
+    let media_url = video_url(
+        state.media.as_deref(),
+        project.id(),
+        project.source(),
+        project.info().size,
+    );
+    project.summary(media_url, proxy_url)
 }
 
 /// The project `id`.

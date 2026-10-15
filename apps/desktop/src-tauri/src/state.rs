@@ -9,6 +9,7 @@ use blurrd_engine::{Engine, EngineConfig, OcrSetup, default_cache_dir};
 use crate::capabilities::CapabilityProbe;
 use crate::exact::ExactRenderer;
 use crate::jobs::Jobs;
+use crate::media_server::MediaServer;
 use crate::paths::UserPaths;
 use crate::presets::Presets;
 use crate::projects::Projects;
@@ -33,6 +34,8 @@ pub(crate) struct AppState {
     pub(crate) presets: Arc<Presets>,
     pub(crate) session: Arc<Session>,
     pub(crate) exact: Arc<ExactRenderer>,
+    /// The loopback media server, unless it could not start.
+    pub(crate) media: Option<Arc<MediaServer>>,
 }
 
 impl AppState {
@@ -54,6 +57,15 @@ impl AppState {
             },
         };
         let cache = config.cache_dir.clone();
+        let media = match MediaServer::start() {
+            Ok(server) => Some(Arc::new(server)),
+            Err(error) => {
+                tauri_plugin_log::log::warn!(
+                    "the media server could not start, large videos play through the asset protocol: {error}"
+                );
+                None
+            }
+        };
         let engine = Engine::new(config).map(Arc::new);
         if let Err(error) = &engine {
             tauri_plugin_log::log::error!("the engine could not start: {error}");
@@ -67,6 +79,7 @@ impl AppState {
             presets: Arc::new(Presets::new(config_dir.join(PRESETS_FILE))),
             session: Arc::new(Session::new(cache.join(SESSION_FILE))),
             exact: Arc::new(ExactRenderer::new()),
+            media,
         })
     }
 

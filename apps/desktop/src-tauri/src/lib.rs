@@ -14,6 +14,7 @@ mod exact;
 mod jobs;
 mod logging;
 mod media;
+mod media_server;
 mod output;
 mod paths;
 mod presets;

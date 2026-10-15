@@ -278,6 +278,13 @@ leaks. An Exact patch is the frame blurred by the export's own blur
 and a frame seeker stays open on the last project so that stepping
 through frames is answered from decoded frames.
 
+Videos play through the asset protocol. Files of 1 GiB and more play from
+the loopback media server instead (`src-tauri/src/media_server.rs`): it
+listens on 127.0.0.1 on a random port, answers only URLs with the random
+token of this app start and the id of an opened video, and supports range
+requests, so the player seeks without the webview holding large ranges in
+memory.
+
 ### Window shell
 
 `src/features/shell/AppShell.tsx` lays out the main window: the title bar,

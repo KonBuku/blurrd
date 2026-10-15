@@ -36,7 +36,8 @@ tauri-plugin-store = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 # `log`: the engine's tracing events reach the log plugin's files.
 tracing = { workspace = true, features = ["log"] }
-uuid = { workspace = true, features = ["v7"] }
+# v7 job ids, v4 for the media server's random token.
+uuid = { workspace = true, features = ["v4", "v7"] }
 
 [lints]
 workspace = true
