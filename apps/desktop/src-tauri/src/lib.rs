@@ -4,10 +4,13 @@
 //! IPC. The crate owns the window and the plugins, and exposes the
 //! engine through its commands (module `commands`): probing and opening
 //! videos, reading and editing projects, presets and the saved queue, and
-//! jobs that report over per-job channels (module `jobs`).
+//! jobs that report over per-job channels (module `jobs`). The
+//! `blurrd://` scheme serves thumbnails, Exact patches and leak crops
+//! (module `scheme`).
 
 mod capabilities;
 mod commands;
+mod exact;
 mod jobs;
 mod logging;
 mod media;
@@ -15,6 +18,7 @@ mod output;
 mod paths;
 mod presets;
 mod projects;
+mod scheme;
 mod session;
 mod state;
 mod tasks;
@@ -83,6 +87,22 @@ pub fn run() -> Result<(), tauri::Error> {
             state.probe_capabilities();
             app.manage(state);
             Ok(())
+        })
+        .register_asynchronous_uri_scheme_protocol(scheme::SCHEME, |ctx, request, responder| {
+            let Some(state) = ctx.app_handle().try_state::<AppState>() else {
+                // Only before the setup hook ran; the page is not loaded yet.
+                responder.respond(scheme::unavailable());
+                return;
+            };
+            let state = state.inner().clone();
+            // Decoding and encoding take milliseconds: answer off the
+            // webview's thread.
+            let spawned = std::thread::Builder::new()
+                .name("blurrd-scheme".to_owned())
+                .spawn(move || responder.respond(scheme::respond(&state, &request)));
+            if let Err(error) = spawned {
+                tauri_plugin_log::log::warn!("could not answer a blurrd:// request: {error}");
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::probe_media,

@@ -17,9 +17,12 @@ name = "blurrd_app"
 tauri-build = { workspace = true }
 
 [dependencies]
+blurrd-blur = { workspace = true }
 blurrd-core = { workspace = true }
 blurrd-engine = { workspace = true }
 blurrd-video = { workspace = true }
+# Exact patches and leak crops of the blurrd:// scheme.
+jpeg-encoder = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The asset protocol serves the opened videos to the preview player.

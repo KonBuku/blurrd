@@ -106,6 +106,11 @@ pub(crate) struct OpenProject {
 }
 
 impl OpenProject {
+    /// The project id (the fingerprint's hash).
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
     /// The source video.
     pub(crate) fn source(&self) -> &Path {
         &self.source

@@ -7,6 +7,7 @@ use blurrd_core::{AppError, OcrCapability};
 use blurrd_engine::{Engine, EngineConfig, OcrSetup, default_cache_dir};
 
 use crate::capabilities::CapabilityProbe;
+use crate::exact::ExactRenderer;
 use crate::jobs::Jobs;
 use crate::paths::UserPaths;
 use crate::presets::Presets;
@@ -31,6 +32,7 @@ pub(crate) struct AppState {
     pub(crate) capabilities: Arc<CapabilityProbe>,
     pub(crate) presets: Arc<Presets>,
     pub(crate) session: Arc<Session>,
+    pub(crate) exact: Arc<ExactRenderer>,
 }
 
 impl AppState {
@@ -64,6 +66,7 @@ impl AppState {
             capabilities: Arc::new(CapabilityProbe::new(ocr)),
             presets: Arc::new(Presets::new(config_dir.join(PRESETS_FILE))),
             session: Arc::new(Session::new(cache.join(SESSION_FILE))),
+            exact: Arc::new(ExactRenderer::new()),
         })
     }
 

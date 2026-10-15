@@ -440,9 +440,11 @@ dependencies = [
 name = "blurrd-app"
 version = "0.1.0"
 dependencies = [
+ "blurrd-blur",
  "blurrd-core",
  "blurrd-engine",
  "blurrd-video",
+ "jpeg-encoder",
  "serde",
  "serde_json",
  "tauri",
