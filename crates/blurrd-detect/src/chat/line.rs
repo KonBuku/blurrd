@@ -30,8 +30,9 @@ const TRIM: f32 = 0.1;
 const LINE_ROWS: (u32, u32) = (8, 22);
 /// Rows kept at each end when two touching lines are split.
 const SPLIT_MARGIN: (u32, u32) = (6, 5);
-/// A line starting at most this far below the previous line's top is the
-/// continuation of a wrapped message (messages are 29 px apart, a wrapped
+/// A line starting at most this far below the top of the line read just
+/// above it (or of that line's continuation) is the continuation of a
+/// wrapped message (messages are 29 px apart, a wrapped
 /// line 18 px). Lines split from a run of more than two lines (an
 /// overlay's ink joins them) are left out of this rule: the split also
 /// yields texture, and the overlay's ink shifts the tops of the parts.
@@ -312,9 +313,13 @@ pub(super) fn find_names<F>(
             let top = area.y0 + a as i32;
             let x = |c: u32| area.x0 + c as i32;
             if !joined {
-                let wrapped = top - prev_top <= WRAP_MAX;
-                prev_top = top;
+                // Only a line read just above can continue here: rows of
+                // texture above a line (the box's top edge after a 1440p
+                // downscale) are no message to continue (measured: a line
+                // with descenders under them was never read).
+                let wrapped = pending.is_some() && top - prev_top <= WRAP_MAX;
                 if wrapped {
+                    prev_top = top;
                     // The continuation of a line covered to its end is
                     // covered with it: a phrase can carry a second name
                     // onto it. One box over both lines, so the line is
@@ -369,6 +374,9 @@ pub(super) fn find_names<F>(
                     bracketed: read.bracketed,
                 };
                 pending = Some((name, band));
+                if !joined {
+                    prev_top = top;
+                }
             }
         }
     }

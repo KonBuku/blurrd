@@ -371,6 +371,40 @@ fn ignores_texture_at_the_box_edge() {
 }
 
 #[test]
+fn reads_a_line_under_texture_rows() {
+    // A short run of texture rows right above a line, too far right to be
+    // a line of its own (the box's top edge after a 1440p downscale), is
+    // no message that the line could continue.
+    for seed in 0..6u64 {
+        let mut rng = Rng::new(80 + seed);
+        let messages = vec![message(
+            &mut rng,
+            Channel::All,
+            SINGLE_WORD[(seed % 5) as usize],
+            0,
+        )];
+        let mut fx = chat_fixture(
+            Language::English,
+            messages,
+            BACKGROUNDS[(seed % 2) as usize],
+            Palette::DEFAULT,
+        );
+        for x in (240..340).step_by(6) {
+            let speck = RectI {
+                x0: x,
+                y0: 997,
+                x1: x + 2,
+                y1: 1005,
+            };
+            fx.frame.fill_rect(speck, [235, 235, 235], 1.0);
+        }
+        let check = check_frame(&fx);
+        check.assert_clean(&format!("seed {seed}"));
+        assert_eq!(check.detections.len(), 1, "seed {seed}");
+    }
+}
+
+#[test]
 fn reports_the_message_after_the_name() {
     // The message is reported separately (blurred only when the user asks
     // for it), and the name box does not reach into it.
