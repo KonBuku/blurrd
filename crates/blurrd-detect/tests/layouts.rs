@@ -12,6 +12,8 @@
     reason = "test helpers on small frames: coordinates never wrap, a panic is a failure"
 )]
 
+mod support;
+
 use blurrd_blur::{PixelParams, PreparedBox, YuvColour, prepare_boxes};
 use blurrd_core::{BlurBox, BlurParams, HudAnchor, HudLayout, Region};
 use blurrd_detect::calibration::{Calibrator, MIN_CONFIDENCE};
@@ -19,12 +21,14 @@ use blurrd_detect::chat::LEFT_PANEL_ROI;
 use blurrd_detect::geometry::{HudCrop, HudSampler};
 use blurrd_detect::killfeed::FEED_ROI;
 use blurrd_detect::{ChatDetector, Detection, KillFeedDetector, RgbView};
-use blurrd_testkit::hud::chat::{Channel, ChatMessage, ChatSpec, Language};
+use blurrd_testkit::hud::chat::{Channel, ChatInput, ChatMessage, ChatSpec, Language};
 use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
 use blurrd_testkit::metrics::item_coverage;
 use blurrd_testkit::{
     Background, Fixture, FontSet, Layout, NameStyle, Palette, RgbFrame, Rng, Scene, synth_name,
 };
+
+use support::Filter;
 
 /// Frames of every scene: kills and messages arrive in the first 12.
 const FRAMES: u32 = 40;
@@ -225,4 +229,75 @@ fn a_change_of_bars_starts_a_new_segment() {
         calibration.geometry_at(0).unwrap().layout,
         HudLayout::Wide16x9
     );
+}
+
+#[test]
+fn two_word_chat_names_are_covered_in_greyscale_720p() {
+    // Native 720p video in greyscale with the chat open on a bright
+    // background: the enemies' red names and prefixes fade towards the
+    // background, and every two-word name is still covered whole. (A
+    // recording where a broken letter of such a name read as the colon
+    // needs the game's font at 720p; the fixture fonts do not break that
+    // way, so this guards the surrounding behaviour only.)
+    let layout = Layout::wide(1280, 720);
+    let sampler = HudSampler::new(layout.geometry());
+    let fonts = FontSet::latin();
+    for seed in 0..6 {
+        let mut rng = Rng::new(1500 + seed);
+        let messages = (0..8)
+            .map(|i| ChatMessage {
+                channel: Channel::All,
+                name: synth_name(&mut rng, NameStyle::TwoWord),
+                team: if i % 2 == 0 { Team::Enemy } else { Team::Ally },
+                text: "nice try".to_owned(),
+                role: None,
+                wrap: false,
+                time: 1 + 2 * i,
+            })
+            .collect();
+        let spec = ChatSpec {
+            input: Some(ChatInput {
+                from: 20,
+                to: 40,
+                channel: Channel::All,
+                text: "gg".to_owned(),
+            }),
+            ..ChatSpec::new(Language::English, messages)
+        };
+        let scene = Scene::new(layout, Background::white_sky(), Palette::DEFAULT, FRAMES)
+            .with_chat(&fonts, spec);
+        let fx = scene.render(30);
+        let fx = Fixture {
+            frame: Filter::Saturation(0.0).whole_frame(&fx.frame),
+            truth: fx.truth,
+        };
+        let frame = view(&fx.frame);
+        let mut crop = HudCrop::default();
+        let left = sampler.crop(&frame, LEFT_PANEL_ROI, HudAnchor::Left, &mut crop);
+        let mut dets = Vec::new();
+        ChatDetector::new().detect(&left, &mut dets).unwrap();
+        let detections: Vec<Detection> = dets
+            .iter()
+            .map(|d| to_source(&sampler, d, HudAnchor::Left))
+            .collect();
+        let boxes = prepared(&fx, layout.sy, &detections);
+        let coverage = item_coverage(&fx.truth, &boxes);
+        let names: Vec<_> = coverage
+            .iter()
+            .filter(|c| c.region == Region::TextChat)
+            .collect();
+        assert_eq!(names.len(), 8, "seed {seed}");
+        let leaks: Vec<String> = names
+            .iter()
+            .filter(|c| c.is_leak())
+            .map(|c| {
+                let item = fx.truth.items.iter().find(|i| i.id == c.id).unwrap();
+                format!(
+                    "{} ({} of {} px)",
+                    item.text, c.leaked_pixels, c.glyph_pixels
+                )
+            })
+            .collect();
+        assert!(leaks.is_empty(), "seed {seed}: {leaks:?}");
+    }
 }

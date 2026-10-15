@@ -109,6 +109,9 @@ const WHITE_PERCENTILE: f32 = 0.9;
 /// bright: faint coloured glyphs on bright backgrounds lose their
 /// saturation, but they stay darker than the white message.
 const WHITE_FRACTION: f32 = 0.85;
+/// The message after the colon of a name too faint to be seen is at least
+/// this many times as bright as the name's ink before it.
+const MESSAGE_CONTRAST: f32 = 1.15;
 
 /// How the end of a sender name was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -812,9 +815,26 @@ fn read_name(line: &LineInk<'_>) -> Option<NameRead> {
 /// narrow glyph that a space separates from the message is the name's dim
 /// last letter, and the colon is that glyph (measured at 720p in
 /// greyscale: a final "s" read as the colon cut the name's box short).
+///
+/// The dim name may still leave thin high-contrast slivers (a letter's
+/// stem and dot can look like a colon). Where ink precedes a candidate,
+/// the glyph after it must be brighter than that ink by
+/// [`MESSAGE_CONTRAST`]: the message is brighter than the dim name, the
+/// rest of the name is not. Slivers darker than the message's white are
+/// part of the name, not texture specks (measured at native 720p in
+/// greyscale: a broken letter of the first word of a two-word name read
+/// as the colon, the second word unblurred for 34 frames).
 fn faint_name(line: &LineInk<'_>) -> Option<NameRead> {
     let neutral = |c: [u8; 3]| hue_saturation(c).1 < MIN_SATURATION;
-    let ends_name = |c: u32| LineColours::followed_by(line, c, neutral);
+    let ends_name = |c: u32| {
+        LineColours::followed_by(line, c, neutral)
+            && line.colour(EDGE_COLUMNS, c).is_none_or(|name| {
+                LineColours::glyph_after(line, c).is_none_or(|message| {
+                    f32::from(brightness(message)) >= MESSAGE_CONTRAST * f32::from(brightness(name))
+                })
+            })
+    };
+    let white = f32::from(line.white_level());
     let mut specks = 0;
     let mut colon = None;
     for (k, glyph) in line.strong_segments.iter().enumerate() {
@@ -834,6 +854,12 @@ fn faint_name(line: &LineInk<'_>) -> Option<NameRead> {
             });
             colon = Some(*after.unwrap_or(glyph));
             break;
+        }
+        if line
+            .colour(glyph.start, glyph.end)
+            .is_some_and(|c| f32::from(brightness(c)) < WHITE_FRACTION * white)
+        {
+            continue;
         }
         specks += glyph.len();
         if specks > COLON_COLUMNS {
@@ -908,13 +934,16 @@ impl LineColours {
             .position(|s| s.start <= colon && colon < s.end)
             .and_then(|k| Some((line.segments[k], line.segments.get(k + 1)?)))
             .is_none_or(|(glyph, next)| next.start - glyph.end > WORD_GAP);
-        // The first ink after the colon, glyph by glyph: on bright
-        // backgrounds faint glyphs run together into one segment.
-        spaced
-            && (colon + COLON_COLUMNS + 1..line.width)
-                .find(|&x| (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK)
-                .and_then(|x| line.colour(x, x + GLYPH_COLUMNS))
-                .is_none_or(message)
+        spaced && Self::glyph_after(line, colon).is_none_or(message)
+    }
+
+    /// The colour of the first glyph after the colon candidate in column
+    /// `colon`, glyph by glyph: on bright backgrounds faint glyphs run
+    /// together into one segment.
+    fn glyph_after(line: &LineInk<'_>, colon: u32) -> Option<[u8; 3]> {
+        (colon + COLON_COLUMNS + 1..line.width)
+            .find(|&x| (0..line.height).filter(|&y| line.get(x, y)).count() >= COLUMN_MIN_INK)
+            .and_then(|x| line.colour(x, x + GLYPH_COLUMNS))
     }
 
     /// Where the prefix colour ends after the name start `nx0`: the last
@@ -1008,6 +1037,11 @@ fn inner_closing_paren(line: &LineInk<'_>, prefix: Run, shape: (u32, u32)) -> Op
 fn same_rows(rows: (u32, u32), shape: (u32, u32)) -> bool {
     let (top, bottom) = (rows.0.abs_diff(shape.0), rows.1.abs_diff(shape.1));
     top.max(bottom) <= 1 && top.min(bottom) == 0
+}
+
+/// The brightness of a colour: its largest channel.
+fn brightness(colour: [u8; 3]) -> u8 {
+    colour.into_iter().max().unwrap_or(0)
 }
 
 /// Hue in degrees and saturation (`(max - min) / max`) of a colour.
