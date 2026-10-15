@@ -164,10 +164,14 @@ impl Layout {
         }
     }
 
-    /// A length of `px` reference pixels in source pixels, rounded up and
-    /// at least 1 (for halos and outlines).
-    pub fn len_px(&self, px: f32) -> u32 {
-        (px * self.sy.max(self.sx)).ceil().max(1.0) as u32
+    /// A length of `px` reference pixels in source pixels along x and
+    /// along y, each rounded up and at least 1 (for halos and shadow
+    /// offsets). The axes differ in stretched layouts: a 4:3 image
+    /// stretched to 16:9 widens the HUD but keeps its height, so its text
+    /// shadow and halo stay as tall as at 1080p.
+    pub fn len_px(&self, px: f32) -> (u32, u32) {
+        let len = |scale: f32| (px * scale).ceil().max(1.0) as u32;
+        (len(self.sx), len(self.sy))
     }
 
     /// The true HUD geometry of this layout.

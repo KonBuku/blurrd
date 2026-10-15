@@ -111,7 +111,8 @@ impl Painter<'_> {
         let bmp = &label.bitmap;
         let x0 = self.layout.x(pen.0, anchor).round() as i32 - bmp.origin_x;
         let y0 = self.layout.y(pen.1).round() as i32 - bmp.baseline;
-        let shadow = self.layout.len_px(1.0) as i32;
+        let (shadow_x, shadow_y) = self.layout.len_px(1.0);
+        let (shadow_x, shadow_y) = (shadow_x as i32, shadow_y as i32);
         let bounds = self.frame.bounds();
         let clip = match clip {
             Some(c) => self.map(c, anchor).intersection(&bounds)?,
@@ -120,8 +121,8 @@ impl Painter<'_> {
         let area = RectI::new(
             x0,
             y0,
-            x0 + bmp.width as i32 + shadow,
-            y0 + bmp.height as i32 + shadow,
+            x0 + bmp.width as i32 + shadow_x,
+            y0 + bmp.height as i32 + shadow_y,
         )
         .ok()?
         .intersection(&clip)?;
@@ -129,7 +130,7 @@ impl Painter<'_> {
         for y in area.y0..area.y1 {
             for x in area.x0..area.x1 {
                 let glyph = bmp.at(x - x0, y - y0);
-                let shade = bmp.at(x - x0 - shadow, y - y0 - shadow);
+                let shade = bmp.at(x - x0 - shadow_x, y - y0 - shadow_y);
                 if shade > 0.0 {
                     self.frame
                         .blend(x, y, [0, 0, 0], shade * SHADOW_ALPHA * alpha);
@@ -166,8 +167,8 @@ impl Painter<'_> {
         let Some(text) = ink.bounds() else {
             return;
         };
-        let halo = self.layout.len_px(GLYPH_HALO_REF_PX);
-        let glyphs = ink.dilated(halo);
+        let (halo_x, halo_y) = self.layout.len_px(GLYPH_HALO_REF_PX);
+        let glyphs = ink.dilated_xy(halo_x, halo_y);
         let slot_src = self.map(draw.slot, anchor);
         // The slot always contains the ink and its halo, even
         // mid-animation, so a slot box never leaks.

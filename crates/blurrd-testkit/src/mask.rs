@@ -116,24 +116,31 @@ impl Mask {
     /// radius `r`, so the result is conservative).
     #[must_use]
     pub fn dilated(&self, r: u32) -> Self {
-        let r = r as i32;
+        self.dilated_xy(r, r)
+    }
+
+    /// The mask grown by `rx` pixels left and right and `ry` pixels up and
+    /// down (a rectangular structuring element of `2rx + 1` × `2ry + 1`).
+    #[must_use]
+    pub fn dilated_xy(&self, rx: u32, ry: u32) -> Self {
+        let (rx, ry) = (rx as i32, ry as i32);
         let a = self.area;
         let grown = RectI {
-            x0: a.x0 - r,
-            y0: a.y0 - r,
-            x1: a.x1 + r,
-            y1: a.y1 + r,
+            x0: a.x0 - rx,
+            y0: a.y0 - ry,
+            x1: a.x1 + rx,
+            y1: a.y1 + ry,
         };
         // Separable: dilate rows into `wide`, then columns into `out`.
         let mut wide = Self::empty(grown);
         for (x, y) in self.pixels() {
-            for dx in -r..=r {
+            for dx in -rx..=rx {
                 wide.insert(x + dx, y);
             }
         }
         let mut out = Self::empty(grown);
         for (x, y) in wide.pixels() {
-            for dy in -r..=r {
+            for dy in -ry..=ry {
                 out.insert(x, y + dy);
             }
         }
@@ -196,6 +203,14 @@ mod tests {
         assert_eq!(m.count(), 25);
         assert_eq!(m.bounds(), RectI::new(3, 3, 8, 8).ok());
         assert!(m.contains(3, 7) && !m.contains(2, 5));
+    }
+
+    #[test]
+    fn dilates_each_axis_on_its_own() {
+        let m = dot(5, 5).dilated_xy(3, 1);
+        assert_eq!(m.count(), 21);
+        assert_eq!(m.bounds(), RectI::new(2, 4, 9, 7).ok());
+        assert!(m.contains(2, 6) && !m.contains(5, 7));
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub struct TruthItem {
     /// before the halo).
     pub text: RectI,
     /// Every pixel of the ink, dilated by [`GLYPH_HALO_REF_PX`] (scaled to
-    /// the layout). This is what a blur must cover.
+    /// the layout along each axis). This is what a blur must cover.
     pub glyphs: Mask,
     /// The slot the name can appear in: the box Safe mode would blur. It
     /// always contains [`TruthItem::glyphs`].
