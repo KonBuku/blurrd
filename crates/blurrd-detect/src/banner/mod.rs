@@ -33,7 +33,7 @@
 mod plate;
 mod tracker;
 
-use blurrd_core::{NameKind, RectI, Region};
+use blurrd_core::{HudAnchor, NameKind, RectI, Region};
 
 pub use plate::Plate;
 pub use tracker::{BannerBox, BannerTracker, FADE, FALLBACK_HALF, RING};
@@ -48,6 +48,15 @@ use crate::morph::{MorphScratch, white_tophat};
 
 /// The banner name is centred on this column once it has settled.
 pub const CENTRE_X: i32 = 960;
+
+/// The anchor the banner's crop is sampled with in layouts other than
+/// 16:9 ([`HudSampler::crop`](crate::geometry::HudSampler::crop)): the
+/// banner is centred on the game image. The kill feed in the same
+/// [`FEED_ROI`] is anchored right, so the banner needs a crop of its own
+/// there (measured on synthetic 4:3, 16:10, pillarboxed and stretched
+/// frames: a banner read from the right-anchored crop leaks in every
+/// frame, from the centred crop in none).
+pub const ANCHOR: HudAnchor = HudAnchor::Center;
 
 /// The strip searched for the name (`BX0..BX1`, `BY0..BY1`): the plate's
 /// rows, and wide on the right for the slide-in.
@@ -241,7 +250,9 @@ impl BannerDetector {
     }
 
     /// Reads the banner in `crop`, the [`FEED_ROI`] of a frame in reference
-    /// scale (the kill-feed crop: the banner lies inside it).
+    /// scale, sampled with [`ANCHOR`] (in 16:9 the kill-feed crop itself:
+    /// the banner lies inside it). Its boxes map back to the frame with
+    /// the same anchor.
     ///
     /// # Errors
     ///

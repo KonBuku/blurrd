@@ -2,9 +2,9 @@
 //! every layout of the fixture matrix (16:9 at 720p, 1080p, 1440p and 4K,
 //! native 4:3, 4:3 pillarboxed, 16:10 and 4:3 stretched) and every
 //! colour-blind palette: the calibration finds the layout and learns the
-//! kill-feed bar colours of the palettes, and every kill-feed and chat
-//! name read through it is fully covered in source pixels (plan 7.3,
-//! M15).
+//! kill-feed bar colours of the palettes, and every kill-feed, chat, voice
+//! and banner name read through it is fully covered in source pixels
+//! (plan 7.3, M15).
 
 #![allow(
     clippy::cast_possible_wrap,
@@ -15,13 +15,17 @@
 mod support;
 
 use blurrd_blur::{PixelParams, PreparedBox, YuvColour, prepare_boxes};
-use blurrd_core::{BlurBox, BlurParams, FrameRange, HudAnchor, HudLayout, Region};
+use blurrd_core::{BlurBox, BlurParams, FrameRange, HudAnchor, HudLayout, NameKind, Region};
 use blurrd_detect::calibration::{Calibrator, MIN_CONFIDENCE};
 use blurrd_detect::chat::LEFT_PANEL_ROI;
 use blurrd_detect::geometry::{HudCrop, HudSampler};
 use blurrd_detect::killfeed::FEED_ROI;
 use blurrd_detect::voice::LEFT_PANEL_ROI as VOICE_PANEL_ROI;
-use blurrd_detect::{ChatDetector, Detection, KillFeedDetector, RgbView, VoiceDetector};
+use blurrd_detect::{
+    BannerDetector, BannerTracker, ChatDetector, Detection, KillFeedDetector, RgbView,
+    VoiceDetector, banner,
+};
+use blurrd_testkit::hud::banner::BannerSpec;
 use blurrd_testkit::hud::chat::{Channel, ChatInput, ChatMessage, ChatSpec, Language};
 use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
 use blurrd_testkit::hud::voice::{self, Speaker, VoiceSpec};
@@ -301,6 +305,126 @@ fn two_word_chat_names_are_covered_in_greyscale_720p() {
             })
             .collect();
         assert!(leaks.is_empty(), "seed {seed}: {leaks:?}");
+    }
+}
+
+#[test]
+fn voice_names_are_covered_in_every_layout() {
+    // Three speakers of every name style on dark, textured and bright
+    // backgrounds, read through the left-anchored panel crop.
+    let fonts = FontSet::latin();
+    let styles = [
+        NameStyle::Latin(3),
+        NameStyle::Latin(8),
+        NameStyle::Latin(14),
+        NameStyle::TwoWord,
+        NameStyle::Latin(16),
+        NameStyle::Latin(5),
+    ];
+    for (k, layout) in Layout::matrix().into_iter().enumerate() {
+        let sampler = HudSampler::new(layout.geometry());
+        let mut detector = VoiceDetector::new();
+        let mut crop = HudCrop::default();
+        let mut dets = Vec::new();
+        for seed in 0..12u64 {
+            let mut rng = Rng::new(100 * k as u64 + seed);
+            let speakers = (0..3u8)
+                .map(|slot| Speaker {
+                    name: synth_name(
+                        &mut rng,
+                        styles[(seed as usize + slot as usize) % styles.len()],
+                    ),
+                    location: voice::LOCATIONS[slot as usize].to_owned(),
+                    slot,
+                    shown: vec![FrameRange { f0: 0, f1: 9 }],
+                })
+                .collect();
+            let background = [
+                Background::dusk(),
+                Background::noise(seed),
+                Background::white_sky(),
+            ][seed as usize % 3];
+            let fx = Scene::new(layout, background, Palette::DEFAULT, 10)
+                .with_voice(&fonts, VoiceSpec { speakers })
+                .render(4);
+            let frame = view(&fx.frame);
+            let panel = sampler.crop(&frame, VOICE_PANEL_ROI, HudAnchor::Left, &mut crop);
+            detector.detect(&panel, &mut dets).unwrap();
+            let detections: Vec<Detection> = dets
+                .iter()
+                .map(|d| to_source(&sampler, d, HudAnchor::Left))
+                .collect();
+            let boxes = prepared(&fx, layout.sy, &detections);
+            let names: Vec<_> = item_coverage(&fx.truth, &boxes)
+                .into_iter()
+                .filter(|c| c.region == Region::VoiceChat)
+                .collect();
+            let leaks: Vec<_> = names
+                .iter()
+                .filter(|c| c.is_leak())
+                .map(|c| (c.leaked_pixels, c.glyph_pixels))
+                .collect();
+            assert_eq!(names.len(), 3, "{:?} seed {seed}", layout.kind);
+            assert!(leaks.is_empty(), "{:?} seed {seed}: {leaks:?}", layout.kind);
+        }
+    }
+}
+
+#[test]
+fn banner_names_are_covered_in_every_layout() {
+    // An ACE banner read through the centred crop of the feed area, over
+    // its whole episode (slide-in, settle, hold, fade).
+    let fonts = FontSet::latin();
+    for (k, layout) in Layout::matrix().into_iter().enumerate() {
+        let sampler = HudSampler::new(layout.geometry());
+        let name = synth_name(&mut Rng::new(3 + k as u64), NameStyle::Latin(9));
+        let spec = BannerSpec {
+            hold: 60,
+            ..BannerSpec::new("ACE", &name, 5)
+        };
+        let scene = Scene::new(
+            layout,
+            Background::dusk(),
+            Palette::DEFAULT,
+            spec.end() + 20,
+        )
+        .with_banner(&fonts, spec);
+        let fixtures: Vec<Fixture> = (0..scene.frames()).map(|f| scene.render(f)).collect();
+        let mut detector = BannerDetector::new();
+        let mut tracker = BannerTracker::new();
+        let mut crop = HudCrop::default();
+        let mut boxes = Vec::new();
+        for (f, fx) in fixtures.iter().enumerate() {
+            let frame = view(&fx.frame);
+            let feed = sampler.crop(&frame, FEED_ROI, banner::ANCHOR, &mut crop);
+            let seen = detector.detect(&feed).unwrap();
+            tracker.push(f as u32, &seen, &mut boxes);
+        }
+        tracker.finish(&mut boxes);
+        let mut names = 0;
+        for (f, fx) in fixtures.iter().enumerate() {
+            let detections: Vec<Detection> = boxes
+                .iter()
+                .filter(|b| b.frame as usize == f)
+                .map(|b| {
+                    let rect = sampler.to_source(b.rect, banner::ANCHOR);
+                    Detection {
+                        region: Region::Banner,
+                        kind: NameKind::Banner,
+                        text: rect,
+                        rect,
+                        row_top: None,
+                    }
+                })
+                .collect();
+            for c in item_coverage(&fx.truth, &prepared(fx, layout.sy, &detections)) {
+                if c.region == Region::Banner {
+                    names += 1;
+                    assert!(!c.is_leak(), "{:?} frame {f}: {c:?}", layout.kind);
+                }
+            }
+        }
+        assert!(names > 60, "{:?}: {names} banner name frames", layout.kind);
     }
 }
 
