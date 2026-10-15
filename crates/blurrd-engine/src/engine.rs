@@ -36,7 +36,7 @@ pub struct PoolSizes {
     /// Decoded frames waiting for a crop worker (reference-counted, so a
     /// queued frame holds one decoder surface).
     pub frame_queue: usize,
-    /// Threads that cut, convert and resample the HUD crops.
+    /// Threads that bring frames to the reference scale and cut the crops.
     pub crop_workers: usize,
     /// Frames of crops waiting for each detector stage.
     pub stage_queue: usize,

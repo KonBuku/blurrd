@@ -163,8 +163,8 @@ fn analysis_covers_every_name_of_a_synthetic_recording() {
 
 #[test]
 fn analysis_maps_other_resolutions_onto_the_reference_hud() {
-    // The crops are resampled onto the reference grid and the boxes mapped
-    // back, with no code per resolution. Voice and text chat at sizes other
+    // Frames are brought to the reference scale and the boxes mapped back,
+    // with no code per resolution. Voice and text chat at sizes other
     // than 1080p, and the kill feed's portrait clearance below 1080p, depend
     // on the per-resolution calibration of M15, so this checks that the
     // kill feed and the banner leak nothing, and the clearance at 1440p.
@@ -193,6 +193,58 @@ fn analysis_maps_other_resolutions_onto_the_reference_hud() {
             let on_portraits = synthetic::boxes_on_portraits(project, &scene, checked, 1);
             assert!(on_portraits.is_empty(), "{height}p: {on_portraits:#?}");
         }
+    }
+}
+
+#[test]
+fn analysis_runs_on_other_aspect_ratios() {
+    // Frames that are not 16:9 keep their aspect ratio at the reference
+    // scale and the HUD elements their edges. Native 4:3 (at 960 and at
+    // 1080 lines), 16:10 and 21:9 match the HUD geometry the analysis
+    // assumes before calibration, so their kill feed and banner leak
+    // nothing. A stretched 4:3 game and a pillarboxed one fill 16:9
+    // frames; their HUD is found by the calibration of milestone I2, so
+    // here they only have to analyse without an error.
+    let checked: RegionSet = [Region::KillFeed, Region::Banner].into_iter().collect();
+    let layouts = [
+        (Layout::native_4x3(1280, 960), true),
+        (Layout::native_4x3(1440, 1080), true),
+        (Layout::wide_16x10(1920, 1200), true),
+        (Layout::wide(2560, 1080), true),
+        (Layout::stretched_4x3(1920, 1080), false),
+        (Layout::pillarbox(1920, 1080), false),
+    ];
+    for (k, (layout, assumed)) in layouts.into_iter().enumerate() {
+        let (width, height) = (layout.width, layout.height);
+        let work = Workdir::new(&format!("analysis-aspect-{k}"));
+        let scene = synthetic::hud_scene(layout, 90, 21 + k as u64);
+        let clip = work.path("clip.mkv");
+        synthetic::write_clip(&clip, &scene);
+        let events = Events::default();
+        let analysis = engine(&work)
+            .analyze(
+                &request(clip, RegionSet::all()),
+                &events,
+                &CancellationToken::new(),
+            )
+            .unwrap_or_else(|e| panic!("{width}x{height}: {e:?}"));
+        let project = &analysis.project;
+        assert_eq!(project.plan().validate(width, height), Ok(()));
+        if !assumed {
+            continue;
+        }
+        let summary = synthetic::evaluate(project, &scene, checked);
+        let leaks: u64 = checked
+            .iter()
+            .map(|r| summary.leaks_per_region.get(&r).copied().unwrap_or(0))
+            .sum();
+        assert!(summary.item_frames > 0, "{width}x{height}");
+        assert_eq!(leaks, 0, "{width}x{height}: {summary:?}");
+        // Sizes other than 16:9 are flagged for checking.
+        let warned = events.take().iter().any(
+            |e| matches!(e, JobEvent::Warning { code, .. } if *code == WarningCode::CalibrationLow),
+        );
+        assert!(warned, "{width}x{height}");
     }
 }
 

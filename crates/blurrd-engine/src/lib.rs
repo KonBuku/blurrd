@@ -41,6 +41,7 @@ mod job;
 mod render;
 mod resample;
 mod run;
+mod scaler;
 
 pub use analysis::{Analysis, AnalyzeReport, AnalyzeRequest, LOOKAHEAD_MAX};
 pub use dictionary::{DictionaryBuilder, Pass0Stats, ProtectedZone, ZoneKind, protected_zones};

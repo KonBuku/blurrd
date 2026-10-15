@@ -16,7 +16,7 @@ use blurrd_ocr::{Ep, GpuAdapter, ModelSet, OcrEngine, OcrOptions, OrtRuntime};
 use crossbeam_channel::Receiver;
 
 use super::frame::FrameCrops;
-use crate::dictionary::{DictionaryBuilder, Pass0Stats, ZoneKind};
+use crate::dictionary::{DictionaryBuilder, Pass0Stats};
 use crate::engine::OcrSetup;
 
 /// The OCR side of pass 0, ready to read.
@@ -98,11 +98,7 @@ impl Pass0 {
                 continue;
             }
             for zone in &zones {
-                let crop = match zone.kind {
-                    ZoneKind::FeedAndBanner => crops.feed.native(zone.rect),
-                    ZoneKind::LeftPanel => crops.left.native(zone.rect),
-                };
-                if let Some(crop) = crop {
+                if let Some(crop) = crops.ocr_view(zone.kind, zone.rect) {
                     self.builder
                         .push_zone(&mut self.ocr, zone.id, crop)
                         .map_err(|e| e.to_string())?;
