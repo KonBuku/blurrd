@@ -1,8 +1,11 @@
 //! Canceling the engine's jobs on a real recording from
 //! `BLURRD_TEST_MEDIA` (local only, never in CI): the analysis, the
 //! render and the streaming run each return within 100 ms of the cancel
-//! while running at full speed, and leave no output or `.tmp` file.
-//! Only times are printed.
+//! while running at full speed, and leave no output or `.tmp` file. The
+//! analysis and the run are canceled without and with OCR verification
+//! (pass 0 on the GPU and on the CPU) when ONNX Runtime and the models
+//! are installed (`ORT_DYLIB_PATH`, `BLURRD_MODEL_DIR`; required with
+//! `BLURRD_REQUIRE_OCR`). Only times are printed.
 //!
 //! ```text
 //! cargo nextest run -p blurrd-engine --release --run-ignored all real_cancel --no-capture
@@ -22,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use blurrd_core::{AppError, ErrorKind, JobEvent, JobId};
 use blurrd_engine::{
-    AnalyzeRequest, CancellationToken, Engine, EngineConfig, ProgressSink, RenderRequest,
+    AnalyzeRequest, CancellationToken, Engine, EngineConfig, OcrSetup, ProgressSink, RenderRequest,
     RunRequest,
 };
 use blurrd_testkit::media::{Manifest, MediaDir};
@@ -77,6 +80,26 @@ fn cancel_latency<T: Send>(
         );
         latency
     })
+}
+
+/// ONNX Runtime and the models from the environment, on the GPU or the
+/// CPU, or `None` when they are not installed (a failure when
+/// `BLURRD_REQUIRE_OCR` is set).
+fn ocr_setup(gpu: bool) -> Option<OcrSetup> {
+    let required = std::env::var("BLURRD_REQUIRE_OCR").is_ok_and(|v| !v.is_empty() && v != "0");
+    let path = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    match (path("ORT_DYLIB_PATH"), path("BLURRD_MODEL_DIR")) {
+        (Some(dylib), Some(models)) if dylib.is_file() && models.is_dir() => {
+            let mut setup = OcrSetup::new(dylib, models);
+            setup.gpu = gpu;
+            Some(setup)
+        }
+        _ => {
+            assert!(!required, "run `cargo xtask fetch-ort` and `fetch-models`");
+            eprintln!("OCR cases skipped: ONNX Runtime or the OCR models are not installed");
+            None
+        }
+    }
 }
 
 /// The files in `dir` whose name starts with `stem`.
@@ -134,6 +157,26 @@ fn real_jobs_cancel_quickly_and_leave_nothing() {
         engine.run(&req, watch, token)
     }));
     assert_eq!(leftovers(&work, "run"), Vec::<String>::new());
+
+    // With OCR verification (pass 0 reads while the detectors run).
+    for (gpu, ep) in [(true, "gpu"), (false, "cpu")] {
+        let Some(setup) = ocr_setup(gpu) else {
+            break;
+        };
+        let mut config = EngineConfig::new(work.join("cache"));
+        config.ocr = Some(setup);
+        let engine = Engine::new(config).unwrap();
+        latencies.push(cancel_latency(
+            &format!("analyze+ocr({ep})"),
+            |watch, token| engine.analyze(&analyze(true), watch, token),
+        ));
+        latencies.push(cancel_latency(&format!("run+ocr({ep})"), |watch, token| {
+            let mut req = RunRequest::new(job(), clip.clone(), work.join("run-ocr.mp4"));
+            req.accept_unverified = true;
+            engine.run(&req, watch, token)
+        }));
+        assert_eq!(leftovers(&work, "run-ocr"), Vec::<String>::new());
+    }
 
     let _ = std::fs::remove_dir_all(&work);
     assert!(latencies.iter().all(|&l| l < MAX_LATENCY), "{latencies:?}");

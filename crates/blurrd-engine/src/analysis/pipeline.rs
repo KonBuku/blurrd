@@ -39,7 +39,7 @@ use crate::engine::PoolSizes;
 use crate::job::{Job, canceled, internal};
 
 /// How often a waiting thread looks at the stop flag.
-const POLL: Duration = Duration::from_millis(20);
+pub(super) const POLL: Duration = Duration::from_millis(20);
 
 /// What the pipeline produced.
 #[derive(Debug)]
@@ -83,13 +83,22 @@ pub(crate) struct Pipeline<'a> {
 }
 
 /// The first error of any thread, and the flag that stops them all.
-#[derive(Default)]
-struct Control {
+struct Control<'a> {
     stop: AtomicBool,
     error: Mutex<Option<AppError>>,
+    /// The job, whose cancellation stops every thread too.
+    job: &'a Job<'a>,
 }
 
-impl Control {
+impl<'a> Control<'a> {
+    fn new(job: &'a Job<'a>) -> Self {
+        Self {
+            stop: AtomicBool::new(false),
+            error: Mutex::new(None),
+            job,
+        }
+    }
+
     /// Records `error` (the first one wins) and stops every thread.
     fn fail(&self, error: AppError) {
         self.stop.store(true, Ordering::Relaxed);
@@ -98,8 +107,17 @@ impl Control {
         }
     }
 
+    /// Whether the threads stop: after an error, or once the job was
+    /// canceled (then the cancellation is the error).
     fn stopped(&self) -> bool {
-        self.stop.load(Ordering::Relaxed)
+        if self.stop.load(Ordering::Relaxed) {
+            return true;
+        }
+        if self.job.is_canceled() {
+            self.fail(canceled());
+            return true;
+        }
+        false
     }
 
     /// Runs `work`, recording its error.
@@ -123,7 +141,7 @@ impl Control {
 
 /// Sends `value`, waiting while the queue is full, until the receiver is
 /// gone or the pipeline stops; returns whether it was sent.
-fn send<T>(tx: &Sender<T>, mut value: T, control: &Control) -> bool {
+fn send<T>(tx: &Sender<T>, mut value: T, control: &Control<'_>) -> bool {
     loop {
         if control.stopped() {
             return false;
@@ -156,7 +174,7 @@ impl Pipeline<'_> {
             pools,
             progress,
         } = self;
-        let control = Control::default();
+        let control = Control::new(job);
         let workers = pools.crop_workers.max(1);
         let (frame_tx, frame_rx) = bounded::<VideoFrame>(pools.frame_queue.max(1));
         let (crop_tx, crop_rx) = bounded::<Result<FrameCrops, AppError>>(workers * 2);
@@ -176,7 +194,7 @@ impl Pipeline<'_> {
             let control = &control;
             let decoder = scope.spawn(move || {
                 control
-                    .guard(|| decode_frames(input, &decode, &frame_tx, job, control))
+                    .guard(|| decode_frames(input, &decode, &frame_tx, control))
                     .unwrap_or_default()
             });
             for _ in 0..workers {
@@ -204,8 +222,11 @@ impl Pipeline<'_> {
                 });
             }
             drop((emit_tx, signal_tx));
-            let pass0 = pass0
-                .map(|pass0| scope.spawn(move || pass0.run(&pass0_rx, &signal_rx, hud_stages)));
+            let pass0 = pass0.map(|pass0| {
+                scope.spawn(move || {
+                    pass0.run(&pass0_rx, &signal_rx, hud_stages, &|| control.stopped())
+                })
+            });
             let previews = previews.map(|previews| scope.spawn(move || previews.run(&previews_rx)));
             let collected = collect(&emit_rx, sources, progress, job, control, on_frame);
             let pts = decoder.join().unwrap_or_default();
@@ -250,13 +271,11 @@ fn decode_frames(
     input: &Path,
     options: &DecodeOptions,
     frames: &Sender<VideoFrame>,
-    job: &Job<'_>,
-    control: &Control,
+    control: &Control<'_>,
 ) -> Result<Vec<i64>, AppError> {
     let mut decoder = Decoder::open(input, options)?;
     let mut pts = Vec::new();
     loop {
-        job.check_canceled()?;
         if control.stopped() {
             return Ok(pts);
         }
@@ -276,7 +295,7 @@ fn dispatch(
     crops: &Receiver<Result<FrameCrops, AppError>>,
     stages: &[Sender<Arc<FrameCrops>>],
     sides: &[&Sender<Arc<FrameCrops>>],
-    control: &Control,
+    control: &Control<'_>,
 ) -> Result<(), AppError> {
     let mut waiting: BTreeMap<u32, FrameCrops> = BTreeMap::new();
     let mut next = 0u32;
@@ -314,7 +333,7 @@ fn run_stage(
     frames: &Receiver<Arc<FrameCrops>>,
     emitted: &Sender<Emitted>,
     signals: Option<&Sender<(u32, bool)>>,
-    control: &Control,
+    control: &Control<'_>,
 ) -> Result<(), AppError> {
     for crops in frames {
         if control.stopped() {
@@ -406,7 +425,7 @@ fn collect(
     sources: [bool; SOURCES],
     progress: Option<u32>,
     job: &Job<'_>,
-    control: &Control,
+    control: &Control<'_>,
     on_frame: &mut dyn FnMut(u32, &TrackBuilder),
 ) -> Collector {
     let mut collector = Collector {
@@ -433,8 +452,7 @@ fn collect(
             }
         }
     }
-    if job.is_canceled() {
-        control.fail(canceled());
-    }
+    // Records a cancellation that came after the last frame.
+    control.stopped();
     collector
 }

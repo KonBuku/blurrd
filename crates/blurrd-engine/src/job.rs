@@ -50,15 +50,6 @@ impl<'a> Job<'a> {
         self.cancel.is_cancelled()
     }
 
-    /// Fails with [`ErrorKind::Canceled`] once the job was canceled.
-    pub(crate) fn check_canceled(&self) -> Result<(), AppError> {
-        if self.is_canceled() {
-            Err(canceled())
-        } else {
-            Ok(())
-        }
-    }
-
     /// Time since the job started.
     pub(crate) fn elapsed(&self) -> Duration {
         self.started.elapsed()

@@ -13,9 +13,10 @@ use std::sync::Arc;
 
 use blurrd_core::{HudGeometry, Luid};
 use blurrd_ocr::{Ep, GpuAdapter, ModelSet, OcrEngine, OcrOptions, OrtRuntime};
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 
 use super::frame::FrameCrops;
+use super::pipeline::POLL;
 use crate::dictionary::{DictionaryBuilder, Pass0Stats};
 use crate::engine::OcrSetup;
 
@@ -70,14 +71,17 @@ impl Pass0 {
         })
     }
 
-    /// Reads the frames from `frames` until it closes. `structure` delivers
-    /// `(frame, structure on)` from each of the `hud_stages` HUD stages.
-    /// Fails with the reason when OCR fails.
+    /// Reads the frames from `frames` until it closes or `stopped` says
+    /// the analysis stops (an error or a cancellation: the frames still
+    /// queued are dropped unread). `structure` delivers `(frame,
+    /// structure on)` from each of the `hud_stages` HUD stages. Fails
+    /// with the reason when OCR fails.
     pub(crate) fn run(
         mut self,
         frames: &Receiver<Arc<FrameCrops>>,
         structure: &Receiver<(u32, bool)>,
         hud_stages: usize,
+        stopped: &dyn Fn() -> bool,
     ) -> Result<Pass0Stats, String> {
         // Per frame: signals received, and whether any was on.
         let mut signals: BTreeMap<u32, (usize, bool)> = BTreeMap::new();
@@ -85,9 +89,14 @@ impl Pass0 {
         for crops in frames {
             let index = crops.index;
             while signals.get(&index).is_none_or(|s| s.0 < hud_stages) {
-                let Ok((frame, on)) = structure.recv() else {
-                    // The stages stopped (the analysis is ending early).
+                if stopped() {
                     return Ok(self.builder.stats());
+                }
+                let (frame, on) = match structure.recv_timeout(POLL) {
+                    Ok(signal) => signal,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    // The stages stopped (the analysis is ending early).
+                    Err(RecvTimeoutError::Disconnected) => return Ok(self.builder.stats()),
                 };
                 let entry = signals.entry(frame).or_insert((0, false));
                 entry.0 += 1;
@@ -98,6 +107,9 @@ impl Pass0 {
                 continue;
             }
             for zone in &zones {
+                if stopped() {
+                    return Ok(self.builder.stats());
+                }
                 if let Some(crop) = crops.ocr_view(zone.kind, zone.rect) {
                     self.builder
                         .push_zone(&mut self.ocr, zone.id, crop)
