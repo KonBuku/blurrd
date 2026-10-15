@@ -9,8 +9,10 @@
 //!
 //! The decoder hands out reference-counted frames (no pixel copy); a fixed
 //! number of crop workers cut and convert the HUD crops and read the screen
-//! surfaces of single frames in parallel; the dispatcher restores frame
-//! order and gives every stage a shared handle to each frame's crops; each
+//! surfaces of single frames in parallel, at most [`REORDER_PER_WORKER`]
+//! frames per worker ahead of the oldest frame not yet dispatched; the
+//! dispatcher restores frame order and gives every stage a shared handle
+//! to each frame's crops; each
 //! stage runs its detectors and temporal models over the frames in order on
 //! its own thread; the collector merges the stages' final boxes frame by
 //! frame (each stage's output is delayed by its temporal model's
@@ -22,7 +24,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use blurrd_core::{AppError, Track};
@@ -40,6 +42,11 @@ use crate::job::{Job, canceled, internal};
 
 /// How often a waiting thread looks at the stop flag.
 pub(super) const POLL: Duration = Duration::from_millis(20);
+
+/// How many frames per crop worker may be ahead of the oldest frame the
+/// dispatcher still waits for. Bounds its reorder buffer, whose frames
+/// hold decoder surfaces, when one worker is descheduled.
+const REORDER_PER_WORKER: u32 = 4;
 
 /// What the pipeline produced.
 #[derive(Debug)]
@@ -139,6 +146,47 @@ impl<'a> Control<'a> {
     }
 }
 
+/// The frame the dispatcher hands out next, so crop workers do not run
+/// too far ahead of it.
+struct Window {
+    next: Mutex<u32>,
+    moved: Condvar,
+    size: u32,
+}
+
+impl Window {
+    fn new(size: u32) -> Self {
+        Self {
+            next: Mutex::new(0),
+            moved: Condvar::new(),
+            size: size.max(1),
+        }
+    }
+
+    /// Waits until frame `index` is inside the window; false when the
+    /// pipeline stops first.
+    fn enter(&self, index: u32, control: &Control<'_>) -> bool {
+        let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
+        while index >= next.saturating_add(self.size) {
+            if control.stopped() {
+                return false;
+            }
+            next = self
+                .moved
+                .wait_timeout(next, POLL)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        true
+    }
+
+    /// Moves the window to start at frame `next`.
+    fn advance(&self, next: u32) {
+        *self.next.lock().unwrap_or_else(PoisonError::into_inner) = next;
+        self.moved.notify_all();
+    }
+}
+
 /// Sends `value`, waiting while the queue is full, until the receiver is
 /// gone or the pipeline stops; returns whether it was sent.
 fn send<T>(tx: &Sender<T>, mut value: T, control: &Control<'_>) -> bool {
@@ -176,6 +224,11 @@ impl Pipeline<'_> {
         } = self;
         let control = Control::new(job);
         let workers = pools.crop_workers.max(1);
+        let window = Window::new(
+            u32::try_from(workers)
+                .unwrap_or(u32::MAX)
+                .saturating_mul(REORDER_PER_WORKER),
+        );
         let (frame_tx, frame_rx) = bounded::<VideoFrame>(pools.frame_queue.max(1));
         let (crop_tx, crop_rx) = bounded::<Result<FrameCrops, AppError>>(workers * 2);
         let (emit_tx, emit_rx) = unbounded::<Emitted>();
@@ -191,7 +244,7 @@ impl Pipeline<'_> {
         let previews_tx = previews.is_some().then_some(previews_tx);
 
         let (pts, tracks, max_delay, pass0_result, previews) = std::thread::scope(|scope| {
-            let control = &control;
+            let (control, window) = (&control, &window);
             let decoder = scope.spawn(move || {
                 control
                     .guard(|| decode_frames(input, &decode, &frame_tx, control))
@@ -200,19 +253,13 @@ impl Pipeline<'_> {
             for _ in 0..workers {
                 let (frame_rx, crop_tx, mut cropper) =
                     (frame_rx.clone(), crop_tx.clone(), cropper.clone());
-                scope.spawn(move || {
-                    for frame in frame_rx {
-                        let crops = cropper.crops(frame);
-                        if !send(&crop_tx, crops, control) {
-                            break;
-                        }
-                    }
-                });
+                scope
+                    .spawn(move || crop_frames(&frame_rx, &crop_tx, &mut cropper, window, control));
             }
             drop((frame_rx, crop_tx));
             scope.spawn(move || {
                 let sides: Vec<_> = pass0_tx.iter().chain(&previews_tx).collect();
-                control.guard(|| dispatch(&crop_rx, &to_stages, &sides, control));
+                control.guard(|| dispatch(&crop_rx, &to_stages, &sides, window, control));
             });
             for (stage, rx) in stages.into_iter().zip(stage_inputs) {
                 let (emit_tx, signal_tx) = (emit_tx.clone(), signal_tx.clone());
@@ -289,12 +336,32 @@ fn decode_frames(
     }
 }
 
+/// Cuts the crops of the frames from `frames` into `crops`, inside the
+/// reorder window, until the frames end or the pipeline stops.
+fn crop_frames(
+    frames: &Receiver<VideoFrame>,
+    crops: &Sender<Result<FrameCrops, AppError>>,
+    cropper: &mut Cropper,
+    window: &Window,
+    control: &Control<'_>,
+) {
+    for frame in frames {
+        if !window.enter(frame.index(), control) {
+            return;
+        }
+        if !send(crops, cropper.crops(frame), control) {
+            return;
+        }
+    }
+}
+
 /// Restores frame order and hands every frame to each stage and side
 /// output (pass 0, previews).
 fn dispatch(
     crops: &Receiver<Result<FrameCrops, AppError>>,
     stages: &[Sender<Arc<FrameCrops>>],
     sides: &[&Sender<Arc<FrameCrops>>],
+    window: &Window,
     control: &Control<'_>,
 ) -> Result<(), AppError> {
     let mut waiting: BTreeMap<u32, FrameCrops> = BTreeMap::new();
@@ -316,6 +383,7 @@ fn dispatch(
             }
             next += 1;
         }
+        window.advance(next);
     }
     if waiting.is_empty() || control.stopped() {
         Ok(())
