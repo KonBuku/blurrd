@@ -24,7 +24,9 @@ pub(crate) trait PathScope: Send + Sync {
 
 impl PathScope for tauri::scope::fs::Scope {
     fn allows(&self, path: &Path) -> bool {
-        self.is_allowed(path)
+        // The scope matches globs on the text of the path and does not
+        // resolve `..`: `<chosen>\..\x` would match `<chosen>\**`.
+        !has_dot_segments(path) && self.is_allowed(path)
     }
 
     fn add_file(&self, path: &Path) {
@@ -59,31 +61,41 @@ impl UserPaths {
     /// [`ErrorKind::NotFound`] when it does not exist, [`ErrorKind::Io`]
     /// when it is relative or was not chosen by the user.
     pub(crate) fn existing(&self, path: &Path) -> Result<PathBuf, AppError> {
-        let absolute = absolute(path)?;
-        let canonical = std::fs::canonicalize(&absolute).map_err(|error| {
-            let kind = if error.kind() == std::io::ErrorKind::NotFound {
-                ErrorKind::NotFound
-            } else {
-                ErrorKind::Io
-            };
-            AppError::new(kind, "The file could not be found.")
-                .with_detail(format!("{}: {error}", absolute.display()))
-        })?;
-        self.check(simplified(&canonical))
+        self.check(canonical(&absolute(path)?)?)
     }
 
-    /// The absolute form of `path`, which may not exist yet (a file chosen
-    /// in a save dialog) but must have been chosen by the user.
+    /// The canonical form of `path`, a file that may not exist yet (a file
+    /// chosen in a save dialog) but must lie in a place the user chose.
+    ///
+    /// The folder of the file must exist and is resolved by the system
+    /// (links, `8.3` names); the file name is joined to it as it is. Paths
+    /// with `.` or `..` segments, names the system would rewrite (trailing
+    /// dots or spaces, `:` streams) and device or other special prefixes
+    /// are refused, so the path that is checked is the path that is
+    /// written. An existing file is resolved like the folder, so a link
+    /// cannot lead out of the chosen place.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Io`] when it is relative or was not chosen.
+    /// [`ErrorKind::NotFound`] when the folder does not exist,
+    /// [`ErrorKind::Io`] when the path is relative, not plain, names a
+    /// folder or was not chosen.
     pub(crate) fn target(&self, path: &Path) -> Result<PathBuf, AppError> {
         let absolute = absolute(path)?;
-        let resolved = match std::fs::canonicalize(&absolute) {
-            Ok(canonical) => simplified(&canonical),
-            Err(_) => absolute,
+        let (folder, name) = plain_parts(&absolute)?;
+        let joined = canonical(folder)?.join(name);
+        let resolved = match std::fs::symlink_metadata(&joined) {
+            // Something exists there (a file, a folder, a link): check
+            // where it really is; a dangling link has no answer.
+            Ok(_) => canonical(&joined)?,
+            Err(_) => joined,
         };
+        if resolved.is_dir() {
+            return Err(
+                AppError::new(ErrorKind::Io, "This path names a folder, not a file.")
+                    .with_detail(resolved.display().to_string()),
+            );
+        }
         self.check(resolved)
     }
 
@@ -118,6 +130,74 @@ fn absolute(path: &Path) -> Result<PathBuf, AppError> {
     }
 }
 
+/// The canonical form of `path` without the verbatim prefix.
+fn canonical(path: &Path) -> Result<PathBuf, AppError> {
+    std::fs::canonicalize(path)
+        .map(|canonical| simplified(&canonical))
+        .map_err(|error| {
+            let kind = if error.kind() == std::io::ErrorKind::NotFound {
+                ErrorKind::NotFound
+            } else {
+                ErrorKind::Io
+            };
+            AppError::new(kind, "The file could not be found.")
+                .with_detail(format!("{}: {error}", path.display()))
+        })
+}
+
+/// The folder and the file name of `path` (absolute), when every part of
+/// it is plain: a drive or `\\server\share` prefix (also in its verbatim
+/// form), then only names that the system keeps as they are.
+fn plain_parts(path: &Path) -> Result<(&Path, &std::ffi::OsStr), AppError> {
+    let not_plain = |why: &str| {
+        AppError::new(ErrorKind::Io, "This path cannot be used.")
+            .with_detail(format!("{}: {why}", path.display()))
+    };
+    if has_dot_segments(path) {
+        return Err(not_plain("it has . or .. segments"));
+    }
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::Disk(_)
+                | Prefix::VerbatimDisk(_)
+                | Prefix::UNC(..)
+                | Prefix::VerbatimUNC(..) => {}
+                Prefix::DeviceNS(_) | Prefix::Verbatim(_) => {
+                    return Err(not_plain("device paths are not accepted"));
+                }
+            },
+            Component::RootDir => {}
+            Component::CurDir | Component::ParentDir => {
+                return Err(not_plain("it has . or .. segments"));
+            }
+            Component::Normal(name) => {
+                let name = name.to_string_lossy();
+                if name.ends_with(['.', ' ']) || name.contains(':') {
+                    return Err(not_plain(
+                        "a name ends with a dot or space or names a stream",
+                    ));
+                }
+            }
+        }
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(folder), Some(name)) => Ok((folder, name)),
+        _ => Err(not_plain("it does not name a file")),
+    }
+}
+
+/// Whether `path` has a `.` or `..` segment, between any separators
+/// (`std::path` drops some `.` segments before they could be seen).
+pub(crate) fn has_dot_segments(path: &Path) -> bool {
+    path.components()
+        .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+        || path
+            .to_string_lossy()
+            .split(['\\', '/'])
+            .any(|segment| segment == "." || segment == "..")
+}
+
 /// `path` without the verbatim prefix `canonicalize` adds on Windows
 /// (`\\?\C:\a` becomes `C:\a`, `\\?\UNC\host\share` becomes
 /// `\\host\share`), the form the dialogs and the drop handler report.
@@ -148,7 +228,7 @@ pub(crate) mod tests {
 
     use blurrd_core::ErrorKind;
 
-    use super::{PathScope, UserPaths, simplified};
+    use super::{PathScope, UserPaths, has_dot_segments, simplified};
 
     /// A scope of explicitly allowed paths and folders, for tests.
     #[derive(Debug, Default)]
@@ -158,11 +238,16 @@ pub(crate) mod tests {
 
     impl PathScope for TestScope {
         fn allows(&self, path: &Path) -> bool {
-            self.allowed
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|allowed| path.starts_with(allowed))
+            // Like the asset scope: `Path::starts_with` compares the text
+            // of the components, so `<chosen>\..\x` would start with
+            // `<chosen>`.
+            !has_dot_segments(path)
+                && self
+                    .allowed
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|allowed| path.starts_with(allowed))
         }
 
         fn add_file(&self, path: &Path) {
@@ -224,6 +309,78 @@ pub(crate) mod tests {
         // A file chosen in a save dialog does not exist yet.
         assert!(paths.target(&chosen.join("new.json")).is_ok());
         assert!(paths.target(&other.join("new.json")).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_test_scope_refuses_dot_segments() {
+        let scope = TestScope::default();
+        scope.add_file(Path::new(r"C:\chosen"));
+        assert!(scope.allows(Path::new(r"C:\chosen\new.json")));
+        assert!(!scope.allows(Path::new(r"C:\chosen\..\other\new.json")));
+        assert!(!scope.allows(Path::new(r"C:\chosen/../other/new.json")));
+        assert!(!scope.allows(Path::new(r"C:\other\new.json")));
+    }
+
+    /// Save targets stay inside the chosen folder whatever the spelling.
+    #[test]
+    fn save_targets_cannot_leave_the_chosen_folder() {
+        let dir = std::env::temp_dir().join(format!("blurrd-targets-{}", std::process::id()));
+        let chosen = dir.join("chosen");
+        let other = dir.join("other");
+        std::fs::create_dir_all(chosen.join("sub")).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let paths = paths_below(&chosen);
+        let chosen = simplified(&chosen.canonicalize().unwrap());
+        let other = simplified(&other.canonicalize().unwrap());
+        let text = chosen.to_string_lossy().into_owned();
+
+        // Plain targets inside the folder, also with forward slashes, in
+        // the verbatim form and over an existing file.
+        for good in [
+            format!(r"{text}\new.json"),
+            format!(r"{text}\sub\new.json"),
+            format!("{}/sub/new.json", text.replace('\\', "/")),
+            format!(r"\\?\{text}\new.json"),
+        ] {
+            let target = paths
+                .target(Path::new(&good))
+                .unwrap_or_else(|e| panic!("{good}: {e}"));
+            assert!(target.starts_with(&chosen), "{good}: {}", target.display());
+        }
+        std::fs::write(chosen.join("old.json"), b"{}").unwrap();
+        assert_eq!(
+            paths.target(&chosen.join("old.json")).unwrap(),
+            chosen.join("old.json")
+        );
+
+        let escapes = [
+            format!(r"{text}\..\other\new.json"),
+            format!(r"{text}\..\..\new.json"),
+            format!("{text}/../other/new.json"),
+            format!(r"{text}/..\other/new.json"),
+            format!(r"{text}\sub\..\..\other\new.json"),
+            format!(r"{text}\.\new.json"),
+            format!(r"{text}\.. \other\new.json"),
+            format!(r"{text}\..\other.\new.json"),
+            format!(r"{text}\...\new.json"),
+            format!(r"{text}\sub.\new.json"),
+            format!(r"{text}\new.json."),
+            format!(r"{text}\new.json "),
+            format!(r"{text}\new.json:stream"),
+            format!(r"\\?\{text}\..\other\new.json"),
+            format!(r"\\.\{text}\new.json"),
+            r"\\server\share\x\..\new.json".to_owned(),
+            r"\\?\UNC\server\share\x\..\new.json".to_owned(),
+            format!(r"{text}\missing\new.json"),
+            format!(r"{}\new.json", other.display()),
+            "new.json".to_owned(),
+            format!(r"{text}\"),
+        ];
+        for bad in &escapes {
+            assert!(paths.target(Path::new(bad)).is_err(), "{bad} was accepted");
+        }
+        assert!(!other.join("new.json").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -193,7 +193,13 @@ fn forward_files(app: &AppHandle, argv: &[String], cwd: &str) {
     // like files dropped onto the window: the commands may use them.
     let scope = app.asset_protocol_scope();
     for path in &paths {
-        let path = Path::new(path);
+        // The scope matches the text of a path: allow the canonical form,
+        // the one the commands check (a `..` in an argument would never
+        // match it).
+        let Ok(path) = std::fs::canonicalize(path).map(|path| paths::simplified(&path)) else {
+            continue;
+        };
+        let path = path.as_path();
         let allowed = if path.is_dir() {
             scope.allow_directory(path, true)
         } else {
