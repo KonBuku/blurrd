@@ -14,8 +14,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use blurrd_core::{
     AppError, BlurParams, DensityLanes, ErrorKind, Fingerprint, FramePts, FrameRange, MediaInfo,
     Override, OverridesSaved, Project, ProjectSummary, ProjectVerify, RegionSet, ThumbnailStrip,
-    TrackSet, VerifyReport, VerifyState, VerifySummary, schema,
+    TrackSet, VerifyReport, VerifySummary, schema,
 };
+use blurrd_engine::UNVERIFIED_SUFFIX;
 use blurrd_engine::cache::{self, ProjectDir, THUMBNAIL_INTERVAL_S};
 use blurrd_video::PtsTable;
 
@@ -23,9 +24,6 @@ use blurrd_video::PtsTable;
 /// video that was not analysed yet is its height over this (the engine's
 /// assumed geometry before calibration).
 const REFERENCE_HEIGHT: f32 = 1080.0;
-
-/// Suffix of outputs made from projects that are not verified.
-pub(crate) const UNVERIFIED_SUFFIX: &str = "_UNVERIFIED";
 
 /// The projects opened in this session.
 #[derive(Debug)]
@@ -385,14 +383,6 @@ impl OpenProject {
             )
         }
     }
-}
-
-/// Whether a project's verification is clean and covers its current
-/// revision (the render's rule for `_UNVERIFIED` names).
-pub(crate) fn is_verified(project: &Project) -> bool {
-    project.verify.state == VerifyState::Clean
-        && project.verify.plan_revision == project.revision
-        && project.verify.unverified_ranges.is_empty()
 }
 
 /// `output` without its `_UNVERIFIED` suffix, if it has one.

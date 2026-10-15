@@ -14,7 +14,7 @@ use blurrd_core::{
     OutputFolder, OutputPreview, RateControl,
 };
 
-use crate::projects::UNVERIFIED_SUFFIX;
+use blurrd_engine::unverified_name;
 
 /// Characters Windows does not allow in file names.
 const FORBIDDEN: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -83,10 +83,10 @@ pub(crate) fn output_target(
         if verified {
             path.to_path_buf()
         } else {
-            unverified(path)
+            unverified_name(path)
         }
     };
-    let taken = |path: &Path| path.exists() || unverified(path).exists();
+    let taken = |path: &Path| path.exists() || unverified_name(path).exists();
     let is_source = |path: &Path| same_path(&written(path), source);
 
     let first = name(1);
@@ -121,7 +121,7 @@ pub(crate) fn preview(
     verified: bool,
 ) -> Result<OutputPreview, AppError> {
     let path = match output_target(source, export, verified)? {
-        OutputTarget::Write(path) if !verified => unverified(&path),
+        OutputTarget::Write(path) if !verified => unverified_name(&path),
         OutputTarget::Write(path) | OutputTarget::Skip(path) => path,
     };
     let audio = match export.audio {
@@ -168,16 +168,6 @@ fn extension(container: Container, source: &Path) -> Option<String> {
             .extension()
             .map(|ext| ext.to_string_lossy().into_owned()),
     }
-}
-
-/// `name_UNVERIFIED.ext` next to `name.ext`, as the render names it.
-fn unverified(path: &Path) -> PathBuf {
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let name = match path.extension() {
-        Some(ext) => format!("{stem}{UNVERIFIED_SUFFIX}.{}", ext.to_string_lossy()),
-        None => format!("{stem}{UNVERIFIED_SUFFIX}"),
-    };
-    path.with_file_name(name)
 }
 
 /// Whether two paths name the same file (Windows compares names without

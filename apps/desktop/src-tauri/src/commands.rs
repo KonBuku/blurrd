@@ -19,6 +19,7 @@ use blurrd_core::{
     JobEvent, JobId, OutputFolder, OutputPreview, Override, OverridesSaved, Preset, ProbeOutcome,
     ProjectSummary, Region, RegionSettings, TrackSet, VerifyReport, VerifySettings,
 };
+use blurrd_engine::is_verified;
 use serde::Deserialize;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -27,7 +28,7 @@ use uuid::Uuid;
 use crate::jobs::EventOut;
 use crate::media::{asset_url, video_url};
 use crate::output;
-use crate::projects::{OpenProject, is_verified};
+use crate::projects::OpenProject;
 use crate::session::SessionEntry;
 use crate::state::AppState;
 use crate::tasks::{self, ExportRequest, region_set};

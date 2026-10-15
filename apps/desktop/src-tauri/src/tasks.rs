@@ -13,11 +13,11 @@ use blurrd_core::{
     AppError, BlurParams, ExportSettings, JobEvent, JobKind, JobSummary, Region, RegionSet,
     VerifyState, WarningCode,
 };
-use blurrd_engine::{AnalyzeRequest, Engine, ProgressSink, RenderRequest, RunRequest};
+use blurrd_engine::{AnalyzeRequest, Engine, ProgressSink, RenderRequest, RunRequest, is_verified};
 
 use crate::jobs::{JobSink, Work};
 use crate::output::{OutputTarget, output_target};
-use crate::projects::{OpenProject, is_verified};
+use crate::projects::OpenProject;
 
 /// What an export needs besides the project.
 #[derive(Debug, Clone)]
