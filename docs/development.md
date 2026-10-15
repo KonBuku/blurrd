@@ -253,7 +253,10 @@ the queue.
 
 `src-tauri/src/commands.rs` exposes the engine to the frontend (plan 9.1);
 the typed wrappers are `src/ipc/commands.ts`, `jobs.ts` and `presets.ts`,
-and their payloads are generated bindings. The commands take only paths
+and their payloads are generated bindings. `src/ipc/contract.test.ts`
+checks that every command a wrapper invokes is declared in `build.rs`,
+registered in `src-tauri/src/lib.rs`, granted in the capability and
+answered by the mock backend. The commands take only paths
 the user chose: the open and save dialogs and drops onto the window add
 them to the asset protocol scope, and `src-tauri/src/paths.rs` refuses
 anything outside it. Projects (`projects.rs`) are read from and written to
