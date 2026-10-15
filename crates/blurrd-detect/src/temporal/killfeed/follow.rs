@@ -124,6 +124,9 @@ pub(super) enum How {
     /// part of it, at its place or one row lower (see
     /// [`super::Part::lead_in`]).
     Lead,
+    /// Before the name's first match, while another name of its row is
+    /// matched: the row moves as one (see [`super::ride_row`]).
+    Row,
 }
 
 /// Template positions of one frame: the top-left corners span

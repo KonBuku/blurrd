@@ -574,6 +574,92 @@ fn covers_names_on_a_moving_background() {
 }
 
 #[test]
+fn covers_a_name_hidden_at_its_row_birth_while_its_row_is_followed() {
+    // A bright patch hides the killer name from the row's birth for its
+    // first 30 frames, while the victim stays readable: the detector
+    // reads the killer only afterwards and its template, which shows the
+    // name, matches none of the hidden frames. The row moves as one, so
+    // the killer is covered where the followed victim puts it.
+    const HIDDEN: u32 = 30;
+    let fonts = FontSet::latin();
+    let mut rng = Rng::new(23);
+    let kill = Kill {
+        killer: "Brightwater".to_owned(),
+        victim: "Osric".to_owned(),
+        killer_team: Team::Ally,
+        victim_team: Team::Enemy,
+        badge: None,
+        ..random_kill(&mut rng, 0)
+    };
+    let scene = Scene::new(
+        Layout::reference(),
+        Background::dusk(),
+        Palette::DEFAULT,
+        110,
+    )
+    .with_kill_feed(
+        &fonts,
+        KillFeedSpec {
+            life: 80,
+            wipe_in: false,
+            ..KillFeedSpec::new(vec![kill])
+        },
+    );
+    let mut detector = KillFeedDetector::new();
+    let mut tracker = KillFeedTracker::new();
+    let (mut detections, mut out, mut truths) = (Vec::new(), Vec::new(), Vec::new());
+    let mut hidden = 0;
+    for f in 0..scene.frames() {
+        let mut fx = scene.render(f);
+        let killer = fx
+            .truth
+            .in_region(Region::KillFeed)
+            .find(|i| i.kind == NameKind::Killer)
+            .map(|i| i.text);
+        if let Some(text) = killer.filter(|_| hidden < HIDDEN) {
+            let patch = RectI {
+                x0: text.x0 - 2,
+                y0: text.y0 - 3,
+                x1: text.x1 + 2,
+                y1: text.y1 + 3,
+            };
+            fx.frame.fill_rect(patch, [214, 222, 226], 1.0);
+            hidden += 1;
+        }
+        detector
+            .detect(&feed_view(&fx.frame), &mut detections)
+            .unwrap();
+        if hidden > 0 && hidden < HIDDEN {
+            assert!(
+                !detections.iter().any(|d| d.kind == NameKind::Killer),
+                "{f}: the hidden killer was read"
+            );
+        }
+        tracker
+            .push(&KillFeedFrame {
+                frame: f,
+                crop: feed_view(&fx.frame),
+                detections: &detections,
+            })
+            .unwrap();
+        tracker.drain_ready(&mut out);
+        truths.push(fx.truth);
+    }
+    tracker.finish(&mut out);
+    assert_eq!(hidden, HIDDEN);
+    let mut leaks = Vec::new();
+    for (entry, truth) in out.iter().zip(&truths) {
+        for c in item_coverage(truth, &prepared(entry)) {
+            let item = truth.items.iter().find(|i| i.id == c.id).unwrap();
+            if item.opacity >= 1.0 && c.is_leak() {
+                leaks.push(format!("{}: {:?} {}", entry.frame, item.kind, item.text));
+            }
+        }
+    }
+    assert!(leaks.is_empty(), "{} leaks: {leaks:#?}", leaks.len());
+}
+
+#[test]
 fn holds_names_through_a_flash() {
     // A flash washes the feed out almost completely for its first frames.
     let video = Video::new(

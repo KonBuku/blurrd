@@ -15,7 +15,9 @@
 //!    references follow during the track's life.
 //! 3. Each reference is followed backward in time (to the row's slide-in)
 //!    and forward (through stack jumps, flashes, gaps and the fade-out)
-//!    with [`crate::track::ncc`].
+//!    with [`crate::track::ncc`]. Before the first frame its template
+//!    matches, a name moves with another name of its row that is
+//!    followed there (a row is rigid).
 //! 4. The blur box of every frame is the name's box moved by the tracked
 //!    offset: a fixed size, so it never jitters. The other names of the
 //!    reference row move with it (a row is rigid), which covers a name
@@ -365,7 +367,7 @@ impl Part {
             let confidence = match p.how {
                 How::Matched | How::Slide => Confidence::Tracked,
                 How::Weak | How::Hold => Confidence::WeakHold,
-                How::Gap | How::Lead => Confidence::GapFill,
+                How::Gap | How::Lead | How::Row => Confidence::GapFill,
             };
             return Some((*p, confidence));
         }
@@ -646,6 +648,7 @@ impl KillFeedTracker {
             &mut insert,
         );
         part.lead_in(&self.ring, lo);
+        ride_row(&mut part, &self.parts, r.frame, lo);
         part.pre_roll = compose::pre_roll(&part, &self.ring, lo);
         // Forward up to the newest frame.
         for g in r.frame + 1..=newest {
@@ -882,6 +885,78 @@ impl KillFeedTracker {
             p.positions.retain(|&g, _| g >= keep || Some(g) == end);
             true
         });
+    }
+}
+
+/// Extends the positions of `part` (a new reference in frame `reference`)
+/// to the frames before its first one (down to frame `lo`) in which an
+/// existing part matches a name of the reference row: a row moves as
+/// one, so the name sits where the other name's movement puts it.
+///
+/// The template of a name can fail where the detector also failed and the
+/// other names of its row stay readable: a bright background edge through
+/// the translucent bar behind one name only changes that name's look
+/// (measured: a sharpened diagonal through a real killer name, whose
+/// victim was followed from the row's birth, left the killer unblurred
+/// for 19 frames, while neither the backward pass nor the slide-in search
+/// matched it). Of several such parts the one that reaches furthest back
+/// is used; only frames in which it matched count, not its slide-in (the
+/// pre-roll before the name's own first frame covers a row's birth, and
+/// moving that frame into the slide-in lost it: measured at 900p), back
+/// to a frame in which another part holds the name itself (a reference
+/// cut from a short reading would otherwise carry its guesses, and the
+/// portrait clearance taken from that reading, over the frames the other
+/// part follows: measured under a sharpening filter, where that clearance
+/// cut the first three glyphs of a killer name from the merged box).
+fn ride_row(part: &mut Part, parts: &[Part], reference: u32, lo: u32) {
+    let (Some((&first, _)), Some(&at)) = (
+        part.positions.first_key_value(),
+        part.positions.get(&reference),
+    ) else {
+        return;
+    };
+    let matched = |p: &&Pos| p.how == How::Matched;
+    let rides = parts.iter().filter_map(|q| {
+        let q_at = *q.positions.get(&reference).filter(matched)?;
+        let q_box = q.own_box(reference, true)?;
+        part.boxes
+            .iter()
+            .skip(1)
+            .any(|b| b.kind == q.kind && compose::place(at, b.offset).iou(&q_box) >= SAME_NAME_IOU)
+            .then_some((q, q_at))
+    });
+    let reach = |q: &Part| {
+        (lo..first)
+            .rev()
+            .take_while(|g| q.positions.get(g).is_some_and(|p| matched(&p)))
+            .count()
+    };
+    let Some((q, q_at)) = rides.max_by_key(|(q, _)| reach(q)) else {
+        return;
+    };
+    let own = part.boxes.first().map_or((0, 0, 0, 0), |b| b.offset);
+    for g in (lo..first).rev() {
+        let Some(p) = q.positions.get(&g).filter(matched) else {
+            break;
+        };
+        let pos = Pos {
+            x0: at.x0 + p.x0 - q_at.x0,
+            y0: at.y0 + p.y0 - q_at.y0,
+            x1: at.x1 + p.x1 - q_at.x1,
+            y1: at.y1 + p.y1 - q_at.y1,
+            how: How::Row,
+        };
+        // Another part that holds the name there follows it already.
+        let rect = compose::place(pos, own);
+        let followed = parts.iter().any(|o| {
+            o.kind == part.kind
+                && o.own_box(g, false)
+                    .is_some_and(|b| b.iou(&rect) >= SAME_NAME_IOU)
+        });
+        if followed {
+            break;
+        }
+        part.positions.insert(g, pos);
     }
 }
 
