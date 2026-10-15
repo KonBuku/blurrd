@@ -9,7 +9,6 @@ import { colourModel, pixelParams, type ColourModel, type PixelParams } from "@/
 import { FrameClock } from "@/lib/frames";
 import { IntervalIndex } from "@/lib/interval-index";
 import { pathKey } from "@/lib/media";
-import { isEngineRegion } from "@/lib/regions";
 import { settingsOf, useJobSettingsStore } from "@/store/job-settings";
 
 import { useProjectEdits } from "@/features/editing/useProjectEdits";
@@ -75,7 +74,7 @@ export function useProject(path: string): ProjectState {
       index: new IntervalIndex(clock.count, tracks.data.tracks, overrides),
       params: pixelParams(blur, project.data.sy),
       colour: colourModel(media.color.matrix, media.color.range),
-      enabled: new Set(regions.filter(isEngineRegion)),
+      enabled: new Set(regions),
     };
   }, [project.data, tracks.data, clock, overrides, blur, regions]);
   const failure = project.error ?? tracks.error ?? pts.error;

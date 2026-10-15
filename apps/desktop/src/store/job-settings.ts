@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
+import type { Preset } from "@/bindings/Preset";
 import { DEFAULT_JOB_SETTINGS, type JobSettings, type SettingsSection } from "@/lib/job-settings";
-import { DEFAULT_PRESET_ID, withPreset, type PresetData } from "@/lib/presets";
+import { DEFAULT_PRESET_ID, withPreset } from "@/lib/presets";
 
 import { useQueueStore, type QueueState } from "./queue";
 
@@ -45,7 +46,7 @@ export interface JobSettingsState {
     change: (section: JobSettings[K]) => JobSettings[K],
   ) => void;
   /** Applies a preset to the targets (their detector options stay). */
-  readonly applyPreset: (targets: SettingsTargets, preset: PresetData) => void;
+  readonly applyPreset: (targets: SettingsTargets, preset: Preset) => void;
 }
 
 /** The settings entry of a queue item, or the defaults for `null` (no file). */

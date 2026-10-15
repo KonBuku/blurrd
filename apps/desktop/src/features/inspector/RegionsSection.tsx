@@ -1,16 +1,13 @@
 import { Fragment, useId } from "react";
 
+import type { Region } from "@/bindings/Region";
+import type { RegionSettings } from "@/bindings/RegionSettings";
 import type { TrackSet } from "@/ipc/commands";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RegionIcon } from "@/components/ui/region-chip";
 import { Switch } from "@/components/ui/switch";
-import {
-  ALL_REGIONS,
-  orderedRegions,
-  type DetectedRegion,
-  type RegionChoice,
-} from "@/lib/job-settings";
-import { REGIONS, type AnyRegion } from "@/lib/regions";
+import { ALL_REGIONS, orderedRegions, type DetectedRegion } from "@/lib/job-settings";
+import { REGIONS } from "@/lib/regions";
 
 import { InspectorRow, InspectorSection, WordListInput } from "./parts";
 
@@ -30,10 +27,10 @@ const HUD = ALL_REGIONS.filter((region) => REGIONS[region].group === "hud");
 const SCREENS = ALL_REGIONS.filter((region) => REGIONS[region].group === "screens");
 
 export interface RegionsSectionProps {
-  readonly regions: RegionChoice;
+  readonly regions: RegionSettings;
   /** Tracks of the analysed file, for the per-region counts. */
   readonly tracks: TrackSet | null;
-  readonly onChange: (change: (regions: RegionChoice) => RegionChoice) => void;
+  readonly onChange: (change: (regions: RegionSettings) => RegionSettings) => void;
 }
 
 /**
@@ -49,7 +46,7 @@ export function RegionsSection({ regions, tracks, onChange }: RegionsSectionProp
   const allId = useId();
   const noteId = useId();
 
-  const setRegion = (region: AnyRegion, on: boolean) =>
+  const setRegion = (region: Region, on: boolean) =>
     onChange((current) => {
       const next = new Set(current.enabled);
       if (on) next.add(region);
@@ -84,7 +81,7 @@ export function RegionsSection({ regions, tracks, onChange }: RegionsSectionProp
             aria-describedby={noteId}
             checked={allOn ? true : noneOn ? false : "indeterminate"}
             onCheckedChange={() =>
-              onChange((current) => ({ ...current, enabled: allOn ? [] : ALL_REGIONS }))
+              onChange((current) => ({ ...current, enabled: allOn ? [] : [...ALL_REGIONS] }))
             }
           />
         }
@@ -117,7 +114,7 @@ function GroupHeading({ children }: { readonly children: string }) {
 }
 
 interface RegionRowProps {
-  readonly region: AnyRegion;
+  readonly region: Region;
   readonly description: string;
   readonly on: boolean;
   /** Tracks found in the region, `null` before an analysis. */
@@ -159,7 +156,7 @@ function RegionRow({ region, description, on, count, onToggle }: RegionRowProps)
 }
 
 interface RegionOptionsProps {
-  readonly regions: RegionChoice;
+  readonly regions: RegionSettings;
   readonly onChange: RegionsSectionProps["onChange"];
 }
 

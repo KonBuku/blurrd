@@ -4,6 +4,7 @@ import { Ellipsis } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 
+import type { Preset } from "@/bindings/Preset";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -32,7 +33,7 @@ import {
 import { toAppError } from "@/ipc/errors";
 import { deletePreset, exportPreset, importPreset, listPresets, savePreset } from "@/ipc/presets";
 import { logWarning } from "@/lib/log";
-import { differsFromPreset, presetValues, type PresetData } from "@/lib/presets";
+import { differsFromPreset, presetValues } from "@/lib/presets";
 import { fileSettingsOf, targetsOf, useJobSettingsStore } from "@/store/job-settings";
 import { shownItemId, useQueueStore } from "@/store/queue";
 
@@ -40,7 +41,7 @@ import { shownItemId, useQueueStore } from "@/store/queue";
 const PRESET_FILTER = { name: "blurrd preset", extensions: ["blurrd-preset.json", "json"] };
 
 /** Applies a preset to the inspector's targets. */
-function apply(preset: PresetData) {
+function apply(preset: Preset) {
   const store = useJobSettingsStore.getState();
   store.applyPreset(targetsOf(useQueueStore.getState(), store.scope), preset);
 }
@@ -66,7 +67,7 @@ export function PresetBar() {
   const [dialog, setDialog] = useState<"save" | "export" | null>(null);
   const labelId = useId();
 
-  const setList = (list: PresetData[]) => queryClient.setQueryData(["presets"], list);
+  const setList = (list: Preset[]) => queryClient.setQueryData(["presets"], list);
 
   const update = async () => {
     if (!preset) return;
@@ -170,7 +171,7 @@ export function PresetBar() {
         open={dialog === "save"}
         onOpenChange={(next) => setDialog(next ? "save" : null)}
         onSave={async (name) => {
-          const saved: PresetData = {
+          const saved: Preset = {
             id: `user-${crypto.randomUUID()}`,
             name,
             builtin: false,
@@ -259,7 +260,7 @@ function SavePresetDialog({ open: shown, onOpenChange, onSave }: SavePresetDialo
 interface ExportPresetDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly preset: PresetData;
+  readonly preset: Preset;
 }
 
 /**

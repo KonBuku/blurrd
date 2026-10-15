@@ -1,18 +1,6 @@
 import type { Region } from "@/bindings/Region";
 
 /**
- * Screen surfaces outside the gameplay HUD whose names blurrd also blurs
- * (decision D8): scoreboard/tab, death recap, the "Spectating" banner and
- * the match-end/MVP/round-end screens. The engine adds them to the
- * generated `Region` type in milestone M13b; this local type covers them
- * until then and is replaced by the generated one.
- */
-export type ScreenRegion = "Scoreboard" | "DeathRecap" | "Spectating" | "MatchEnd";
-
-/** Every region the user interface can label. */
-export type AnyRegion = Region | ScreenRegion;
-
-/**
  * Colour family of a region (`--color-region-<family>` tokens). Each HUD
  * region and manual boxes have their own; the screen surfaces share one.
  */
@@ -30,7 +18,7 @@ export interface RegionInfo {
 }
 
 /** Display data per region, in inspector order. */
-export const REGIONS: Readonly<Record<AnyRegion, RegionInfo>> = {
+export const REGIONS: Readonly<Record<Region, RegionInfo>> = {
   KillFeed: { label: "Kill feed", family: "killfeed", group: "hud" },
   Banner: { label: "Round banner", family: "banner", group: "hud" },
   VoiceChat: { label: "Voice chat", family: "voice", group: "hud" },
@@ -43,12 +31,4 @@ export const REGIONS: Readonly<Record<AnyRegion, RegionInfo>> = {
 };
 
 /** All regions in inspector order. */
-export const REGION_ORDER = Object.keys(REGIONS) as readonly AnyRegion[];
-
-/**
- * Whether the generated `Region` type has this region: the HUD regions and
- * Manual, not yet the screen surfaces (M13b).
- */
-export function isEngineRegion(region: AnyRegion): region is Region {
-  return REGIONS[region].group !== "screens";
-}
+export const REGION_ORDER = Object.keys(REGIONS) as readonly Region[];

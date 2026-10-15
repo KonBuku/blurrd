@@ -3,6 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import type { Region } from "@/bindings/Region";
 import type { RegionVerify } from "@/bindings/RegionVerify";
 import type { VerifyReport } from "@/bindings/VerifyReport";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ import { leakCropUrl } from "@/ipc/media";
 import { formatTimecode } from "@/lib/frames";
 import { logWarning } from "@/lib/log";
 import { baseName, formatCount } from "@/lib/media";
-import { REGIONS, type AnyRegion } from "@/lib/regions";
+import { REGIONS } from "@/lib/regions";
 import {
   STATUS_LABELS,
   ZONE_LABELS,
@@ -56,7 +57,7 @@ export function ReportDialog({ open, onOpenChange, item, project, report }: Repo
   const { summary } = report;
   const leaks = countedLeaks(report.leaks);
   const outside = outOfScope(report.leaks);
-  const regions = Object.entries(report.per_region) as [AnyRegion, RegionVerify][];
+  const regions = Object.entries(report.per_region) as [Region, RegionVerify][];
   const unverifiable = regions.filter(([, counts]) => counts.unverifiable_items > 0);
   const title = item.output ? baseName(item.output) : item.name;
 

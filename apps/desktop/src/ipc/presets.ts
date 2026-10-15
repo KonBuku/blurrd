@@ -7,29 +7,29 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { PresetData } from "@/lib/presets";
+import type { Preset } from "@/bindings/Preset";
 
 /** Every preset, built-ins first. */
-export function listPresets(): Promise<PresetData[]> {
-  return invoke<PresetData[]>("list_presets");
+export function listPresets(): Promise<Preset[]> {
+  return invoke<Preset[]>("list_presets");
 }
 
 /** Adds a user preset or replaces the one with the same id; answers the new list. */
-export function savePreset(preset: PresetData): Promise<PresetData[]> {
-  return invoke<PresetData[]>("save_preset", { preset });
+export function savePreset(preset: Preset): Promise<Preset[]> {
+  return invoke<Preset[]>("save_preset", { preset });
 }
 
 /** Deletes a user preset; answers the new list. */
-export function deletePreset(id: string): Promise<PresetData[]> {
-  return invoke<PresetData[]>("delete_preset", { id });
+export function deletePreset(id: string): Promise<Preset[]> {
+  return invoke<Preset[]>("delete_preset", { id });
 }
 
 /**
  * Adds the presets of a preset file chosen in the open dialog and answers
  * the added ones (ids that are taken get a new one).
  */
-export function importPreset(path: string): Promise<PresetData[]> {
-  return invoke<PresetData[]>("import_preset", { path });
+export function importPreset(path: string): Promise<Preset[]> {
+  return invoke<Preset[]>("import_preset", { path });
 }
 
 /** Writes one preset to a file chosen in the save dialog. */

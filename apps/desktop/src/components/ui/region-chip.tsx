@@ -12,11 +12,12 @@ import {
   TextChatIcon,
   VoiceChatIcon,
 } from "@/components/icons/regions";
-import { REGIONS, type AnyRegion, type RegionFamily } from "@/lib/regions";
+import type { Region } from "@/bindings/Region";
+import { REGIONS, type RegionFamily } from "@/lib/regions";
 import { cn } from "@/lib/utils";
 
 /** Icon per region; the screen surfaces share a colour but not an icon. */
-const REGION_ICONS: Readonly<Record<AnyRegion, Icon>> = {
+const REGION_ICONS: Readonly<Record<Region, Icon>> = {
   KillFeed: KillFeedIcon,
   Banner: RoundBannerIcon,
   VoiceChat: VoiceChatIcon,
@@ -49,7 +50,7 @@ const FAMILY_TEXT: Readonly<Record<RegionFamily, string>> = {
 };
 
 export type RegionIconProps = {
-  readonly region: AnyRegion;
+  readonly region: Region;
   readonly className?: string;
 };
 
@@ -69,7 +70,7 @@ export function RegionIcon({ region, className }: RegionIconProps) {
 }
 
 export type RegionChipProps = Omit<ComponentProps<"span">, "children"> & {
-  readonly region: AnyRegion;
+  readonly region: Region;
 };
 
 /**

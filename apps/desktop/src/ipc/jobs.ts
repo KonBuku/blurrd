@@ -10,13 +10,14 @@ import type { BlurParams } from "@/bindings/BlurParams";
 import type { ExportSettings } from "@/bindings/ExportSettings";
 import type { JobEvent } from "@/bindings/JobEvent";
 import type { JobId } from "@/bindings/JobId";
+import type { RegionSettings } from "@/bindings/RegionSettings";
 import type { VerifySettings } from "@/bindings/VerifySettings";
-import type { DetectedRegion, DetectorOptions, RegionChoice } from "@/lib/job-settings";
+import type { DetectedRegion, DetectorOptions } from "@/lib/job-settings";
 
 /** Arguments of `start_analysis` without the channel. */
 export interface AnalysisRequest {
   readonly projectId: string;
-  readonly regions: RegionChoice;
+  readonly regions: RegionSettings;
   readonly detector: DetectorOptions;
   readonly verify: VerifySettings;
 }

@@ -5,8 +5,9 @@
  * leave out the names kept readable unless asked to keep them.
  */
 import type { AppError } from "@/bindings/AppError";
+import type { Preset } from "@/bindings/Preset";
 import type { PresetFile } from "@/bindings/PresetFile";
-import { BUILTIN_PRESETS, withoutKeptNames, type PresetData } from "@/lib/presets";
+import { BUILTIN_PRESETS, withoutKeptNames } from "@/lib/presets";
 
 /** Session storage key of the user presets. */
 const STORAGE_KEY = "blurrd.mock.presets";
@@ -18,31 +19,28 @@ function failure(kind: AppError["kind"], message: string): AppError {
   return { kind, message, detail: null };
 }
 
-/** A preset file's content (`blurrd-presets/1`) holding presets with screen surfaces. */
-type MockPresetFile = Omit<PresetFile, "presets"> & { readonly presets: PresetData[] };
-
 /** The presets of one mock backend. */
 export class MockPresets {
   /** Files written by `export_preset` and read by `import_preset`: path → JSON text. */
   readonly files = new Map<string, string>();
 
-  private user(): PresetData[] {
+  private user(): Preset[] {
     const text = sessionStorage.getItem(STORAGE_KEY);
-    return text === null ? [] : (JSON.parse(text) as PresetData[]);
+    return text === null ? [] : (JSON.parse(text) as Preset[]);
   }
 
-  private store(presets: readonly PresetData[]): PresetData[] {
+  private store(presets: readonly Preset[]): Preset[] {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
     return this.list();
   }
 
   /** `list_presets`: built-ins first, then the user's presets. */
-  list(): PresetData[] {
+  list(): Preset[] {
     return [...BUILTIN_PRESETS, ...this.user()];
   }
 
   /** `save_preset`: adds or replaces a user preset. */
-  save(preset: PresetData): PresetData[] {
+  save(preset: Preset): Preset[] {
     if (BUILTIN_PRESETS.some((builtin) => builtin.id === preset.id)) {
       throw failure("InvalidProject", "Built-in presets cannot be changed.");
     }
@@ -54,7 +52,7 @@ export class MockPresets {
   }
 
   /** `delete_preset`: removes a user preset. */
-  delete(id: string): PresetData[] {
+  delete(id: string): Preset[] {
     if (BUILTIN_PRESETS.some((builtin) => builtin.id === id)) {
       throw failure("InvalidProject", "Built-in presets cannot be deleted.");
     }
@@ -65,7 +63,7 @@ export class MockPresets {
   export(id: string, path: string, includeKeptNames: boolean): void {
     const preset = this.list().find((candidate) => candidate.id === id);
     if (!preset) throw failure("NotFound", "The preset does not exist.");
-    const file: MockPresetFile = {
+    const file: PresetFile = {
       schema: SCHEMA,
       version: 1,
       presets: [includeKeptNames ? preset : withoutKeptNames(preset)],
@@ -74,10 +72,10 @@ export class MockPresets {
   }
 
   /** `import_preset`: adds the presets of the file at `path` as user presets. */
-  import(path: string): PresetData[] {
+  import(path: string): Preset[] {
     const text = this.files.get(path);
     if (text === undefined) throw failure("NotFound", "The file does not exist.");
-    const file = JSON.parse(text) as Partial<MockPresetFile>;
+    const file = JSON.parse(text) as Partial<PresetFile>;
     if (file.schema !== SCHEMA || !Array.isArray(file.presets)) {
       throw failure("InvalidProject", "This is not a blurrd preset file.");
     }

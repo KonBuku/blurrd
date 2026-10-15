@@ -10,12 +10,11 @@ import { clearMocks, mockConvertFileSrc, mockIPC, mockWindows } from "@tauri-app
 import type { AppError } from "@/bindings/AppError";
 import type { Capabilities } from "@/bindings/Capabilities";
 import type { Override } from "@/bindings/Override";
+import type { Preset } from "@/bindings/Preset";
 import type { SessionEntry } from "@/ipc/commands";
 import type { AnalysisRequest, RenderRequest, RunFile } from "@/ipc/jobs";
 import type { ExportSettings } from "@/bindings/ExportSettings";
 import { pathKey } from "@/lib/media";
-import type { PresetData } from "@/lib/presets";
-import { isEngineRegion } from "@/lib/regions";
 
 import { MOCK_CAPABILITIES } from "./capabilities";
 
@@ -326,11 +325,7 @@ export function installMockBackend(): MockBackend {
         };
         const frames = frameCount(path);
         return backend.jobs.start("Analyze", frames, onEvent, () => {
-          backend.projects.analyze(
-            path,
-            new Set(regions.enabled.filter(isEngineRegion)),
-            verify.enabled,
-          );
+          backend.projects.analyze(path, new Set(regions.enabled), verify.enabled);
           const { report } = backend.projects.state(path);
           return {
             frames,
@@ -384,11 +379,7 @@ export function installMockBackend(): MockBackend {
             totalFrames: frameCount(path),
             finish: () => {
               if (!current) {
-                backend.projects.analyze(
-                  path,
-                  new Set(file.regions.enabled.filter(isEngineRegion)),
-                  file.verify.enabled,
-                );
+                backend.projects.analyze(path, new Set(file.regions.enabled), file.verify.enabled);
               }
               return render(path, file.settings);
             },
@@ -434,7 +425,7 @@ export function installMockBackend(): MockBackend {
       case "list_presets":
         return backend.presets.list();
       case "save_preset":
-        return backend.presets.save((args as { preset: PresetData }).preset);
+        return backend.presets.save((args as { preset: Preset }).preset);
       case "delete_preset":
         return backend.presets.delete((args as { id: string }).id);
       case "import_preset":

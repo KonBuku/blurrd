@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Preset } from "@/bindings/Preset";
 import { useJobsStore } from "@/features/jobs/jobs";
 import type { AnalysisRequest, RenderRequest } from "@/ipc/jobs";
 import { MOCK_CAPABILITIES } from "@/ipc/mock/capabilities";
@@ -11,7 +12,7 @@ import { projectId } from "@/ipc/mock/project";
 import { analysisRequest, renderRequest } from "@/lib/job-request";
 import { DEFAULT_JOB_SETTINGS, type JobSettings } from "@/lib/job-settings";
 import { pathKey } from "@/lib/media";
-import { BUILTIN_PRESETS, withPreset, type PresetData } from "@/lib/presets";
+import { BUILTIN_PRESETS, withPreset } from "@/lib/presets";
 import { fileSettingsOf, settingsOf, useJobSettingsStore } from "@/store/job-settings";
 import { useQueueStore } from "@/store/queue";
 import { useUiStore } from "@/store/ui";
@@ -450,7 +451,7 @@ describe("inspector", () => {
     queue(PATH, OTHER);
     renderInspector();
     await screen.findByText("Manual boxes");
-    const maxPrivacy = BUILTIN_PRESETS[1] as PresetData;
+    const maxPrivacy = BUILTIN_PRESETS[1] as Preset;
     await pick("Preset", "Max privacy");
     expect(settingsFor(PATH)).toEqual(withPreset(DEFAULT_JOB_SETTINGS, maxPrivacy));
     expect(settingsFor(OTHER)).toBe(DEFAULT_JOB_SETTINGS);
@@ -497,7 +498,7 @@ describe("inspector", () => {
       const plain = JSON.parse(
         backend.presets.files.get("D:\\Presets\\scrims.blurrd-preset.json") ?? "{}",
       ) as {
-        presets: PresetData[];
+        presets: Preset[];
       };
       expect(plain.presets[0]?.regions.keep_names).toEqual({ own_row: true, names: [] });
 
@@ -510,7 +511,7 @@ describe("inspector", () => {
       await waitFor(() => expect(backend.presets.files.size).toBe(2));
       const withNames = JSON.parse(
         backend.presets.files.get("D:\\Presets\\scrims-names.blurrd-preset.json") ?? "{}",
-      ) as { presets: PresetData[] };
+      ) as { presets: Preset[] };
       expect(withNames.presets[0]?.regions.keep_names.names).toEqual(["Ally"]);
 
       // Import: the taken id gets a new one.

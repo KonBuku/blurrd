@@ -7,22 +7,13 @@
  */
 import type { BlurParams } from "@/bindings/BlurParams";
 import type { ExportSettings } from "@/bindings/ExportSettings";
+import type { Region } from "@/bindings/Region";
 import type { RegionSettings } from "@/bindings/RegionSettings";
 import type { Sensitivity } from "@/bindings/Sensitivity";
 import type { TemporalParams } from "@/bindings/TemporalParams";
 import type { VerifySettings } from "@/bindings/VerifySettings";
 
-import { REGION_ORDER, type AnyRegion } from "./regions";
-
-/**
- * Region settings with the screen surfaces (decision D8) among the enabled
- * regions. Until milestone M13b adds those to the generated `Region`, the
- * request carries them under the same field; afterwards this type equals
- * `RegionSettings`.
- */
-export type RegionChoice = Omit<RegionSettings, "enabled"> & {
-  readonly enabled: readonly AnyRegion[];
-};
+import { REGION_ORDER } from "./regions";
 
 /**
  * Detector options of `start_analysis` that are not part of a preset
@@ -36,7 +27,7 @@ export interface DetectorOptions {
 
 /** Everything a job of one file runs with. */
 export interface JobSettings {
-  readonly regions: RegionChoice;
+  readonly regions: RegionSettings;
   readonly detector: DetectorOptions;
   readonly blur: BlurParams;
   readonly export: ExportSettings;
@@ -47,16 +38,16 @@ export interface JobSettings {
 export type SettingsSection = keyof JobSettings;
 
 /** A region the detector finds (every region but manual boxes). */
-export type DetectedRegion = Exclude<AnyRegion, "Manual">;
+export type DetectedRegion = Exclude<Region, "Manual">;
 
 /** Detector regions every new file starts with: all of them (D8). */
 export const ALL_REGIONS: readonly DetectedRegion[] = REGION_ORDER.filter(
   (region): region is DetectedRegion => region !== "Manual",
 );
 
-/** `RegionSettings::default()` with the screen surfaces enabled (D8). */
-export const DEFAULT_REGIONS: RegionChoice = {
-  enabled: ALL_REGIONS,
+/** `RegionSettings::default()`: every region enabled (D8). */
+export const DEFAULT_REGIONS: RegionSettings = {
+  enabled: [...ALL_REGIONS],
   mode: "Tight",
   keep_names: { own_row: false, names: [] },
   chat_blur_message: false,
@@ -120,8 +111,8 @@ export const DEFAULT_JOB_SETTINGS: JobSettings = {
 };
 
 /** Enabled regions in inspector order, without duplicates. */
-export function orderedRegions(regions: Iterable<AnyRegion>): DetectedRegion[] {
-  const set = new Set<AnyRegion>(regions);
+export function orderedRegions(regions: Iterable<Region>): DetectedRegion[] {
+  const set = new Set<Region>(regions);
   return ALL_REGIONS.filter((region) => set.has(region));
 }
 

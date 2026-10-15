@@ -1,9 +1,8 @@
 /**
  * Presets (plan 6.5): named region, blur, export and verification
  * settings. The built-ins mirror `Preset::builtins` (*Default*, *Max
- * privacy*, *Kill feed only*), with the screen surfaces enabled where the
- * engine enables every region (D8). The detector options are not part of
- * a preset.
+ * privacy*, *Kill feed only*). The detector options are not part of a
+ * preset.
  */
 import type { Preset } from "@/bindings/Preset";
 
@@ -13,19 +12,15 @@ import {
   DEFAULT_REGIONS,
   DEFAULT_VERIFY,
   type JobSettings,
-  type RegionChoice,
 } from "./job-settings";
 
-/** A preset as the inspector uses it: screen surfaces allowed among the regions. */
-export type PresetData = Omit<Preset, "regions"> & { readonly regions: RegionChoice };
-
 /** The settings a preset holds. */
-export type PresetValues = Pick<PresetData, "regions" | "blur" | "export" | "verify">;
+export type PresetValues = Pick<Preset, "regions" | "blur" | "export" | "verify">;
 
 /** Id of the *Default* preset. */
 export const DEFAULT_PRESET_ID = "default";
 
-const DEFAULT_PRESET: PresetData = {
+const DEFAULT_PRESET: Preset = {
   id: DEFAULT_PRESET_ID,
   name: "Default",
   builtin: true,
@@ -36,7 +31,7 @@ const DEFAULT_PRESET: PresetData = {
 };
 
 /** The presets that ship with blurrd, in menu order. */
-export const BUILTIN_PRESETS: readonly PresetData[] = [
+export const BUILTIN_PRESETS: readonly Preset[] = [
   DEFAULT_PRESET,
   {
     ...DEFAULT_PRESET,
