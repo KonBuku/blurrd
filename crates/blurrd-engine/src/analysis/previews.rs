@@ -3,7 +3,7 @@
 //!
 //! A thumbnail of [`THUMB_HEIGHT`] lines is written every
 //! [`THUMB_INTERVAL`] seconds of presentation time as
-//! `thumbs/<k>.jpg` (`k` counts the intervals, five digits), from the
+//! [`ProjectDir::thumbnail`] `k` (`k` counts the intervals), from the
 //! first frame at or after the interval's start. Videos the desktop app's
 //! player cannot play also get `proxy.mp4` (see
 //! [`blurrd_video::ProxyWriter`]). Neither is needed for blurring, so a
@@ -18,12 +18,10 @@ use crossbeam_channel::Receiver;
 use jpeg_encoder::{ColorType, Encoder};
 
 use super::frame::FrameCrops;
-use crate::cache::ProjectDir;
+use crate::cache::{ProjectDir, THUMBNAIL_INTERVAL_S as THUMB_INTERVAL};
 
 /// Height of a thumbnail in pixels (160 × 90 for 16:9 videos).
 pub(crate) const THUMB_HEIGHT: u32 = 90;
-/// Seconds of presentation time between two thumbnails.
-pub(crate) const THUMB_INTERVAL: f64 = 0.5;
 /// JPEG quality of the thumbnails.
 const JPEG_QUALITY: u8 = 80;
 
@@ -48,7 +46,7 @@ struct ProxyPlan {
 
 /// Makes the previews of one video.
 pub(crate) struct Previews {
-    thumbs: PathBuf,
+    dir: ProjectDir,
     converter: RgbConverter,
     time_base: Rational,
     size: (u32, u32),
@@ -63,7 +61,7 @@ pub(crate) struct Previews {
 impl std::fmt::Debug for Previews {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Previews")
-            .field("thumbs", &self.thumbs)
+            .field("thumbs", &self.dir.thumbs())
             .field("proxy", &self.proxy.as_ref().map(|plan| &plan.path))
             .finish_non_exhaustive()
     }
@@ -100,7 +98,7 @@ impl Previews {
             }
         }
         Self {
-            thumbs,
+            dir: dir.clone(),
             converter,
             time_base: info.time_base,
             size: thumb_size(info.width, info.height),
@@ -170,7 +168,7 @@ impl Previews {
             match self.thumbnail(frame) {
                 Ok(jpeg) => {
                     for k in self.next..=due {
-                        let path = self.thumbs.join(format!("{k:05}.jpg"));
+                        let path = self.dir.thumbnail(k);
                         if let Err(error) = std::fs::write(&path, &jpeg) {
                             self.problem(format!("a thumbnail could not be written: {error}"));
                             break;

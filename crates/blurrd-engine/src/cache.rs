@@ -9,6 +9,9 @@
 //! <cache>/projects/<fingerprint>/thumbs/00042.jpg
 //! <cache>/caps/decoders.json  caps/encoders.json
 //! ```
+//!
+//! [`ProjectDir`] names the files of one video's folder, so the desktop
+//! app serves the same files the jobs write.
 
 use std::fmt::Write as _;
 use std::fs::File;
@@ -104,27 +107,36 @@ pub fn keyframes_sha256(keyframes: Option<&[u32]>) -> String {
     sha256_hex(&bytes)
 }
 
+/// Seconds of presentation time between two thumbnails: thumbnail `k`
+/// shows the first frame at or after `k` times this interval.
+pub const THUMBNAIL_INTERVAL_S: f64 = 0.5;
+
 /// The cache folder of one video.
 #[derive(Debug, Clone)]
-pub(crate) struct ProjectDir {
+pub struct ProjectDir {
     dir: PathBuf,
 }
 
 impl ProjectDir {
     /// The folder of the video with `fingerprint` inside `cache`.
-    pub(crate) fn new(cache: &Path, fingerprint: &Fingerprint) -> Self {
+    pub fn new(cache: &Path, fingerprint: &Fingerprint) -> Self {
         Self {
             dir: cache.join("projects").join(&fingerprint.blake3_head_tail),
         }
     }
 
+    /// The folder itself (verification reports are named inside it).
+    pub fn path(&self) -> &Path {
+        &self.dir
+    }
+
     /// The project file.
-    pub(crate) fn project(&self) -> PathBuf {
+    pub fn project(&self) -> PathBuf {
         self.dir.join("project.json")
     }
 
     /// The PTS table.
-    pub(crate) fn pts(&self) -> PathBuf {
+    pub fn pts(&self) -> PathBuf {
         self.dir.join("pts.bin")
     }
 
@@ -135,12 +147,17 @@ impl ProjectDir {
     }
 
     /// The thumbnail folder.
-    pub(crate) fn thumbs(&self) -> PathBuf {
+    pub fn thumbs(&self) -> PathBuf {
         self.dir.join("thumbs")
     }
 
+    /// Thumbnail `index` (see [`THUMBNAIL_INTERVAL_S`]).
+    pub fn thumbnail(&self, index: u32) -> PathBuf {
+        self.thumbs().join(format!("{index:05}.jpg"))
+    }
+
     /// The preview proxy.
-    pub(crate) fn proxy(&self) -> PathBuf {
+    pub fn proxy(&self) -> PathBuf {
         self.dir.join("proxy.mp4")
     }
 
@@ -151,7 +168,7 @@ impl ProjectDir {
     }
 
     /// The cached project, if there is a valid one.
-    pub(crate) fn read_project(&self) -> Option<Project> {
+    pub fn read_project(&self) -> Option<Project> {
         let path = self.project();
         path.is_file()
             .then(|| read_project(&path))
@@ -165,7 +182,7 @@ impl ProjectDir {
     }
 
     /// The cached PTS table, if there is a valid one.
-    pub(crate) fn read_pts(&self) -> Option<PtsTable> {
+    pub fn read_pts(&self) -> Option<PtsTable> {
         let path = self.pts();
         path.is_file()
             .then(|| PtsTable::read(&path))
