@@ -799,14 +799,26 @@ fn part_candidates(
     // A position that is not a match of this frame is a guess: a new row
     // may already show its killer portrait where the guess puts the name.
     // The frame's own portrait limits it as well, where the row's height
-    // is known.
+    // is known. A frame that reads the row's first name ending where the
+    // guess puts it still shows that row: background seen through the
+    // translucent bar is no new portrait (measured: a shop sign behind a
+    // killer name under a brightness -0.20 filter passed as portrait art,
+    // and a short reading of the name in that frame bounded the search,
+    // which cut the first six glyphs from a gap box).
     let floor = match frame {
         Some(fr) if confidence != Confidence::Tracked && pos.y0 == pos.y1 => part
             .boxes
             .iter()
-            .map(|b| place(pos, b.text))
-            .min_by_key(|t| t.x0)
-            .and_then(|t| {
+            .map(|b| (b.kind, place(pos, b.text)))
+            .min_by_key(|(_, t)| t.x0)
+            .filter(|&(kind, t)| {
+                !detections.iter().any(|d| {
+                    d.kind == kind
+                        && (d.text.x1 - t.x1).abs() <= SAME_EXTENT
+                        && (d.text.y1 - t.y1).abs() <= SAME_EXTENT
+                })
+            })
+            .and_then(|(_, t)| {
                 // The names the frame shows right of it in its row.
                 let bound = fr
                     .names
@@ -1032,8 +1044,16 @@ fn companion_seen(
     if row.peek().is_none() {
         return Seen::Unknown;
     }
+    // The name read with another start is the same name: the start of a
+    // killer name is read with pieces of the portrait or without its first
+    // glyphs, its end lies next to the weapon (measured: a killer companion
+    // under a gamma 2.0 filter counted as away in every frame while the
+    // detector read the name 14 px longer, and the fading row's last
+    // frames showed it unboxed).
     let read = row.any(|d| {
-        (d.text.x0 - text.x0).abs() <= SAME_EXTENT && (d.text.x1 - text.x1).abs() <= SAME_EXTENT
+        let same_end = (d.text.x1 - text.x1).abs() <= SAME_EXTENT;
+        let same_start = (d.text.x0 - text.x0).abs() <= SAME_EXTENT;
+        same_end && (same_start || d.kind == b.kind && d.text.x0 < text.x1 && text.x0 < d.text.x1)
     });
     if read { Seen::Unknown } else { Seen::Away }
 }

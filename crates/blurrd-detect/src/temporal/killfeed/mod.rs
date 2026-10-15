@@ -495,6 +495,10 @@ impl KillFeedTracker {
             }
         }
 
+        for d in &self.detections {
+            grow_to_start(&mut self.parts, frame, d);
+        }
+
         self.references.clear();
         for linker in &mut self.linkers {
             linker.push(frame, &self.detections, &mut self.references);
@@ -885,6 +889,56 @@ impl KillFeedTracker {
             p.positions.retain(|&g, _| g >= keep || Some(g) == end);
             true
         });
+    }
+}
+
+/// Grows the boxes of the killer names that reading `d` of frame `f`
+/// reads with an earlier start: a killer reading that ends where a killer
+/// name ends, in its row, and overlaps it.
+///
+/// A name, most often a companion, may have been read without its first
+/// glyphs in its part's reference frame (a row wiping in, a washed-out
+/// frame); its box then misses them for the part's whole life and only
+/// the per-frame readings cover them, which fail where the row fades out
+/// (measured: a killer companion cut from a reading without its first
+/// three glyphs under a gamma 2.0 filter; the fading row's last frames
+/// showed them unboxed). Only parts that found the killer portrait left of
+/// the reading grow: its clearance limits every box of theirs, so a
+/// reading that took portrait columns for text does not carry the box
+/// into the portrait, and a clearance cut from a short reading (which
+/// lies inside the name) does not meet a grown box (measured in 4K
+/// video: a merge of such a box with a part that followed the whole name
+/// took that clearance and left the name's first glyphs unboxed).
+/// Only the box grows, not the name's text, from which the clearance of
+/// later frames is measured: a reading on the portrait would make the
+/// portrait look like the name. A victim name has the weapon and the kill
+/// icons on its left, which a reading can take for glyphs, and no such
+/// limit: it does not grow.
+fn grow_to_start(parts: &mut [Part], f: u32, d: &Detection) {
+    if d.kind != NameKind::Killer {
+        return;
+    }
+    for p in parts.iter_mut() {
+        let (Some(&pos), Some(clear)) = (p.positions.get(&f), p.killer_clear) else {
+            continue;
+        };
+        // A clearance right of the reading's start contradicts it: one of
+        // the two is wrong, and the box keeps its extent.
+        if STRIP.x0 + pos.x0 + clear > d.text.x0 {
+            continue;
+        }
+        for b in &mut p.boxes {
+            let rect = compose::place(pos, b.offset);
+            let text = compose::place(pos, b.text);
+            let same_end = (text.x1 - d.text.x1).abs() <= SAME_EXTENT
+                && (text.y1 - d.text.y1).abs() <= SAME_EXTENT;
+            let grow = rect.x0 - d.rect.x0;
+            if b.kind == d.kind && same_end && grow > 0 && d.text.x0 < text.x1 {
+                b.offset.0 -= grow;
+                b.slot.0 = b.slot.0.min(b.offset.0);
+            }
+        }
+        p.row_x0 = p.boxes.iter().map(|b| b.offset.0).fold(p.row_x0, i32::min);
     }
 }
 
