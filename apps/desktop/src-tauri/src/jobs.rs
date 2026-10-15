@@ -8,9 +8,12 @@
 //! A job reports through its IPC channel. [`JobSink`] forwards the
 //! engine's events and keeps `Progress` ordered and at most 20 per second
 //! whatever thread the engine reports from: a progress event is dropped
-//! when its frame is behind the last one sent, or when one was sent less
-//! than 50 ms ago (the last frame always passes). The sink holds its lock
-//! while it sends, so the channel's order is the order of the checks.
+//! when its frame is behind the last one sent in the same pass, or when
+//! one was sent less than 50 ms ago (the last frame always passes). A
+//! `Started` or `Stage` event begins a new pass (a run analyses and then
+//! renders under one job), whose frames start again from 0. The sink
+//! holds its lock while it sends, so the channel's order is the order of
+//! the checks.
 //!
 //! Pausing stops the queue from starting jobs and holds the running job
 //! at its next progress report; cancelling a waiting job ends it at once,
@@ -58,8 +61,15 @@ impl ProgressFilter {
     /// Whether `event` is sent at `now`; remembers the progress it lets
     /// through.
     fn admit(&mut self, event: &JobEvent, now: Instant) -> bool {
-        let JobEvent::Progress { frame, total, .. } = *event else {
-            return true;
+        let (frame, total) = match *event {
+            JobEvent::Progress { frame, total, .. } => (frame, total),
+            // A new pass of the job (a run analyses, then renders the
+            // project): its progress starts again from frame 0.
+            JobEvent::Started { .. } | JobEvent::Stage { .. } => {
+                *self = Self::default();
+                return true;
+            }
+            _ => return true,
         };
         if self.last_frame.is_some_and(|last| frame < last) {
             return false;
@@ -329,7 +339,7 @@ pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    use blurrd_core::{JobEvent, JobId, JobKind, JobSummary};
+    use blurrd_core::{JobEvent, JobId, JobKind, JobSummary, Stage};
     use blurrd_engine::ProgressSink;
     use uuid::Uuid;
 
@@ -429,8 +439,83 @@ pub(crate) mod tests {
         assert!(filter.admit(&finished(JobId(Uuid::nil())), t0 + PROGRESS_INTERVAL));
     }
 
+    #[test]
+    fn a_new_pass_starts_its_progress_again() {
+        let mut filter = ProgressFilter::default();
+        let t0 = Instant::now();
+        let stage = JobEvent::Stage {
+            job: JobId(Uuid::nil()),
+            stage: Stage::BlurEncode,
+        };
+        assert!(filter.admit(&progress(100), t0));
+        // The render's first frames right after the analysis's last.
+        assert!(filter.admit(&stage, t0));
+        assert!(filter.admit(&progress(0), t0));
+        assert!(!filter.admit(&progress(1), t0 + Duration::from_millis(10)));
+        assert!(filter.admit(&progress(30), t0 + PROGRESS_INTERVAL));
+    }
+
     fn job() -> JobId {
         JobId(Uuid::now_v7())
+    }
+
+    /// A job of two passes like a run of an edited file: the analysis
+    /// reports frames 0 to 199, the render reports them again.
+    #[test]
+    fn both_passes_of_a_two_pass_job_report_progress() {
+        let jobs = Jobs::start().unwrap();
+        let recorder = Arc::new(Recorder::default());
+        let id = job();
+        let pass = |sink: &super::JobSink, stage| {
+            sink.emit(JobEvent::Stage {
+                job: sink.job(),
+                stage,
+            });
+            for frame in 0..200 {
+                sink.emit(JobEvent::Progress {
+                    job: sink.job(),
+                    frame,
+                    total: 199,
+                    fps: 1.0,
+                    eta_ms: 0,
+                });
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        jobs.enqueue(
+            id,
+            recorder.clone(),
+            Box::new(move |sink| {
+                sink.emit(JobEvent::Started {
+                    job: sink.job(),
+                    kind: JobKind::Run,
+                    total_frames: 200,
+                });
+                pass(sink, Stage::Detect);
+                pass(sink, Stage::BlurEncode);
+                sink.emit(finished(sink.job()));
+            }),
+        );
+        recorder.wait_end(id);
+        let events = recorder.events.lock().unwrap();
+        // The progress of each pass, split at the stage events.
+        let mut passes: Vec<Vec<u32>> = Vec::new();
+        for (_, event) in events.iter() {
+            match *event {
+                JobEvent::Stage { .. } => passes.push(Vec::new()),
+                JobEvent::Progress { frame, .. } => passes.last_mut().unwrap().push(frame),
+                _ => {}
+            }
+        }
+        assert_eq!(passes.len(), 2);
+        for frames in &passes {
+            assert!(frames.len() > 3, "{frames:?}");
+            assert!(frames.windows(2).all(|pair| pair[1] >= pair[0]));
+            assert!(frames[0] < 50, "{frames:?}");
+            assert_eq!(frames.last(), Some(&199));
+        }
+        drop(events);
+        jobs.shutdown();
     }
 
     /// A job that reports `frames` progress events from four threads at
