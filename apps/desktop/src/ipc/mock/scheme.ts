@@ -7,8 +7,8 @@
  * are scaled fixture frames, and leak crops are the leak's box of its
  * first frame, block-averaged unless the clear view is asked for.
  */
+import type { ExactFrame } from "@/bindings/ExactFrame";
 import type { RectI } from "@/bindings/RectI";
-import type { ExactFrame } from "@/ipc/media";
 
 import { FIXTURE, INDEX_RECT, THUMB_EVERY, drawFrame, drawIndex } from "./fixture-media";
 

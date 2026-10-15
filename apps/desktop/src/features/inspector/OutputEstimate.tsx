@@ -1,8 +1,9 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import type { ExportSettings } from "@/bindings/ExportSettings";
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
 import { useDebounced } from "@/hooks/useDebounced";
-import { getOutputPreview, type ProjectSummary } from "@/ipc/commands";
+import { getOutputPreview } from "@/ipc/commands";
 import { toAppError } from "@/ipc/errors";
 import { templateProblem } from "@/lib/export-options";
 import { baseName, formatBytes, formatDuration } from "@/lib/media";

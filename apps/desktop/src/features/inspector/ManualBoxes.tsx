@@ -1,12 +1,12 @@
 import { Plus, Trash2 } from "lucide-react";
 
 import type { Override } from "@/bindings/Override";
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { RegionIcon } from "@/components/ui/region-chip";
 import { editKey, removeEditByUid, startManualTool } from "@/features/editing/actions";
 import { useControllerStore, usePlaybackStore } from "@/features/preview/playback";
-import type { ProjectSummary } from "@/ipc/commands";
 import { formatTimecode } from "@/lib/frames";
 import { cn } from "@/lib/utils";
 import { useEditsStore } from "@/store/edits";

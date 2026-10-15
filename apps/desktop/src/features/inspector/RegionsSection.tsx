@@ -2,7 +2,7 @@ import { Fragment, useId } from "react";
 
 import type { Region } from "@/bindings/Region";
 import type { RegionSettings } from "@/bindings/RegionSettings";
-import type { TrackSet } from "@/ipc/commands";
+import type { TrackSet } from "@/bindings/TrackSet";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RegionIcon } from "@/components/ui/region-chip";
 import { Switch } from "@/components/ui/switch";

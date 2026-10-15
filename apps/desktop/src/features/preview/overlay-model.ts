@@ -7,8 +7,8 @@
 import type { NameKind } from "@/bindings/NameKind";
 import type { RectI } from "@/bindings/RectI";
 import type { Region } from "@/bindings/Region";
+import type { TrackSet } from "@/bindings/TrackSet";
 import type { VerifyReport } from "@/bindings/VerifyReport";
-import type { TrackSet } from "@/ipc/commands";
 import type { TrackBoxTarget } from "@/lib/edits";
 import type { IntervalIndex } from "@/lib/interval-index";
 import { formatCount } from "@/lib/media";

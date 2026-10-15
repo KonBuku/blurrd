@@ -6,24 +6,13 @@
  * defaults for new files hold the same shape.
  */
 import type { BlurParams } from "@/bindings/BlurParams";
+import type { DetectorOptions } from "@/bindings/DetectorOptions";
 import type { ExportSettings } from "@/bindings/ExportSettings";
 import type { Region } from "@/bindings/Region";
 import type { RegionSettings } from "@/bindings/RegionSettings";
-import type { Sensitivity } from "@/bindings/Sensitivity";
-import type { TemporalParams } from "@/bindings/TemporalParams";
 import type { VerifySettings } from "@/bindings/VerifySettings";
 
 import { REGION_ORDER } from "./regions";
-
-/**
- * Detector options of `start_analysis` that are not part of a preset
- * (Inspector › Blur › Advanced detection). Declared here until the engine
- * generates the type (plan section 18, M26).
- */
-export interface DetectorOptions {
-  readonly sensitivity: Sensitivity;
-  readonly temporal: TemporalParams;
-}
 
 /** Everything a job of one file runs with. */
 export interface JobSettings {

@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
+import type { TrackSet } from "@/bindings/TrackSet";
 import { useEqualSelector } from "@/hooks/useEqualSelector";
 
-import { getTracks, openProject, type ProjectSummary, type TrackSet } from "@/ipc/commands";
+import { getTracks, openProject } from "@/ipc/commands";
 import type { JobSettings, SettingsSection } from "@/lib/job-settings";
 import { settingsOf, targetsOf, useJobSettingsStore } from "@/store/job-settings";
 import { shownItemId, useQueueStore, type QueueItem } from "@/store/queue";

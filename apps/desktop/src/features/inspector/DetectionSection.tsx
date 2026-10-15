@@ -1,11 +1,11 @@
 import { useId } from "react";
 
+import type { DetectorOptions } from "@/bindings/DetectorOptions";
 import type { Mode } from "@/bindings/Mode";
 import type { Sensitivity } from "@/bindings/Sensitivity";
 import type { TemporalParams } from "@/bindings/TemporalParams";
 import { NumberField } from "@/components/ui/number-field";
 import { ToggleGroup } from "@/components/ui/toggle-group";
-import type { DetectorOptions } from "@/lib/job-settings";
 
 import { InspectorRow, InspectorSection } from "./parts";
 

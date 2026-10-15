@@ -1,5 +1,5 @@
+import type { HealthSpan } from "@/bindings/HealthSpan";
 import type { Region } from "@/bindings/Region";
-import type { HealthSpan } from "@/ipc/commands";
 
 import { frameToX, type TimelineView } from "./timeline-model";
 

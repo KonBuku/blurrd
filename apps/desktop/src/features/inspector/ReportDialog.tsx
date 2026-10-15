@@ -3,6 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
 import type { Region } from "@/bindings/Region";
 import type { RegionVerify } from "@/bindings/RegionVerify";
 import type { VerifyReport } from "@/bindings/VerifyReport";
@@ -16,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RegionChip } from "@/components/ui/region-chip";
-import { acceptReport, type ProjectSummary } from "@/ipc/commands";
+import { acceptReport } from "@/ipc/commands";
 import { toAppError } from "@/ipc/errors";
 import { leakCropUrl } from "@/ipc/media";
 import { formatTimecode } from "@/lib/frames";

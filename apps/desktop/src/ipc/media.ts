@@ -7,27 +7,12 @@
  */
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import type { ExactFrame } from "@/bindings/ExactFrame";
 import type { RectI } from "@/bindings/RectI";
 
 /** URL of `path` on the `blurrd` scheme (`http://blurrd.localhost/…` on Windows). */
 export function schemeUrl(path: string): string {
   return convertFileSrc(path, "blurrd");
-}
-
-/** One Exact patch: a region of interest and where it goes, in source pixels. */
-export interface ExactPatchInfo {
-  /** Name of the ROI (for example `killfeed` or `left`). */
-  readonly roi: string;
-  readonly rect: RectI;
-}
-
-/** What `blurrd://exact/<project>/<frame>.json` answers. */
-export interface ExactFrame {
-  /** The presentation index the backend decoded. */
-  readonly frame: number;
-  /** Project revision the patches were blurred with. */
-  readonly revision: number;
-  readonly patches: readonly ExactPatchInfo[];
 }
 
 /** A decoded Exact patch. */

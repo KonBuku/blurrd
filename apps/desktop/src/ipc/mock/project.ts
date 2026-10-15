@@ -7,12 +7,14 @@
  * paths containing "fresh" are not analysed yet.
  */
 import type { DensityLanes } from "@/bindings/DensityLanes";
+import type { FramePts } from "@/bindings/FramePts";
 import type { Override } from "@/bindings/Override";
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
 import type { Region } from "@/bindings/Region";
 import type { Segment } from "@/bindings/Segment";
 import type { Track } from "@/bindings/Track";
+import type { TrackSet } from "@/bindings/TrackSet";
 import type { VerifyReport } from "@/bindings/VerifyReport";
-import type { ProjectSummary, PtsTable, TrackSet } from "@/ipc/commands";
 import { IntervalIndex, overrideBindings } from "@/lib/interval-index";
 
 import {
@@ -93,7 +95,7 @@ export function mockProject(path: string): ProjectSummary {
 }
 
 /** Presentation timestamps of the fixture: WebM stores whole milliseconds. */
-export function mockPts(path: string): PtsTable {
+export function mockPts(path: string): FramePts {
   const pts = Array.from({ length: frameCount(path) }, (_, i) =>
     Math.round((i * 1000) / FIXTURE.fps),
   );

@@ -1,3 +1,4 @@
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
 /**
  * Which stream the preview plays: the source itself when WebView2 can
  * decode its codec, otherwise the H.264 proxy made during analysis (plan
@@ -5,7 +6,6 @@
  * recent GPU or the AV1 extension; the codec check avoids a failed load,
  * and a decode error at runtime falls back the same way.
  */
-import type { ProjectSummary } from "@/ipc/commands";
 
 /** A MIME type with a typical codec string per FFmpeg codec name. */
 const CODEC_TYPES: Readonly<Record<string, string>> = {

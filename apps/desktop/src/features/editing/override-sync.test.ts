@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppError } from "@/bindings/AppError";
 import type { Override } from "@/bindings/Override";
 import type { Region } from "@/bindings/Region";
-import { getTracks, openProject, setOverrides, type TrackSet } from "@/ipc/commands";
+import type { TrackSet } from "@/bindings/TrackSet";
+import { getTracks, openProject, setOverrides } from "@/ipc/commands";
 import { installMockBackend, type MockBackend } from "@/ipc/mock";
 import {
   addBox,
@@ -167,7 +168,7 @@ describe("OverrideSync", () => {
     await sync.flush();
     const edited = useEditsStore.getState().overrides;
     expect(backend.projects.state(PATH).set.overrides).toEqual(edited);
-    expect(frameTable({ tracks: initial.tracks, overrides: edited })).not.toBe(initialTable);
+    expect(frameTable({ tracks: initial.tracks, overrides: [...edited] })).not.toBe(initialTable);
     expect(useEditsStore.temporal.getState().pastStates).toHaveLength(100);
 
     for (let i = 0; i < 100; i += 1) {

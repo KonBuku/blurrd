@@ -6,7 +6,7 @@
  */
 import type { AppError } from "@/bindings/AppError";
 import type { MediaInfo } from "@/bindings/MediaInfo";
-import type { ProbeOutcome } from "@/ipc/commands";
+import type { ProbeOutcome } from "@/bindings/ProbeOutcome";
 import { baseName, pathKey } from "@/lib/media";
 
 /** Extensions the fake probe accepts as videos. */

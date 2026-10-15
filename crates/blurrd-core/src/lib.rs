@@ -13,7 +13,8 @@
 //! feature, they also derive `schemars::JsonSchema`. The persisted documents
 //! ([`Project`], [`Settings`], [`PresetFile`], [`VerifyReport`]) implement
 //! [`Document`] and are read and written with [`schema::from_json`] and
-//! [`schema::to_json`].
+//! [`schema::to_json`]. The other payloads of the desktop app's commands,
+//! such as [`ProjectSummary`] and [`TrackSet`], are plain IPC types.
 
 #![forbid(unsafe_code)]
 
@@ -23,6 +24,7 @@ mod error;
 mod export;
 mod geometry;
 mod hud;
+mod ipc;
 mod job;
 mod media;
 mod overrides;
@@ -48,6 +50,10 @@ pub use export::{
 pub use geometry::{EmptyRectError, RectI};
 pub use hud::{
     HudAnchor, HudGeometry, HudLayout, REFERENCE_HEIGHT, REFERENCE_WIDTH, RegionCalibration,
+};
+pub use ipc::{
+    DetectorOptions, ExactFrame, ExactPatchInfo, FramePts, HealthSpan, OutputPreview,
+    OverridesSaved, ProbeOutcome, ProjectSummary, ThumbnailStrip, TrackSet,
 };
 pub use job::{JobEvent, JobId, JobKind, JobSummary, Stage, WarningCode};
 pub use media::{AudioStreamInfo, ColorInfo, ColorRange, Fingerprint, HdrKind, MediaInfo};

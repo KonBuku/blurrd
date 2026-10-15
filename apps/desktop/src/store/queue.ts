@@ -2,7 +2,8 @@ import { create } from "zustand";
 
 import type { AppError } from "@/bindings/AppError";
 import type { MediaInfo } from "@/bindings/MediaInfo";
-import { isProbed, type ProbeOutcome, type SessionEntry } from "@/ipc/commands";
+import type { ProbeOutcome } from "@/bindings/ProbeOutcome";
+import { isProbed, type SessionEntry } from "@/ipc/commands";
 import { baseName, looksLikeFile, pathKey } from "@/lib/media";
 import { isFinished, statusRank, type QueueStatus } from "@/lib/queue-status";
 

@@ -9,13 +9,14 @@
  */
 import type { AppError } from "@/bindings/AppError";
 import type { FrameRange } from "@/bindings/FrameRange";
+import type { Leak } from "@/bindings/Leak";
 import type { Override } from "@/bindings/Override";
+import type { OverridesSaved } from "@/bindings/OverridesSaved";
 import type { RectI } from "@/bindings/RectI";
 import type { Region } from "@/bindings/Region";
-import type { Leak } from "@/bindings/Leak";
+import type { TrackSet } from "@/bindings/TrackSet";
 import type { VerifyReport } from "@/bindings/VerifyReport";
 import type { VerifySummary } from "@/bindings/VerifySummary";
-import type { OverridesSaved, TrackSet } from "@/ipc/commands";
 import { overrideBindings } from "@/lib/interval-index";
 
 import { FIXTURE } from "./fixture-media";

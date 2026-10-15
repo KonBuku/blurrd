@@ -1,11 +1,11 @@
 import { FileSearch } from "lucide-react";
 import { useState } from "react";
 
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
 import { Button } from "@/components/ui/button";
 import { RegionChip } from "@/components/ui/region-chip";
 import { useControllerStore } from "@/features/preview/playback";
 import { useVerifyReport } from "@/features/timeline/useTimelineData";
-import type { ProjectSummary } from "@/ipc/commands";
 import { formatTimecode } from "@/lib/frames";
 import { formatCount } from "@/lib/media";
 import { STATUS_LABELS, countedLeaks } from "@/lib/verify-report";

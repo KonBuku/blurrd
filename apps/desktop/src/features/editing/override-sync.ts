@@ -7,7 +7,7 @@
  */
 import type { AppError } from "@/bindings/AppError";
 import type { Override } from "@/bindings/Override";
-import type { OverridesSaved } from "@/ipc/commands";
+import type { OverridesSaved } from "@/bindings/OverridesSaved";
 import { toAppError } from "@/ipc/errors";
 import { useEditsStore } from "@/store/edits";
 

@@ -2,8 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import type { AppError } from "@/bindings/AppError";
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
 import type { Region } from "@/bindings/Region";
-import { getPts, getTracks, openProject, type ProjectSummary, type TrackSet } from "@/ipc/commands";
+import type { TrackSet } from "@/bindings/TrackSet";
+import { getPts, getTracks, openProject } from "@/ipc/commands";
 import { toAppError } from "@/ipc/errors";
 import { colourModel, pixelParams, type ColourModel, type PixelParams } from "@/lib/blur-geometry";
 import { FrameClock } from "@/lib/frames";
@@ -69,7 +71,7 @@ export function useProject(path: string): ProjectState {
     return {
       project: project.data,
       // The edits on screen, saved or about to be (the edit store owns them).
-      tracks: { ...tracks.data, overrides },
+      tracks: { ...tracks.data, overrides: [...overrides] },
       clock,
       index: new IntervalIndex(clock.count, tracks.data.tracks, overrides),
       params: pixelParams(blur, project.data.sy),

@@ -7,7 +7,7 @@
  */
 import type { ExportSettings } from "@/bindings/ExportSettings";
 import type { MediaInfo } from "@/bindings/MediaInfo";
-import type { OutputPreview } from "@/ipc/commands";
+import type { OutputPreview } from "@/bindings/OutputPreview";
 import { pathKey } from "@/lib/media";
 
 import { MOCK_JOB_FPS } from "./jobs";

@@ -3,13 +3,9 @@ import { useEffect, useMemo } from "react";
 import { toast } from "sonner";
 
 import type { Override } from "@/bindings/Override";
-import {
-  getTracks,
-  openProject,
-  setOverrides,
-  type ProjectSummary,
-  type TrackSet,
-} from "@/ipc/commands";
+import type { ProjectSummary } from "@/bindings/ProjectSummary";
+import type { TrackSet } from "@/bindings/TrackSet";
+import { getTracks, openProject, setOverrides } from "@/ipc/commands";
 import { toAppError } from "@/ipc/errors";
 import { overrideBindings } from "@/lib/interval-index";
 import { useEditsStore } from "@/store/edits";
@@ -50,7 +46,7 @@ export function useProjectEdits(
             old && {
               ...old,
               revision: saved.revision,
-              overrides,
+              overrides: [...overrides],
               bindings: overrideBindings(old.tracks, overrides),
             },
         );

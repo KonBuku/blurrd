@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { ProbeOutcome } from "@/ipc/commands";
+import type { ProbeOutcome } from "@/bindings/ProbeOutcome";
 import { fakeMedia } from "@/ipc/mock/media";
 
 import { useQueueStore, visibleItems } from "./queue";
