@@ -38,7 +38,9 @@ use std::collections::VecDeque;
 
 use blurrd_core::{Confidence, Mode, RectI};
 
-use super::{BOX_ROWS, PortraitSignature, SLOT_X1, SLOTS, SlotEvidence, SlotHit, entry_detection};
+use super::{
+    BOX_ROWS, PortraitSignature, SLOT_X1, SLOTS, SlotEvidence, SlotHit, entry_detection, slot_top,
+};
 
 /// Name score at which one entry frame is enough to start a track.
 pub const STRONG_SCORE: f32 = 2.0;
@@ -482,6 +484,58 @@ impl VoiceTracker {
             reference = signature;
             first = f;
         }
+        if k > 0 {
+            self.backfill_below(k - 1, first, floor, open.start, reference);
+        }
+    }
+
+    /// Continues the backfill of a track whose first frame in its slot is
+    /// `first` in slot `k`, the slot below it: a new entry arriving below
+    /// pushes every entry up one slot, so before `first` the same portrait
+    /// may have been shown in slot `k` (measured in 720p greyscale video:
+    /// a white name on a bright wall, never read and too faint for the
+    /// structure test, unboxed for 3 frames before the push). Frames are
+    /// covered over the whole name slot as long as the portrait matches
+    /// (`reference`: the signature of the track's earliest frame) and no
+    /// other track covers them, down to frame `floor` and at most [`HOLD`]
+    /// frames before `start`, the track's first entry frame.
+    fn backfill_below(
+        &mut self,
+        k: usize,
+        first: u32,
+        floor: u32,
+        start: u32,
+        mut reference: PortraitSignature,
+    ) {
+        let mut id = None;
+        let mut f = first;
+        while f > floor && start - (f - 1) <= HOLD {
+            let g = f - 1;
+            let Some(signature) = self.cell(g, k).and_then(|c| {
+                let matches = c.cover.is_none()
+                    && c.portrait >= HOLD_PORTRAIT
+                    && c.signature.distance(&reference) <= SAME_PORTRAIT;
+                matches.then_some(c.signature)
+            }) else {
+                break;
+            };
+            let id = *id.get_or_insert_with(|| {
+                let id = self.next_id;
+                self.next_id += 1;
+                self.tracks.push(Geometry {
+                    id,
+                    slot: k as u8,
+                    top: slot_top(k),
+                    name_x1: None,
+                    rows: BOX_ROWS,
+                    last: g,
+                });
+                id
+            });
+            self.cover(g, k, id, Confidence::WeakHold);
+            reference = signature;
+            f = g;
+        }
     }
 
     /// A frame without an entry in slot `k`.
@@ -696,6 +750,27 @@ mod tests {
         (out, confidences)
     }
 
+    /// Runs slots 0 and 1 through a tracker and returns the boxes.
+    fn run_two(shows: &[[Show; 2]]) -> Vec<VoiceFrameBoxes> {
+        let mut tracker = VoiceTracker::new();
+        let mut out = vec![];
+        for (f, pair) in shows.iter().enumerate() {
+            let mut slots = [SlotEvidence::default(); SLOTS];
+            for (k, s) in slots.iter_mut().enumerate() {
+                *s = evidence(k, pair.get(k).copied().unwrap_or(Show::Empty));
+            }
+            tracker
+                .push(&VoiceFrame {
+                    frame: f as u32,
+                    slots: &slots,
+                    cut: false,
+                })
+                .unwrap();
+        }
+        tracker.finish(&mut out);
+        out
+    }
+
     const NAME: Show = Show::Name {
         p: 100,
         x1: 120,
@@ -901,6 +976,41 @@ mod tests {
         assert_eq!(c[2], Some(Confidence::PostRoll));
         assert_eq!(c[3], None);
         assert_ne!(out[4].boxes[0].track, out[1].boxes[0].track);
+    }
+
+    #[test]
+    fn backfill_follows_an_entry_down_to_the_slot_it_was_pushed_from() {
+        // Portrait 100 shows in slot 0 without a detected name; a new entry
+        // (portrait 200) arrives below at frame 10 and pushes it to slot 1,
+        // where its name is read.
+        let mut shows = vec![[Show::Empty; 2]; 30];
+        for s in &mut shows[5..10] {
+            s[0] = Show::Portrait { p: 100 };
+        }
+        for s in &mut shows[10..20] {
+            *s = [
+                Show::Name {
+                    p: 200,
+                    x1: 140,
+                    score: 1.5,
+                },
+                NAME,
+            ];
+        }
+        let boxes = run_two(&shows);
+        let slot0 = entry_detection(slot_top(0), BOX_ROWS, SLOT_X1).rect;
+        for b in &boxes[5..10] {
+            assert_eq!(b.boxes.len(), 1, "frame {}", b.frame);
+            assert_eq!(b.boxes[0].rect, slot0);
+            assert_eq!(b.boxes[0].confidence, Confidence::WeakHold);
+        }
+        assert!(boxes[..5].iter().all(|b| b.boxes.is_empty()));
+        // Another portrait in the slot below is not the same entry.
+        for s in &mut shows[5..10] {
+            s[0] = Show::Portrait { p: 30 };
+        }
+        let boxes = run_two(&shows);
+        assert!(boxes[..10].iter().all(|b| b.boxes.is_empty()));
     }
 
     #[test]
