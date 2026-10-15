@@ -166,8 +166,13 @@ const BRIGHT_BACKGROUND: u8 = 150;
 /// (capitals are 10 rows tall); horizontal edges of the background reach
 /// only one to three pixels per column.
 const NAME_STEM: u8 = 5;
-/// Ink pixels a column of the location rows needs to count as a stem.
-const LOCATION_STEM: u8 = 6;
+/// Ink pixels a column of the location rows needs to count as a stem:
+/// the location line's lowercase stems are about six rows tall, and in
+/// video upscaled to the reference their ends fade below the ink
+/// threshold (measured on synthetic 720p entries over fine texture: with
+/// six, "in A Site" lost its first word and 6 of 180 entries were not
+/// aligned). Horizontal background edges reach one to three pixels.
+const LOCATION_STEM: u8 = 5;
 /// Rows searched for the location line's left edge (`y + 23 .. y + 36`).
 const LOCATION_EDGE_ROWS: (i32, i32) = (23, 36);
 /// Largest gap between ink columns inside a name; a word gap of the name

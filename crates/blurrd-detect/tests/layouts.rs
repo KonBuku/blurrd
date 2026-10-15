@@ -15,14 +15,16 @@
 mod support;
 
 use blurrd_blur::{PixelParams, PreparedBox, YuvColour, prepare_boxes};
-use blurrd_core::{BlurBox, BlurParams, HudAnchor, HudLayout, Region};
+use blurrd_core::{BlurBox, BlurParams, FrameRange, HudAnchor, HudLayout, Region};
 use blurrd_detect::calibration::{Calibrator, MIN_CONFIDENCE};
 use blurrd_detect::chat::LEFT_PANEL_ROI;
 use blurrd_detect::geometry::{HudCrop, HudSampler};
 use blurrd_detect::killfeed::FEED_ROI;
-use blurrd_detect::{ChatDetector, Detection, KillFeedDetector, RgbView};
+use blurrd_detect::voice::LEFT_PANEL_ROI as VOICE_PANEL_ROI;
+use blurrd_detect::{ChatDetector, Detection, KillFeedDetector, RgbView, VoiceDetector};
 use blurrd_testkit::hud::chat::{Channel, ChatInput, ChatMessage, ChatSpec, Language};
 use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
+use blurrd_testkit::hud::voice::{self, Speaker, VoiceSpec};
 use blurrd_testkit::metrics::item_coverage;
 use blurrd_testkit::{
     Background, Fixture, FontSet, Layout, NameStyle, Palette, RgbFrame, Rng, Scene, synth_name,
@@ -299,5 +301,36 @@ fn two_word_chat_names_are_covered_in_greyscale_720p() {
             })
             .collect();
         assert!(leaks.is_empty(), "seed {seed}: {leaks:?}");
+    }
+}
+
+#[test]
+fn voice_entries_are_found_at_720p_on_texture() {
+    // Native 720p upscaled to the reference: on fine texture the location
+    // line loses its first word ("in" and a one-letter site) to the
+    // stem threshold, and the entry must still count as aligned.
+    let layout = Layout::wide(1280, 720);
+    let sampler = HudSampler::new(layout.geometry());
+    let fonts = FontSet::latin();
+    let mut detector = VoiceDetector::new();
+    let mut crop = HudCrop::default();
+    let mut dets = Vec::new();
+    for seed in 0..60u64 {
+        let mut rng = Rng::new(700 + seed);
+        let speakers = (0..3u8)
+            .map(|slot| Speaker {
+                name: synth_name(&mut rng, NameStyle::Latin(5 + 3 * slot as usize)),
+                location: voice::LOCATIONS[slot as usize].to_owned(),
+                slot,
+                shown: vec![FrameRange { f0: 0, f1: 9 }],
+            })
+            .collect();
+        let fx = Scene::new(layout, Background::noise(seed), Palette::DEFAULT, 10)
+            .with_voice(&fonts, VoiceSpec { speakers })
+            .render(4);
+        let frame = view(&fx.frame);
+        let panel = sampler.crop(&frame, VOICE_PANEL_ROI, HudAnchor::Left, &mut crop);
+        detector.detect(&panel, &mut dets).unwrap();
+        assert_eq!(dets.len(), 3, "seed {seed}");
     }
 }
