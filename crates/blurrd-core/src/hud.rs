@@ -68,6 +68,14 @@ pub enum HudLayout {
         /// HUD scale in percent.
         scale_pct: u16,
     },
+    /// A 16:9 game image scaled to fill a frame of another aspect ratio,
+    /// or the image between black bars of `bar_px` source pixels on both
+    /// sides (for example a 1920 × 1080 recording saved as 1440 × 1080):
+    /// the whole HUD narrows or widens with the image.
+    Scaled16x9 {
+        /// Width of each black bar in source pixels (0 for none).
+        bar_px: u16,
+    },
 }
 
 /// Calibration confidence per region, from 0.0 to 1.0.
@@ -125,9 +133,11 @@ impl HudGeometry {
     /// The HUD scales with the image height (`sy = height / 1080`) and its
     /// elements keep their anchors at the image edges: a stretched 4:3 game
     /// also widens it by the frame's aspect over 4:3, a pillarbox moves the
-    /// edges in by the bar width. [`HudLayout::Auto`] takes the layout from
-    /// the frame's aspect ratio. [`HudLayout::Custom`] scales the HUD by its
-    /// percentage around the anchors and the vertical centre.
+    /// edges in by the bar width, and a scaled 16:9 image scales it
+    /// horizontally by the image's width over the reference width.
+    /// [`HudLayout::Auto`] takes the layout from the frame's aspect ratio.
+    /// [`HudLayout::Custom`] scales the HUD by its percentage around the
+    /// anchors and the vertical centre.
     pub fn for_layout(width: u32, height: u32, layout: HudLayout) -> Self {
         let (w, h) = (width as f32, height as f32);
         let sy = h / REFERENCE_HEIGHT as f32;
@@ -138,6 +148,10 @@ impl HudGeometry {
         let (sx, sy, bar, oy) = match layout {
             HudLayout::Stretched4x3 => (sy * (w / h) / (4.0 / 3.0), sy, 0.0, 0.0),
             HudLayout::Pillarbox { bar_px } => (sy, sy, f32::from(bar_px), 0.0),
+            HudLayout::Scaled16x9 { bar_px } => {
+                let bar = f32::from(bar_px);
+                ((w - 2.0 * bar) / REFERENCE_WIDTH as f32, sy, bar, 0.0)
+            }
             HudLayout::Custom { scale_pct } => {
                 let s = sy * f32::from(scale_pct) / 100.0;
                 (s, s, 0.0, 0.5 * (h - REFERENCE_HEIGHT as f32 * s))
@@ -319,6 +333,24 @@ mod tests {
     }
 
     #[test]
+    fn maps_a_scaled_16x9_image() {
+        // A 1080p game saved as 1440 x 1080: every anchor agrees, because
+        // the whole image narrowed by 3/4.
+        let g = HudGeometry::for_layout(1440, 1080, HudLayout::Scaled16x9 { bar_px: 0 });
+        assert!(close(g.sx, 0.75) && close(g.sy, 1.0));
+        for anchor in ANCHORS {
+            assert!(close(g.source_x(1900.0, anchor), 1425.0), "{anchor:?}");
+            assert!(close(g.source_x(40.0, anchor), 30.0), "{anchor:?}");
+        }
+        // The same image between the bars of a 16:9 frame.
+        let boxed = HudGeometry::for_layout(1920, 1080, HudLayout::Scaled16x9 { bar_px: 240 });
+        assert!(close(boxed.sx, 0.75));
+        assert!(close(boxed.source_x(0.0, HudAnchor::Left), 240.0));
+        assert!(close(boxed.source_x(1920.0, HudAnchor::Right), 1680.0));
+        assert!(close(boxed.source_x(960.0, HudAnchor::Center), 960.0));
+    }
+
+    #[test]
     fn source_and_reference_round_trip() {
         let layouts = [
             (1280, 720, HudLayout::Auto),
@@ -326,6 +358,7 @@ mod tests {
             (1280, 960, HudLayout::Auto),
             (1920, 1080, HudLayout::Pillarbox { bar_px: 240 }),
             (1920, 1080, HudLayout::Stretched4x3),
+            (1024, 768, HudLayout::Scaled16x9 { bar_px: 0 }),
         ];
         let r = RectI::new(1250, 96, 1838, 129).unwrap();
         for (w, h, layout) in layouts {

@@ -11,4 +11,8 @@ bar_px: number, } } | { "Custom": {
 /**
  * HUD scale in percent.
  */
-scale_pct: number, } };
+scale_pct: number, } } | { "Scaled16x9": { 
+/**
+ * Width of each black bar in source pixels (0 for none).
+ */
+bar_px: number, } };

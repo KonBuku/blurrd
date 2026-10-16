@@ -420,6 +420,31 @@
           "required": [
             "Custom"
           ]
+        },
+        {
+          "description": "A 16:9 game image scaled to fill a frame of another aspect ratio,\nor the image between black bars of `bar_px` source pixels on both\nsides (for example a 1920 × 1080 recording saved as 1440 × 1080):\nthe whole HUD narrows or widens with the image.",
+          "type": "object",
+          "properties": {
+            "Scaled16x9": {
+              "type": "object",
+              "properties": {
+                "bar_px": {
+                  "description": "Width of each black bar in source pixels (0 for none).",
+                  "type": "integer",
+                  "format": "uint16",
+                  "maximum": 65535,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "bar_px"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Scaled16x9"
+          ]
         }
       ]
     },
