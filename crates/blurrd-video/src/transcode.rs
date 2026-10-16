@@ -463,7 +463,8 @@ impl Transcoder {
                 pts,
                 target,
             };
-            let mux_result = mux_packets(&video, &side_rx, muxer, |n| {
+            let stop = || control.stopped(cancel);
+            let mux_result = mux_packets(&video, &side_rx, muxer, &stop, |n| {
                 written = n;
                 progress(n);
             });
@@ -688,6 +689,18 @@ impl Control {
         self.abort.load(Ordering::Relaxed)
     }
 
+    /// Whether the transcode stops early: `Ok` after a stage's error
+    /// (recorded already), [`VideoError::Canceled`] once `cancel` fires.
+    fn stopped(&self, cancel: &dyn Fn() -> bool) -> Option<Result<(), VideoError>> {
+        if self.aborted() {
+            Some(Ok(()))
+        } else if cancel() {
+            Some(Err(VideoError::Canceled))
+        } else {
+            None
+        }
+    }
+
     fn into_result(self) -> Result<(), VideoError> {
         match self.error.into_inner() {
             Ok(Some(error)) => Err(error),
@@ -729,11 +742,13 @@ fn check_frame(frame: &VideoFrame, pts: &PtsTable) -> Result<(), VideoError> {
     }
 }
 
-/// Frees a session's decoder or encoder. After a cancellation or a
-/// failure it is freed on a thread of its own: closing a GPU decoder or
-/// encoder session takes tens of milliseconds, and the job should end as
-/// soon as its stages stopped (plan M14: cancel in under 100 ms). The
-/// output file does not depend on it, so nothing is left behind.
+/// Frees a session's decoder or encoder, or the encoded packets the
+/// muxer still held. After a cancellation or a failure it is freed on a
+/// thread of its own: closing a GPU decoder or encoder session takes tens
+/// of milliseconds, freeing hundreds of encoded packets about 15 ms, and
+/// the job should end as soon as its stages stopped (plan M14: cancel in
+/// under 100 ms). The output file does not depend on it, so nothing is
+/// left behind.
 fn release<T: Send + 'static>(resource: T, stopped_early: bool) {
     if !stopped_early {
         return;
@@ -974,10 +989,16 @@ struct VideoPackets<'a> {
 /// to [`SIDE_LEAD`] seconds later are written; the rest follow once the
 /// video is complete. Calls `written` with the number of video packets
 /// written after each one.
+///
+/// Once `stop` returns a result (a stage failed or the job was canceled),
+/// nothing more is written, as the output is removed: a canceled
+/// two-session render would otherwise still write the hundreds of packets
+/// of the later session's segment waiting for the earlier one.
 fn mux_packets(
     video: &VideoPackets<'_>,
     side: &Receiver<SidePacket>,
     muxer: &mut Muxer,
+    stop: &dyn Fn() -> Option<Result<(), VideoError>>,
     mut written: impl FnMut(u32),
 ) -> Result<(), VideoError> {
     let pts = video.pts;
@@ -998,6 +1019,10 @@ fn mux_packets(
         })?;
         waiting.insert(index, packet.into_inner());
         while let Some(mut packet) = waiting.remove(&next) {
+            if let Some(stopped) = stop() {
+                release(waiting, true);
+                return stopped;
+            }
             let seconds = packet.pts().unwrap_or(0) as f64 * f64::from(time_base.num)
                 / f64::from(time_base.den);
             packet.set_duration(frame_duration(pts, next));
@@ -1010,6 +1035,10 @@ fn mux_packets(
             written(next);
             side.write_until(Some(seconds + SIDE_LEAD), muxer)?;
         }
+    }
+    if let Some(stopped) = stop() {
+        release(waiting, true);
+        return stopped;
     }
     if !waiting.is_empty() {
         return Err(VideoError::FrameCountMismatch {
