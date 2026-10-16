@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { openProject } from "@/ipc/commands";
+
 import type { ProbeOutcome } from "@/bindings/ProbeOutcome";
 import { installMockBackend, type MockBackend } from "@/ipc/mock";
 import { fakeMedia } from "@/ipc/mock/media";
@@ -55,6 +57,20 @@ describe("project lifetime", () => {
     expect(queryClient.getQueryData(["project", "D:\\a.mp4"])).toBeUndefined();
     expect(queryClient.getQueryData(["tracks", "pa"])).toBeUndefined();
     expect(queryClient.getQueryData(["project", "D:\\b.mp4"])).toEqual({ id: "pb" });
+  });
+
+  it("closes a project whose opening was in flight at the removal", async () => {
+    add("D:\\a.mp4", "D:\\b.mp4");
+    const opening = openProject("D:\\a.mp4");
+    const reopened = openProject("D:\\b.mp4");
+    useQueueStore.getState().remove([idOf("D:\\a.mp4"), idOf("D:\\b.mp4")]);
+    // b.mp4 is queued again before its call returns: it stays open.
+    add("D:\\b.mp4");
+    expect(closed()).toEqual([]);
+
+    const [a] = await Promise.all([opening, reopened]);
+    await Promise.resolve();
+    expect(closed()).toEqual([a.id]);
   });
 
   it("keeps a project another queued path still uses", () => {

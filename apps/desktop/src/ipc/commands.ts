@@ -67,9 +67,23 @@ export function saveSession(entries: readonly SessionEntry[]): Promise<void> {
   return invoke<void>("save_session", { entries });
 }
 
+/** The `open_project` calls in flight, by path. */
+const opening = new Map<string, Promise<ProjectSummary>>();
+
 /** Opens (or creates) the project of an analysed or probed file. */
 export function openProject(path: string): Promise<ProjectSummary> {
-  return invoke<ProjectSummary>("open_project", { path });
+  const opened = invoke<ProjectSummary>("open_project", { path });
+  opening.set(path, opened);
+  const settled = () => {
+    if (opening.get(path) === opened) opening.delete(path);
+  };
+  opened.then(settled, settled);
+  return opened;
+}
+
+/** The latest `open_project` call for `path` still in flight, if any. */
+export function openingProject(path: string): Promise<ProjectSummary> | undefined {
+  return opening.get(path);
 }
 
 /**
