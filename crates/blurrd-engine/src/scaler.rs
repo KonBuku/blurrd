@@ -543,4 +543,118 @@ mod tests {
             assert_eq!(digest(&out), expected, "{src:?} -> {dst:?} {range:?}");
         }
     }
+
+    /// Runs the `ffmpeg` command line `ffmpeg` with `args`; returns its
+    /// standard output.
+    fn ffmpeg(ffmpeg: &std::ffi::OsStr, args: &[&std::ffi::OsStr]) -> Vec<u8> {
+        let output = std::process::Command::new(ffmpeg)
+            .args(["-v", "error", "-nostdin"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    }
+
+    #[test]
+    #[ignore = "needs BLURRD_TEST_MEDIA and BLURRD_REFERENCE_FFMPEG (FFmpeg 7.1)"]
+    fn matches_ffmpeg_on_real_recordings() {
+        // Real recording content at the sizes players record at, made by
+        // FFmpeg (exact 4:2:0 samples, no encoder in between), brought to
+        // 1080p by the scaler and by the FFmpeg 7.1 command line the
+        // detectors were validated with: the bytes must be equal. Only
+        // pass/fail and sizes are printed.
+        use blurrd_testkit::media::{Manifest, MediaDir};
+        use std::ffi::OsStr;
+
+        let (Some(media), Some(reference)) = (
+            MediaDir::from_env(),
+            std::env::var_os("BLURRD_REFERENCE_FFMPEG"),
+        ) else {
+            eprintln!("skipped: BLURRD_TEST_MEDIA or BLURRD_REFERENCE_FFMPEG is not set");
+            return;
+        };
+        let manifest = Manifest::load_repository().unwrap();
+        let clip = media.clip_path(&manifest.clips[0]);
+        let raw = std::env::temp_dir().join(format!("blurrd-sws-{}.yuv", std::process::id()));
+        let frames = 4;
+        let rgb = 1920 * 1080 * 3;
+        for (w, h) in [
+            (1280, 720),
+            (1366, 768),
+            (1600, 900),
+            (2560, 1440),
+            (3840, 2160),
+        ] {
+            let size = format!("{w}x{h}");
+            let make = format!("scale={w}:{h}:flags=bicubic,format=yuv420p");
+            let source = ffmpeg(
+                &reference,
+                &[
+                    OsStr::new("-ss"),
+                    OsStr::new("20"),
+                    OsStr::new("-i"),
+                    clip.as_os_str(),
+                    OsStr::new("-frames:v"),
+                    OsStr::new(&frames.to_string()),
+                    OsStr::new("-vf"),
+                    OsStr::new(&make),
+                    OsStr::new("-f"),
+                    OsStr::new("rawvideo"),
+                    OsStr::new("-"),
+                ],
+            );
+            std::fs::write(&raw, &source).unwrap();
+            let expected = ffmpeg(
+                &reference,
+                &[
+                    OsStr::new("-f"),
+                    OsStr::new("rawvideo"),
+                    OsStr::new("-pix_fmt"),
+                    OsStr::new("yuv420p"),
+                    OsStr::new("-color_range"),
+                    OsStr::new("tv"),
+                    OsStr::new("-s"),
+                    OsStr::new(&size),
+                    OsStr::new("-i"),
+                    raw.as_os_str(),
+                    OsStr::new("-vf"),
+                    OsStr::new("scale=1920:1080:flags=bicubic:in_color_matrix=bt709,format=rgb24"),
+                    OsStr::new("-f"),
+                    OsStr::new("rawvideo"),
+                    OsStr::new("-"),
+                ],
+            );
+            let (luma, chroma) = (w * h, w / 2 * (h / 2));
+            let picture = luma + 2 * chroma;
+            assert_eq!(source.len(), frames * picture, "{size}");
+            assert_eq!(expected.len(), frames * rgb, "{size}");
+            let mut scaler = SwsScaler::new(
+                (w as u32, h as u32),
+                (1920, 1080),
+                YuvMatrix::Bt709,
+                SampleRange::Limited,
+            );
+            let mut out = RgbImage::default();
+            for (k, (yuv, reference)) in source
+                .chunks_exact(picture)
+                .zip(expected.chunks_exact(rgb))
+                .enumerate()
+            {
+                let (y, uv) = yuv.split_at(luma);
+                let (u, v) = uv.split_at(chroma);
+                scaler.scale(y, u, v, &mut out);
+                assert!(
+                    out.data == reference,
+                    "{size} frame {k} differs from FFmpeg"
+                );
+            }
+            eprintln!("{size}: {frames} frames identical to FFmpeg");
+        }
+        let _ = std::fs::remove_file(&raw);
+    }
 }

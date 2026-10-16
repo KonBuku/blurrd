@@ -70,6 +70,13 @@ builds so the throughput checks apply, with
 BLURRD_TEST_MEDIA=<folder> cargo nextest run --release --run-ignored all real_ --no-capture
 ```
 
+The analysis brings recordings at other sizes to the detectors' reference
+scale exactly as FFmpeg 7.1's `scale` filter does, because the detectors
+were tuned and validated on such frames. The engine test
+`matches_ffmpeg_on_real_recordings` compares the two byte for byte when
+`BLURRD_REFERENCE_FFMPEG` names an FFmpeg 7.1 `ffmpeg` executable (it is
+skipped otherwise; the FFmpeg the product links is a different version).
+
 Tests that need a GPU or a hardware encoder (NVDEC, D3D11VA, NVENC, Media
 Foundation) are ignored too, because CI runners have none; their names
 start with `gpu_`. Run them with `cargo nextest run --run-ignored all gpu`.
