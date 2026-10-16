@@ -44,6 +44,12 @@ const COLUMN_MIN_INK: usize = 2;
 /// Ink columns separated by at most this many empty columns belong to one
 /// word (gaps between glyphs; a space is wider).
 const WORD_GAP: u32 = 2;
+/// The space after a colon leaves at least this many empty columns. Faint
+/// letters fall apart with gaps of up to 3 columns (measured at native
+/// 720p under gamma 2.0: a broken letter of the broadcast prefix passed
+/// for the colon, and the sender name after it stayed unblurred for 10
+/// frames), while a colon's right bearing and the space leave 5 or more.
+const COLON_SPACE: u32 = 4;
 /// The prefix ("(All)") starts at most this far into the ink area.
 const PREFIX_MAX_X: u32 = 16;
 /// Ink that ends before this column of the ink area is background texture
@@ -925,15 +931,15 @@ impl LineColours {
     /// the colour of the first glyph after it passes `message` (no glyph
     /// passes too).
     fn followed_by(line: &LineInk<'_>, colon: u32, message: impl Fn([u8; 3]) -> bool) -> bool {
-        // A space follows the colon: inside a word, the next glyph is at
-        // most WORD_GAP columns away (a blurred letter of a faint name can
-        // look like a colon in its high-contrast strokes).
+        // A space follows the colon: inside a word, the next glyph is
+        // closer than COLON_SPACE columns (a blurred letter of a faint name
+        // can look like a colon in its high-contrast strokes).
         let spaced = line
             .segments
             .iter()
             .position(|s| s.start <= colon && colon < s.end)
             .and_then(|k| Some((line.segments[k], line.segments.get(k + 1)?)))
-            .is_none_or(|(glyph, next)| next.start - glyph.end > WORD_GAP);
+            .is_none_or(|(glyph, next)| next.start - glyph.end >= COLON_SPACE);
         spaced && Self::glyph_after(line, colon).is_none_or(message)
     }
 

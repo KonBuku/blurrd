@@ -458,3 +458,67 @@ fn voice_entries_are_found_at_720p_on_texture() {
         assert_eq!(dets.len(), 3, "seed {seed}");
     }
 }
+
+#[test]
+fn broadcast_sender_names_are_covered_at_720p_under_gamma() {
+    // Native 720p video brightened by a gamma filter: broadcast lines have
+    // no colon, and no letter of their prefix that falls apart may pass
+    // for one and end the sender name. Guards the native path; the break
+    // itself needs the game's font at 720p.
+    let layout = Layout::wide(1280, 720);
+    let sampler = HudSampler::new(layout.geometry());
+    let fonts = FontSet::latin();
+    for seed in 0..6 {
+        let mut rng = Rng::new(1800 + seed);
+        let messages = (0..6)
+            .map(|i| ChatMessage {
+                channel: Channel::Broadcast,
+                name: synth_name(
+                    &mut rng,
+                    NameStyle::LATIN_MIX[i % NameStyle::LATIN_MIX.len()],
+                ),
+                team: if i % 2 == 0 { Team::Enemy } else { Team::Ally },
+                text: "spotted a gun in Defender Side Spawn".to_owned(),
+                role: Some("Reyna".to_owned()),
+                wrap: false,
+                time: 1 + 2 * i as u32,
+            })
+            .collect();
+        let scene = Scene::new(layout, Background::white_sky(), Palette::DEFAULT, FRAMES)
+            .with_chat(&fonts, ChatSpec::new(Language::English, messages));
+        let fx = scene.render(20);
+        let fx = Fixture {
+            frame: Filter::Gamma(0.5).whole_frame(&fx.frame),
+            truth: fx.truth,
+        };
+        let frame = view(&fx.frame);
+        let mut crop = HudCrop::default();
+        let left = sampler.crop(&frame, LEFT_PANEL_ROI, HudAnchor::Left, &mut crop);
+        let mut dets = Vec::new();
+        ChatDetector::new().detect(&left, &mut dets).unwrap();
+        let detections: Vec<Detection> = dets
+            .iter()
+            .map(|d| to_source(&sampler, d, HudAnchor::Left))
+            .collect();
+        let boxes = prepared(&fx, layout.sy, &detections);
+        let coverage = item_coverage(&fx.truth, &boxes);
+        let names: Vec<_> = coverage
+            .iter()
+            .filter(|c| c.region == Region::TextChat)
+            .collect();
+        // The box shows the latest lines of the long messages.
+        assert!(names.len() >= 3, "seed {seed}: {} names", names.len());
+        let leaks: Vec<String> = names
+            .iter()
+            .filter(|c| c.is_leak())
+            .map(|c| {
+                let item = fx.truth.items.iter().find(|i| i.id == c.id).unwrap();
+                format!(
+                    "{} ({} of {} px)",
+                    item.text, c.leaked_pixels, c.glyph_pixels
+                )
+            })
+            .collect();
+        assert!(leaks.is_empty(), "seed {seed}: {leaks:?}");
+    }
+}
