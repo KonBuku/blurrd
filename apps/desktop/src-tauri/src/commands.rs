@@ -205,12 +205,7 @@ fn summary(state: &AppState, project: &OpenProject) -> ProjectSummary {
         state.paths.add_file(&proxy);
         asset_url(&proxy)
     });
-    let media_url = video_url(
-        state.media.as_deref(),
-        project.id(),
-        project.source(),
-        project.info().size,
-    );
+    let media_url = video_url(state.media.as_deref(), project.id(), project.source());
     project.summary(media_url, proxy_url)
 }
 

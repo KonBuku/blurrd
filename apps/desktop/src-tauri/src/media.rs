@@ -1,29 +1,30 @@
 //! URLs the preview player loads videos from (architecture plan 9.2).
 //!
-//! Videos play through Tauri's asset protocol, whose scope holds exactly
-//! the files the user chose (see [`crate::paths`]); the preview proxy in
-//! the cache is added to the scope when its URL is handed out. Videos
-//! larger than [`LARGE_VIDEO_BYTES`] play from the loopback media server
-//! instead, when it runs.
+//! Every video plays from the loopback media server (see
+//! [`crate::media_server`]): it answers ranges directly from the file,
+//! which seeks faster and reads more than twice as fast as the asset
+//! protocol, also while the window's thread is busy. Only when the server
+//! could not start do videos play through Tauri's asset protocol, whose
+//! scope holds exactly the files the user chose (see [`crate::paths`]).
 
 use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::media_server::MediaServer;
 
-/// Size from which a video plays from the loopback server: the asset
-/// protocol hands every range through the webview's resource callback
-/// and holds its body in memory, which makes seeking in large files slow.
-pub(crate) const LARGE_VIDEO_BYTES: u64 = 1 << 30;
-
-/// The URL of the video `path` (`size` bytes) of project `id`: the
-/// loopback server for large files when it runs, the asset protocol
-/// otherwise.
-pub(crate) fn video_url(server: Option<&MediaServer>, id: &str, path: &Path, size: u64) -> String {
-    match server {
-        Some(server) if size >= LARGE_VIDEO_BYTES => server.url(id, path),
-        _ => asset_url(path),
+/// The URL of the video `path`, served under `id`: the loopback server's
+/// when it runs, otherwise the asset protocol's (logged, as it is the
+/// slower path). The asset protocol only serves files in its scope.
+pub(crate) fn video_url(server: Option<&MediaServer>, id: &str, path: &Path) -> String {
+    if let Some(server) = server {
+        return server.url(id, path);
     }
+    let name = path.file_name().unwrap_or(path.as_os_str());
+    tauri_plugin_log::log::info!(
+        "{} plays through the asset protocol: the media server is not running",
+        name.to_string_lossy()
+    );
+    asset_url(path)
 }
 
 /// The asset protocol URL of `path`, as the frontend's `convertFileSrc`
@@ -55,9 +56,11 @@ pub(crate) fn encode_component(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
     use std::path::Path;
 
-    use super::{LARGE_VIDEO_BYTES, asset_url, encode_component, video_url};
+    use super::{asset_url, encode_component, video_url};
     use crate::media_server::MediaServer;
 
     #[test]
@@ -78,21 +81,35 @@ mod tests {
         );
     }
 
+    /// There is no size limit: a tiny video plays from the server too.
     #[test]
-    fn large_videos_play_from_the_loopback_server() {
+    fn videos_of_every_size_play_from_the_loopback_server() {
+        let dir = std::env::temp_dir().join(format!("blurrd-media-url-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tiny.mp4");
+        std::fs::write(&path, b"tiny video").unwrap();
         let server = MediaServer::start("http://tauri.localhost").unwrap();
+
+        let url = video_url(Some(&server), "tiny", &path);
+        let rest = url.strip_prefix("http://").unwrap();
+        let (address, resource) = rest.split_once('/').unwrap();
+        assert!(address.starts_with("127.0.0.1:"), "{url}");
+        let mut stream = TcpStream::connect(address).unwrap();
+        write!(
+            stream,
+            "GET /{resource} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).unwrap();
+        assert!(answer.starts_with("HTTP/1.1 200 "), "{answer}");
+        assert!(answer.ends_with("\r\n\r\ntiny video"), "{answer}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn videos_play_through_the_asset_protocol_without_the_server() {
         let path = Path::new(r"C:\clips\long.mp4");
-        assert!(
-            video_url(Some(&server), "id", path, LARGE_VIDEO_BYTES)
-                .starts_with("http://127.0.0.1:")
-        );
-        assert_eq!(
-            video_url(Some(&server), "id", path, LARGE_VIDEO_BYTES - 1),
-            asset_url(path)
-        );
-        assert_eq!(
-            video_url(None, "id", path, LARGE_VIDEO_BYTES),
-            asset_url(path)
-        );
+        assert_eq!(video_url(None, "id", path), asset_url(path));
     }
 }

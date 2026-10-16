@@ -283,12 +283,14 @@ padded boxes merge into one patch, and a frame seeker stays open on the
 last project so that stepping through frames is answered from decoded
 frames.
 
-Videos play through the asset protocol. Files of 1 GiB and more play from
-the loopback media server instead (`src-tauri/src/media_server.rs`): it
-listens on 127.0.0.1 on a random port, answers only URLs with the random
-token of this app start and the id of an opened video, and supports range
-requests, so the player seeks without the webview holding large ranges in
-memory.
+Videos of every size play from the loopback media server
+(`src-tauri/src/media_server.rs`): it listens on 127.0.0.1 on a random
+port, answers only URLs with the random token of this app start and the
+id of an opened video, and answers range requests straight from the file
+in 256 KiB writes. In WebView2 it read about three times faster than the
+asset protocol, seeked faster and did not slow down while the window's
+thread was busy. Only when the server cannot start do videos play through
+the asset protocol (`src-tauri/src/media.rs` logs it).
 
 ### Window shell
 

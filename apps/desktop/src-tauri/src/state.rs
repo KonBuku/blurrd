@@ -68,7 +68,7 @@ impl AppState {
             Ok(server) => Some(Arc::new(server)),
             Err(error) => {
                 tauri_plugin_log::log::warn!(
-                    "the media server could not start, large videos play through the asset protocol: {error}"
+                    "the media server could not start, videos play through the asset protocol: {error}"
                 );
                 None
             }

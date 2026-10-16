@@ -1,7 +1,9 @@
-//! The loopback media server (architecture plan 8 and 9.2): the preview
-//! player's fallback for large videos, which the asset protocol serves
-//! poorly on WebView2 (every range request goes through the webview's
-//! resource callback and its body is held in memory).
+//! The loopback media server (architecture plan 8 and 9.2): the
+//! preview's video source, for videos of every size. The asset protocol
+//! is used only when this server cannot start: on WebView2 it hands
+//! every range through the webview's resource callback in pieces of
+//! about 1 MB, which made it about three times slower to read and to
+//! seek, and slower still while the window's thread is busy.
 //!
 //! The server listens on 127.0.0.1 only, on a port the system picks,
 //! allows only the window's origin to read its answers (CORS), and
