@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use blurrd_core::{
-    AppError, BlurParams, ExportSettings, JobEvent, JobKind, JobSummary, Region, RegionSet,
-    VerifyState, WarningCode,
+    AppError, BlurParams, ExportSettings, JobEvent, JobKind, JobSummary, RegionSet, VerifyState,
+    WarningCode,
 };
 use blurrd_engine::{AnalyzeRequest, Engine, ProgressSink, RenderRequest, RunRequest, is_verified};
 
@@ -28,11 +28,6 @@ pub(crate) struct ExportRequest {
     pub(crate) blur: BlurParams,
     /// The detector regions that are blurred (manual boxes always are).
     pub(crate) enabled: RegionSet,
-}
-
-/// The regions of `regions` as a set.
-pub(crate) fn region_set(regions: &[Region]) -> RegionSet {
-    regions.iter().copied().collect()
 }
 
 /// Analyses `project`: detects `regions` and verifies when `verify` is set.

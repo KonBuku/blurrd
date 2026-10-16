@@ -61,4 +61,22 @@ describe("ipc contract", () => {
     const answered = new Set(matches(mock, /case "([a-z_]+)":/g));
     expect(wrappers.filter((command) => !answered.has(command))).toEqual([]);
   });
+
+  it("takes the job arguments whose types are generated", () => {
+    const commands = read("src-tauri", "src", "commands.rs");
+    /** Argument names of command `name` as the frontend sends them. */
+    const parameters = (name: string) => {
+      const start = commands.indexOf(`fn ${name}(`);
+      const list = commands.slice(start, commands.indexOf(") ->", start));
+      return matches(list, /\n\s+([a-z_]+): /g)
+        .filter((parameter) => parameter !== "state" && parameter !== "on_event")
+        .map((parameter) => parameter.replaceAll(/_([a-z])/g, (_, c: string) => c.toUpperCase()))
+        .toSorted();
+    };
+    /** Field names of a generated binding. */
+    const fields = (type: string) => matches(read("src", "bindings", `${type}.ts`), /^(\w+): /gm);
+    expect(parameters("start_analysis")).toEqual(fields("StartAnalysis"));
+    expect(parameters("start_render")).toEqual(fields("StartRender"));
+    expect(commands).toContain("files: Vec<RunFile>");
+  });
 });

@@ -15,12 +15,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use blurrd_core::{
-    AppError, BlurParams, Capabilities, DensityLanes, ErrorKind, ExportSettings, FramePts,
-    JobEvent, JobId, OutputFolder, OutputPreview, Override, OverridesSaved, Preset, ProbeOutcome,
-    ProjectSummary, Region, RegionSettings, TrackSet, VerifyReport, VerifySettings,
+    AppError, BlurParams, Capabilities, DensityLanes, DetectorOptions, ErrorKind, ExportSettings,
+    FramePts, JobEvent, JobId, OutputFolder, OutputPreview, Override, OverridesSaved, Preset,
+    ProbeOutcome, ProjectSummary, RegionSet, RegionSettings, RunFile, TrackSet, VerifyReport,
+    VerifySettings,
 };
 use blurrd_engine::is_verified;
-use serde::Deserialize;
 use tauri::State;
 use tauri::ipc::Channel;
 use uuid::Uuid;
@@ -31,7 +31,7 @@ use crate::output;
 use crate::projects::OpenProject;
 use crate::session::SessionEntry;
 use crate::state::AppState;
-use crate::tasks::{self, ExportRequest, region_set};
+use crate::tasks::{self, ExportRequest};
 
 /// Extensions of the files a folder contributes to the queue.
 const VIDEO_EXTENSIONS: [&str; 4] = ["mp4", "m4v", "mov", "mkv"];
@@ -316,16 +316,19 @@ fn new_job() -> JobId {
     JobId(Uuid::now_v7())
 }
 
-/// Analyses a project. The detector options of the request are not read:
-/// the engine has no detector settings yet (plan section 18, M22).
+/// Analyses a project. The arguments are the fields of
+/// [`blurrd_core::StartAnalysis`]. The detector options are not read: the
+/// engine has no detector settings yet (plan section 18, M22).
 #[tauri::command]
 pub(crate) fn start_analysis(
     state: State<'_, AppState>,
     project_id: String,
     regions: RegionSettings,
+    detector: DetectorOptions,
     verify: VerifySettings,
     on_event: Channel<JobEvent>,
 ) -> Result<JobId, AppError> {
+    let _ = detector;
     let engine = state.engine()?;
     let project = project(&state, &project_id)?;
     let job = new_job();
@@ -334,14 +337,15 @@ pub(crate) fn start_analysis(
     Ok(job)
 }
 
-/// Blurs and encodes a project into a new file.
+/// Blurs and encodes a project into a new file. The arguments are the
+/// fields of [`blurrd_core::StartRender`].
 #[tauri::command]
 pub(crate) fn start_render(
     state: State<'_, AppState>,
     project_id: String,
     settings: ExportSettings,
     blur: BlurParams,
-    enabled: Vec<Region>,
+    enabled: RegionSet,
     on_event: Channel<JobEvent>,
 ) -> Result<JobId, AppError> {
     let engine = state.engine()?;
@@ -349,7 +353,7 @@ pub(crate) fn start_render(
     let request = ExportRequest {
         export: checked_export(&state, settings)?,
         blur,
-        enabled: region_set(&enabled),
+        enabled,
     };
     let job = new_job();
     state.jobs.enqueue(
@@ -375,18 +379,6 @@ pub(crate) fn start_reverify(
     Ok(job)
 }
 
-/// One file of `start_run` (field names as the frontend sends them).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RunFile {
-    project_id: String,
-    regions: RegionSettings,
-    verify: VerifySettings,
-    settings: ExportSettings,
-    blur: BlurParams,
-    enabled: Vec<Region>,
-}
-
 /// Queues the export of several files; answers their job ids in order.
 /// Every file is checked before any is queued.
 #[tauri::command]
@@ -403,7 +395,7 @@ pub(crate) fn start_run(
         let request = ExportRequest {
             export: checked_export(&state, file.settings)?,
             blur: file.blur,
-            enabled: region_set(&file.enabled),
+            enabled: file.enabled,
         };
         prepared.push((project, request, file.regions.enabled, file.verify.enabled));
     }

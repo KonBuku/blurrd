@@ -13,13 +13,14 @@ use ts_rs::TS;
 
 use crate::blur_params::BlurParams;
 use crate::error::AppError;
+use crate::export::ExportSettings;
 use crate::geometry::RectI;
 use crate::media::MediaInfo;
 use crate::overrides::{Override, OverrideBinding};
 use crate::plan::Track;
 use crate::project::ProjectVerify;
 use crate::region::{Region, RegionSet};
-use crate::settings::{Sensitivity, TemporalParams};
+use crate::settings::{RegionSettings, Sensitivity, TemporalParams, VerifySettings};
 use crate::time::{FrameRange, Rational};
 
 /// What `probe_media` answers for one file: its media facts, or why it
@@ -170,6 +171,61 @@ pub struct ExactPatchInfo {
     pub roi: String,
     /// Where the patch goes, in source pixels.
     pub rect: RectI,
+}
+
+/// The arguments of `start_analysis` besides the job channel (field
+/// names as the frontend sends them).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct StartAnalysis {
+    /// The project to analyse.
+    pub project_id: String,
+    /// The regions to detect.
+    pub regions: RegionSettings,
+    /// Detector options (not read yet: the engine has no detector
+    /// settings).
+    pub detector: DetectorOptions,
+    /// Whether and how to verify.
+    pub verify: VerifySettings,
+}
+
+/// The arguments of `start_render` besides the job channel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct StartRender {
+    /// The project to export.
+    pub project_id: String,
+    /// Codec, encoder, container and output naming.
+    pub settings: ExportSettings,
+    /// The blur.
+    pub blur: BlurParams,
+    /// The detector regions that are blurred (manual boxes always are),
+    /// so a region switched off after the analysis is left out.
+    pub enabled: RegionSet,
+}
+
+/// One file of `start_run`: everything the analysis and the render of
+/// that file need, because settings are per file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RunFile {
+    /// The project to export.
+    pub project_id: String,
+    /// The regions to detect when the file is analysed.
+    pub regions: RegionSettings,
+    /// Detector options (not read yet).
+    pub detector: DetectorOptions,
+    /// Whether and how to verify.
+    pub verify: VerifySettings,
+    /// Codec, encoder, container and output naming.
+    pub settings: ExportSettings,
+    /// The blur.
+    pub blur: BlurParams,
+    /// The detector regions that are blurred.
+    pub enabled: RegionSet,
 }
 
 /// The export settings an Exact request blurs with: the `settings` query

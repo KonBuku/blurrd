@@ -1,27 +1,20 @@
 /**
  * The job commands (plan 9.1). A job reports its progress through a
  * `Channel<JobEvent>` passed with the command; the command itself answers
- * with the job id once the job was queued. The request shapes are built
- * from the inspector's job settings in `lib/job-request.ts`.
+ * with the job id once the job was queued. The request shapes are
+ * generated from the backend's types and built from the inspector's job
+ * settings in `lib/job-request.ts`.
  */
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-import type { BlurParams } from "@/bindings/BlurParams";
-import type { DetectorOptions } from "@/bindings/DetectorOptions";
-import type { ExportSettings } from "@/bindings/ExportSettings";
 import type { JobEvent } from "@/bindings/JobEvent";
 import type { JobId } from "@/bindings/JobId";
-import type { RegionSettings } from "@/bindings/RegionSettings";
-import type { VerifySettings } from "@/bindings/VerifySettings";
-import type { DetectedRegion } from "@/lib/job-settings";
+import type { RunFile as GeneratedRunFile } from "@/bindings/RunFile";
+import type { StartAnalysis } from "@/bindings/StartAnalysis";
+import type { StartRender } from "@/bindings/StartRender";
 
 /** Arguments of `start_analysis` without the channel. */
-export interface AnalysisRequest {
-  readonly projectId: string;
-  readonly regions: RegionSettings;
-  readonly detector: DetectorOptions;
-  readonly verify: VerifySettings;
-}
+export type AnalysisRequest = Readonly<StartAnalysis>;
 
 /**
  * Arguments of `start_render` without the channel. Besides the export
@@ -29,22 +22,13 @@ export interface AnalysisRequest {
  * are blurred, so a region switched off after the analysis is left out
  * of the export like it is left out of the preview.
  */
-export interface RenderRequest {
-  readonly projectId: string;
-  readonly settings: ExportSettings;
-  readonly blur: BlurParams;
-  readonly enabled: readonly DetectedRegion[];
-}
+export type RenderRequest = Readonly<StartRender>;
 
 /**
  * One file of a `start_run` request: everything the analysis and the
  * render of that file need, because settings are per file.
  */
-export interface RunFile extends AnalysisRequest {
-  readonly settings: ExportSettings;
-  readonly blur: BlurParams;
-  readonly enabled: readonly DetectedRegion[];
-}
+export type RunFile = Readonly<GeneratedRunFile>;
 
 /** Called with every event of a job, in order. */
 export type JobListener = (event: JobEvent) => void;

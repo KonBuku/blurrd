@@ -53,7 +53,8 @@ pub use hud::{
 };
 pub use ipc::{
     DetectorOptions, ExactFrame, ExactPatchInfo, ExactSettings, FramePts, HealthSpan,
-    OutputPreview, OverridesSaved, ProbeOutcome, ProjectSummary, ThumbnailStrip, TrackSet,
+    OutputPreview, OverridesSaved, ProbeOutcome, ProjectSummary, RunFile, StartAnalysis,
+    StartRender, ThumbnailStrip, TrackSet,
 };
 pub use job::{JobEvent, JobId, JobKind, JobSummary, Stage, WarningCode};
 pub use media::{AudioStreamInfo, ColorInfo, ColorRange, Fingerprint, HdrKind, MediaInfo};
