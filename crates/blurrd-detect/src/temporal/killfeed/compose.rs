@@ -80,8 +80,12 @@ const PRE_AREA_RIGHT: i32 = 60;
 /// The row is compared with the frame this many frames before the
 /// earliest pre-roll frame, before the row was born.
 const PRE_BIRTH: u32 = 2;
-/// A pixel changed if one of its channels moved by more than this ...
-const PRE_CHANGE: i32 = 40;
+/// A pixel changed if one of its channels moved by more than this, low
+/// enough for filters that flatten bright areas (measured on a row born
+/// over a bright sky: unfiltered, 52 to 74 % of the area moved by more
+/// than 40 and 80 to 93 % by more than 25; under gamma 2.0 only 36 to
+/// 44 % and 73 to 87 %, and its names stayed unblurred for 3 frames) ...
+const PRE_CHANGE: i32 = 24;
 /// ... and an area changed if at least this share of its pixels did.
 const PRE_CHANGED: f32 = 0.5;
 /// A name alone in its row (a self-kill shows only the victim) has its
@@ -853,8 +857,13 @@ fn part_candidates(
         }
         // The killer portrait sits left of the row's first name: no
         // widening reaches past that name's box, and no box into the
-        // portrait where it was found.
-        rect.x0 = rect.x0.max(STRIP.x0 + pos.x0 + part.row_x0).max(floor);
+        // portrait where it was found. A pre-roll frame shows the row still
+        // sliding in, its names left of where they settle: only the
+        // frame's own portrait limits it (measured at native 720p under
+        // gamma 2.0: the first name 34 px left of its settled box,
+        // unblurred for 3 frames).
+        let row_x0 = (confidence != Confidence::PreRoll).then_some(STRIP.x0 + pos.x0 + part.row_x0);
+        rect.x0 = rect.x0.max(row_x0.unwrap_or(i32::MIN)).max(floor);
         let text_x1 = STRIP.x0 + pos.x1 + b.text.2;
         rect.x1 = rect
             .x1
