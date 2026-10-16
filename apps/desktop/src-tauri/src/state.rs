@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use blurrd_core::{AppError, OcrCapability};
+use blurrd_core::{AppError, ErrorKind, OcrCapability};
 use blurrd_engine::{Engine, EngineConfig, OcrSetup, default_cache_dir};
 
 use crate::capabilities::CapabilityProbe;
@@ -13,6 +13,7 @@ use crate::media_server::MediaServer;
 use crate::paths::UserPaths;
 use crate::presets::Presets;
 use crate::projects::Projects;
+use crate::scheme::{self, Pending, Workers};
 use crate::session::Session;
 
 /// File name of the user presets in the app config folder (plan 6.5).
@@ -36,6 +37,8 @@ pub(crate) struct AppState {
     pub(crate) exact: Arc<ExactRenderer>,
     /// The loopback media server, unless it could not start.
     pub(crate) media: Option<Arc<MediaServer>>,
+    /// The threads answering `blurrd://` requests.
+    pub(crate) scheme: Arc<Workers<Pending>>,
 }
 
 impl AppState {
@@ -46,7 +49,8 @@ impl AppState {
     ///
     /// # Errors
     ///
-    /// [`blurrd_core::ErrorKind::Internal`] when the job queue cannot start.
+    /// [`ErrorKind::Internal`] when the job queue or the scheme's threads
+    /// cannot start.
     pub(crate) fn new(config_dir: &Path, paths: UserPaths) -> Result<Self, AppError> {
         let mut config = EngineConfig::new(default_cache_dir());
         config.ocr = ocr_setup();
@@ -66,6 +70,15 @@ impl AppState {
                 None
             }
         };
+        let workers = Workers::start(
+            "blurrd-scheme",
+            scheme::WORKERS,
+            scheme::QUEUED,
+            Pending::answer,
+        )
+        .map_err(|e| {
+            AppError::new(ErrorKind::Internal, "blurrd could not start.").with_detail(e.to_string())
+        })?;
         let engine = Engine::new(config).map(Arc::new);
         if let Err(error) = &engine {
             tauri_plugin_log::log::error!("the engine could not start: {error}");
@@ -80,6 +93,7 @@ impl AppState {
             session: Arc::new(Session::new(cache.join(SESSION_FILE))),
             exact: Arc::new(ExactRenderer::new()),
             media,
+            scheme: Arc::new(workers),
         })
     }
 

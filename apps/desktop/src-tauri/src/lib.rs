@@ -97,12 +97,10 @@ pub fn run() -> Result<(), tauri::Error> {
             };
             let state = state.inner().clone();
             // Decoding and encoding take milliseconds: answer off the
-            // webview's thread.
-            let spawned = std::thread::Builder::new()
-                .name("blurrd-scheme".to_owned())
-                .spawn(move || responder.respond(scheme::respond(&state, &request)));
-            if let Err(error) = spawned {
-                tauri_plugin_log::log::warn!("could not answer a blurrd:// request: {error}");
+            // webview's thread, on the scheme's workers.
+            let workers = std::sync::Arc::clone(&state.scheme);
+            if let Err(pending) = workers.submit(scheme::Pending::new(state, request, responder)) {
+                pending.busy();
             }
         })
         .invoke_handler(tauri::generate_handler![

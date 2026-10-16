@@ -13,21 +13,120 @@
 //! - `crop/<project>/<leak>.jpg?view=blurred|clear`: the crop of a leak
 //!   of the verification report, blurred unless `clear` is asked for.
 //!
-//! Requests are answered on their own thread; unknown paths and projects
-//! answer 404, failures 500 with the error message.
+//! Requests are answered by a few worker threads ([`Workers`]) off the
+//! webview's thread; when [`QUEUED`] requests already wait, more answer
+//! 503 at once. Unknown paths and projects answer 404, failures 500 with
+//! the error message.
 //!
 //! [`ExactFrame`]: blurrd_core::ExactFrame
 //! [`ExactSettings`]: blurrd_core::ExactSettings
 
 use std::path::Path;
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::sync::{Arc, Mutex};
 
 use blurrd_core::{AppError, ErrorKind, ExactSettings};
 use tauri::http::{Request, Response, StatusCode, header};
 
+use crate::projects::lock;
 use crate::state::AppState;
 
 /// The name of the scheme.
 pub(crate) const SCHEME: &str = "blurrd";
+
+/// Threads answering requests: thumbnails decode in parallel, Exact
+/// requests take turns on the one frame seeker.
+pub(crate) const WORKERS: usize = 4;
+/// Requests that may wait for a worker.
+pub(crate) const QUEUED: usize = 64;
+
+/// A fixed set of threads that handle jobs of type `T` from a bounded
+/// queue.
+pub(crate) struct Workers<T> {
+    queue: SyncSender<T>,
+}
+
+impl<T> std::fmt::Debug for Workers<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Workers").finish_non_exhaustive()
+    }
+}
+
+impl<T: Send + 'static> Workers<T> {
+    /// `threads` threads named `name` that call `handle` for every job,
+    /// with room for `queued` waiting jobs.
+    ///
+    /// # Errors
+    ///
+    /// The error of starting a thread.
+    pub(crate) fn start(
+        name: &str,
+        threads: usize,
+        queued: usize,
+        handle: impl Fn(T) + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
+        let (queue, jobs) = sync_channel(queued);
+        let jobs: Arc<Mutex<Receiver<T>>> = Arc::new(Mutex::new(jobs));
+        let handle = Arc::new(handle);
+        for _ in 0..threads {
+            let jobs = Arc::clone(&jobs);
+            let handle = Arc::clone(&handle);
+            std::thread::Builder::new()
+                .name(name.to_owned())
+                .spawn(move || {
+                    loop {
+                        // The lock is held only while waiting for a job.
+                        let job = lock(&jobs).recv();
+                        match job {
+                            Ok(job) => handle(job),
+                            Err(_) => return,
+                        }
+                    }
+                })?;
+        }
+        Ok(Self { queue })
+    }
+
+    /// Queues `job`; gives it back when the queue is full.
+    pub(crate) fn submit(&self, job: T) -> Result<(), T> {
+        self.queue.try_send(job).map_err(|error| match error {
+            TrySendError::Full(job) | TrySendError::Disconnected(job) => job,
+        })
+    }
+}
+
+/// A request waiting for a worker.
+pub(crate) struct Pending {
+    state: AppState,
+    request: Request<Vec<u8>>,
+    responder: tauri::UriSchemeResponder,
+}
+
+impl Pending {
+    /// A request of `state`'s app to answer through `responder`.
+    pub(crate) fn new(
+        state: AppState,
+        request: Request<Vec<u8>>,
+        responder: tauri::UriSchemeResponder,
+    ) -> Self {
+        Self {
+            state,
+            request,
+            responder,
+        }
+    }
+
+    /// Answers the request.
+    pub(crate) fn answer(self) {
+        self.responder.respond(respond(&self.state, &self.request));
+    }
+
+    /// Answers 503: too many requests wait.
+    pub(crate) fn busy(self) {
+        self.responder
+            .respond(status(StatusCode::SERVICE_UNAVAILABLE, "busy"));
+    }
+}
 
 /// What a request asks for.
 #[derive(Debug, Clone, PartialEq)]
@@ -215,10 +314,52 @@ fn status(code: StatusCode, message: &str) -> Response<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
     use blurrd_core::{BlurParams, ExactSettings, Region, RegionSet, Strength};
 
-    use super::{Route, percent_decoded};
+    use super::{Route, Workers, percent_decoded};
     use crate::media::encode_component;
+
+    /// Two workers and two queue slots: a fifth job waits nowhere.
+    #[test]
+    fn workers_are_bounded_and_answer_every_queued_job() {
+        let gate = Arc::new(Mutex::new(()));
+        let started = Arc::new(AtomicUsize::new(0));
+        let done = Arc::new(Mutex::new(Vec::new()));
+        let closed = gate.lock().unwrap();
+        let workers = {
+            let (gate, started, done) =
+                (Arc::clone(&gate), Arc::clone(&started), Arc::clone(&done));
+            Workers::start("test-worker", 2, 2, move |job: u32| {
+                started.fetch_add(1, Ordering::SeqCst);
+                drop(gate.lock().unwrap());
+                done.lock().unwrap().push(job);
+            })
+            .unwrap()
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        // Two jobs block both workers ...
+        assert!(workers.submit(0).is_ok());
+        assert!(workers.submit(1).is_ok());
+        while started.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // ... two wait in the queue, the rest is turned away.
+        let accepted: Vec<u32> = (2..8).filter(|&job| workers.submit(job).is_ok()).collect();
+        assert_eq!(accepted, vec![2, 3]);
+        drop(closed);
+        while done.lock().unwrap().len() < 4 {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut finished = done.lock().unwrap().clone();
+        finished.sort_unstable();
+        assert_eq!(finished, vec![0, 1, 2, 3]);
+    }
 
     #[test]
     fn paths_map_to_routes() {
