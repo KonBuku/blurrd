@@ -14,7 +14,9 @@
 //! units, malformed) are ignored and the whole file is sent, as RFC 9110
 //! allows. Connections are kept alive, each on its own thread, at most
 //! [`MAX_CONNECTIONS`] at a time; a request body is read and dropped, or
-//! the connection closes when it is large or chunked.
+//! the connection closes when it is large or chunked. A request (head
+//! and body) must arrive within [`REQUEST_TIMEOUT`] of its first byte,
+//! so clients that trickle it cannot hold the connection slots.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -24,7 +26,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use uuid::Uuid;
 
@@ -34,6 +36,8 @@ use crate::projects::lock;
 pub(crate) const MAX_CONNECTIONS: usize = 16;
 /// How long an idle kept-alive connection stays open.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a request may take to arrive, from its first byte.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long writing an answer may stall before the connection closes.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest request head accepted.
@@ -62,6 +66,12 @@ impl MediaServer {
     ///
     /// The errors of binding the socket or starting the thread.
     pub(crate) fn start(origin: &str) -> io::Result<Self> {
+        Self::start_with(origin, REQUEST_TIMEOUT)
+    }
+
+    /// [`MediaServer::start`] with requests that must arrive within
+    /// `request_timeout`.
+    fn start_with(origin: &str, request_timeout: Duration) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         let address = listener.local_addr()?;
         let token = Uuid::new_v4().simple().to_string();
@@ -71,6 +81,7 @@ impl MediaServer {
             token: token.clone(),
             files: Arc::clone(&files),
             open: Arc::new(AtomicUsize::new(0)),
+            request_timeout,
         };
         std::thread::Builder::new()
             .name("blurrd-media".to_owned())
@@ -101,6 +112,8 @@ struct Server {
     token: String,
     files: Files,
     open: Arc<AtomicUsize>,
+    /// How long a request may take to arrive, from its first byte.
+    request_timeout: Duration,
 }
 
 impl Server {
@@ -130,7 +143,7 @@ impl Server {
             let spawned = std::thread::Builder::new()
                 .name("blurrd-media-connection".to_owned())
                 .spawn(move || {
-                    if let Err(error) = server.serve(stream) {
+                    if let Err(error) = server.serve(&stream) {
                         tauri_plugin_log::log::debug!("media connection ended: {error}");
                     }
                     server.open.fetch_sub(1, Ordering::SeqCst);
@@ -142,18 +155,25 @@ impl Server {
     }
 
     /// Answers the requests of one connection until it closes.
-    fn serve(&self, stream: TcpStream) -> io::Result<()> {
-        stream.set_read_timeout(Some(IDLE_TIMEOUT))?;
+    fn serve(&self, stream: &TcpStream) -> io::Result<()> {
         stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-        let mut reader = BufReader::new(stream.try_clone()?);
+        let mut reader = BufReader::new(stream);
         let mut writer = stream;
         loop {
-            let Some(request) = read_head(&mut reader)? else {
+            // Wait for the next request as long as the connection may
+            // idle; from its first byte on, the whole request must
+            // arrive within the request timeout.
+            reader.get_ref().set_read_timeout(Some(IDLE_TIMEOUT))?;
+            if reader.fill_buf()?.is_empty() {
+                return Ok(());
+            }
+            let deadline = Instant::now() + self.request_timeout;
+            let Some(request) = read_head(&mut reader, deadline)? else {
                 return Ok(());
             };
             // A body the server cannot skip safely ends the connection
             // after the answer, so it is never read as the next request.
-            let keep_alive = request.keep_alive() && skip_body(&request, &mut reader)?;
+            let keep_alive = request.keep_alive() && skip_body(&request, &mut reader, deadline)?;
             let reply = Reply {
                 head: request.method == "HEAD",
                 keep_alive,
@@ -246,9 +266,76 @@ impl Reply {
     }
 }
 
-/// Reads and drops the body of `request`; answers whether the connection
-/// can serve another request (no body, or a small one with a length).
-fn skip_body(request: &Head, reader: &mut impl BufRead) -> io::Result<bool> {
+/// A socket whose reads can time out.
+trait TimedRead: Read {
+    fn set_timeout(&self, timeout: Duration) -> io::Result<()>;
+}
+
+impl TimedRead for &TcpStream {
+    fn set_timeout(&self, timeout: Duration) -> io::Result<()> {
+        self.set_read_timeout(Some(timeout))
+    }
+}
+
+/// Lets the next read of `reader` wait until `deadline` at most.
+///
+/// # Errors
+///
+/// [`io::ErrorKind::TimedOut`] when the deadline has passed.
+fn arm<R: TimedRead>(reader: &BufReader<R>, deadline: Instant) -> io::Result<()> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the request took too long",
+        ));
+    }
+    reader.get_ref().set_timeout(left)
+}
+
+/// Reads one line (with its line feed) into `line` before `deadline`,
+/// never more than `limit` bytes; answers the bytes read, 0 at the end
+/// of the stream.
+fn read_line<R: TimedRead>(
+    reader: &mut BufReader<R>,
+    line: &mut Vec<u8>,
+    limit: usize,
+    deadline: Instant,
+) -> io::Result<usize> {
+    let mut read = 0;
+    loop {
+        arm(reader, deadline)?;
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            return Ok(read);
+        }
+        let (taken, done) = match buffer.iter().position(|&byte| byte == b'\n') {
+            Some(end) => (end + 1, true),
+            None => (buffer.len(), false),
+        };
+        line.extend_from_slice(&buffer[..taken]);
+        reader.consume(taken);
+        read += taken;
+        if read > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "request head too long",
+            ));
+        }
+        if done {
+            return Ok(read);
+        }
+    }
+}
+
+/// Reads and drops the body of `request` before `deadline`; answers
+/// whether the connection can serve another request (no body, or a
+/// small one with a length).
+fn skip_body<R: TimedRead>(
+    request: &Head,
+    reader: &mut BufReader<R>,
+    deadline: Instant,
+) -> io::Result<bool> {
     if request.header("transfer-encoding").is_some() {
         return Ok(false);
     }
@@ -258,8 +345,18 @@ fn skip_body(request: &Head, reader: &mut impl BufRead) -> io::Result<bool> {
     match length.parse::<u64>() {
         Ok(0) => Ok(true),
         Ok(length) if length <= MAX_BODY_BYTES => {
-            let skipped = io::copy(&mut reader.take(length), &mut io::sink())?;
-            Ok(skipped == length)
+            let mut left = length;
+            while left > 0 {
+                arm(reader, deadline)?;
+                let available = reader.fill_buf()?.len();
+                if available == 0 {
+                    return Ok(false);
+                }
+                let skipped = available.min(usize::try_from(left).unwrap_or(usize::MAX));
+                reader.consume(skipped);
+                left -= skipped as u64;
+            }
+            Ok(true)
         }
         _ => Ok(false),
     }
@@ -294,13 +391,17 @@ impl Head {
     }
 }
 
-/// Reads one request head; `None` when the peer closed the connection.
-fn read_head(reader: &mut impl BufRead) -> io::Result<Option<Head>> {
+/// Reads one request head before `deadline`; `None` when the peer
+/// closed the connection.
+fn read_head<R: TimedRead>(
+    reader: &mut BufReader<R>,
+    deadline: Instant,
+) -> io::Result<Option<Head>> {
     let mut lines = Vec::new();
     let mut total = 0;
     loop {
-        let mut line = String::new();
-        let read = reader.read_line(&mut line)?;
+        let mut bytes = Vec::new();
+        let read = read_line(reader, &mut bytes, MAX_HEAD_BYTES - total, deadline)?;
         if read == 0 {
             return if lines.is_empty() {
                 Ok(None)
@@ -309,12 +410,8 @@ fn read_head(reader: &mut impl BufRead) -> io::Result<Option<Head>> {
             };
         }
         total += read;
-        if total > MAX_HEAD_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "request head too long",
-            ));
-        }
+        let line = String::from_utf8(bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "request head not UTF-8"))?;
         let line = line.trim_end_matches(['\r', '\n']).to_owned();
         if line.is_empty() {
             if lines.is_empty() {
@@ -455,7 +552,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{MediaServer, Range, parse_range, same_token};
+    use super::{MAX_CONNECTIONS, MediaServer, Range, parse_range, same_token};
 
     /// The window's origin in the tests.
     pub(crate) const ORIGIN: &str = "http://tauri.localhost";
@@ -699,6 +796,73 @@ mod tests {
         let mut stream = TcpStream::connect(server.address).unwrap();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         assert_eq!(ask(&mut stream, &mut reader, &get("")).status, 404);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Clients that trickle a request head lose their connection once
+    /// the request timeout passes, so they cannot hold every slot; a
+    /// slow request that arrives in time is answered.
+    #[test]
+    fn trickled_requests_cannot_hold_the_slots() {
+        let (path, bytes) = video("trickle");
+        let server = MediaServer::start_with(ORIGIN, Duration::from_millis(400)).unwrap();
+        let url = server.url("abc", &path);
+        let resource = format!("/{}", url.splitn(4, '/').nth(3).unwrap());
+        let get = format!("GET {resource} HTTP/1.1\r\nHost: x\r\nRange: bytes=0-9\r\n\r\n");
+
+        // Every slot taken by a client that sends one line after another
+        // and never ends its head. The lines do not start like an HTTP
+        // request: some security products on Windows hold back a partial
+        // HTTP head, also on the loopback address, until it is complete.
+        let mut slow: Vec<TcpStream> = (0..MAX_CONNECTIONS)
+            .map(|_| {
+                let mut stream = TcpStream::connect(server.address).unwrap();
+                stream.write_all(b"SLOW /x\r\n").unwrap();
+                stream
+            })
+            .collect();
+        for _ in 0..12 {
+            std::thread::sleep(Duration::from_millis(100));
+            for stream in &mut slow {
+                // Fails once the server has closed the connection.
+                let _ = stream.write_all(b"X-Slow: 1\r\n");
+            }
+        }
+        for stream in &mut slow {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut rest = Vec::new();
+            if let Err(error) = stream.read_to_end(&mut rest) {
+                assert!(
+                    !matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ),
+                    "a trickling client kept its connection"
+                );
+            }
+        }
+        drop(slow);
+
+        // The slots are free again; a head sent in parts within the
+        // timeout is answered.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut stream = TcpStream::connect(server.address).unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let (first, second) = get.split_at(get.len() / 2);
+            stream.write_all(first.as_bytes()).unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+            stream.write_all(second.as_bytes()).unwrap();
+            let answer = read_answer(&mut reader, false);
+            if answer.status == 206 {
+                assert_eq!(answer.body, &bytes[..10]);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{}", answer.status);
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let _ = std::fs::remove_file(&path);
     }
 
