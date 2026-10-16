@@ -146,6 +146,8 @@ pub struct HudCrop {
     data: Vec<u8>,
     /// Horizontally filtered source rows (fixed point, 3 channels).
     rows: Vec<i32>,
+    /// One output line's sums of the vertical pass.
+    sums: Vec<i64>,
     filters: Option<CropFilters>,
 }
 
@@ -189,6 +191,7 @@ impl HudSampler {
         let HudCrop {
             data,
             rows,
+            sums,
             filters,
         } = buf;
         if filters
@@ -198,7 +201,7 @@ impl HudSampler {
             *filters = None;
         }
         let f = filters.get_or_insert_with(|| self.filters(roi, anchor, source));
-        resample(frame, f, rows, data);
+        resample(frame, f, rows, sums, data);
         RgbView::packed(data, roi.width(), roi.height())
     }
 
@@ -252,22 +255,36 @@ impl HudSampler {
 }
 
 /// Resamples `frame` through `f` into `out` (packed RGB of the crop's
-/// size), with `rows` as the horizontally filtered intermediate.
-fn resample(frame: &RgbView<'_>, f: &CropFilters, rows: &mut Vec<i32>, out: &mut Vec<u8>) {
+/// size), with `rows` as the horizontally filtered intermediate and `sums`
+/// as one output line's accumulators.
+///
+/// Both passes run along whole lines (a source pixel's window, a filtered
+/// row's channels) so that the inner loops read memory in order; the sums
+/// are exact integers, so the order does not change a byte.
+fn resample(
+    frame: &RgbView<'_>,
+    f: &CropFilters,
+    rows: &mut Vec<i32>,
+    sums: &mut Vec<i64>,
+    out: &mut Vec<u8>,
+) {
     let width = f.x.starts.len();
     let height = f.y.starts.len();
     let (r0, r1) = f.rows;
     let source_w = frame.width() as usize;
+    let line_len = width * 3;
     rows.clear();
-    rows.resize((r1 - r0) * width * 3, 0);
-    for (sy, line) in (r0..r1).zip(rows.chunks_exact_mut(width * 3)) {
+    rows.resize((r1 - r0) * line_len, 0);
+    for (sy, line) in (r0..r1).zip(rows.chunks_exact_mut(line_len)) {
         let src = frame.row(sy as u32);
         for (i, px) in line.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             let (start, weights) = f.x.of(i);
+            // Taps past the right edge carry no weight: the filter merged
+            // them into the last pixel.
+            let end = (start + weights.len()).min(source_w);
+            let window = src[3 * start..3 * end].as_chunks::<3>().0;
             let mut acc = [0i32; 3];
-            for (k, &w) in weights.iter().enumerate() {
-                let x = (start + k).min(source_w - 1);
-                let p = &src[3 * x..3 * x + 3];
+            for (&w, p) in weights.iter().zip(window) {
                 acc[0] += w * i32::from(p[0]);
                 acc[1] += w * i32::from(p[1]);
                 acc[2] += w * i32::from(p[2]);
@@ -276,17 +293,24 @@ fn resample(frame: &RgbView<'_>, f: &CropFilters, rows: &mut Vec<i32>, out: &mut
         }
     }
     out.clear();
-    out.resize(width * height * 3, 0);
+    out.resize(height * line_len, 0);
     let round = 1i64 << (2 * WEIGHT_BITS - 1);
-    for (j, line) in out.chunks_exact_mut(width * 3).enumerate() {
+    for (j, line) in out.chunks_exact_mut(line_len).enumerate() {
         let (start, weights) = f.y.of(j);
-        for (c, value) in line.iter_mut().enumerate() {
-            let mut acc = 0i64;
-            for (k, &w) in weights.iter().enumerate() {
-                let row = (start + k).clamp(r0, r1 - 1) - r0;
-                acc += i64::from(w) * i64::from(rows[row * width * 3 + c]);
+        sums.clear();
+        sums.resize(line_len, 0);
+        for (k, &w) in weights.iter().enumerate() {
+            if w == 0 {
+                continue;
             }
-            *value = ((acc + round) >> (2 * WEIGHT_BITS)).clamp(0, 255) as u8;
+            let row = (start + k).clamp(r0, r1 - 1) - r0;
+            let filtered = &rows[row * line_len..(row + 1) * line_len];
+            for (sum, &v) in sums.iter_mut().zip(filtered) {
+                *sum += i64::from(w) * i64::from(v);
+            }
+        }
+        for (value, &sum) in line.iter_mut().zip(sums.iter()) {
+            *value = ((sum + round) >> (2 * WEIGHT_BITS)).clamp(0, 255) as u8;
         }
     }
 }
@@ -295,7 +319,7 @@ fn resample(frame: &RgbView<'_>, f: &CropFilters, rows: &mut Vec<i32>, out: &mut
 mod tests {
     use blurrd_core::{HudAnchor, HudGeometry, HudLayout, RectI};
 
-    use super::{HudCrop, HudSampler, cubic};
+    use super::{CropFilters, HudCrop, HudSampler, WEIGHT_BITS, cubic};
     use crate::image::RgbView;
 
     /// A smooth test image: every channel a different slow wave of the
@@ -378,6 +402,86 @@ mod tests {
                     }
                 }
                 assert!(worst <= 4, "{w}x{h} {layout:?} {anchor:?}: {worst}");
+            }
+        }
+    }
+
+    /// The resampling by its definition: every output channel the weighted
+    /// sum of the horizontally filtered rows, each tap clamped to the
+    /// source on its own.
+    fn resample_per_pixel(frame: &RgbView<'_>, f: &CropFilters) -> Vec<u8> {
+        let (width, height) = (f.x.starts.len(), f.y.starts.len());
+        let last_x = frame.width() as usize - 1;
+        let last_y = frame.height() as usize - 1;
+        let filtered = |y: usize, x: usize, c: usize| -> i64 {
+            let (start, weights) = f.x.of(x);
+            let row = frame.row(y as u32);
+            weights
+                .iter()
+                .enumerate()
+                .map(|(k, &w)| {
+                    let sx = (start + k).min(last_x);
+                    i64::from(w) * i64::from(row[3 * sx + c])
+                })
+                .sum()
+        };
+        let mut out = vec![0u8; width * height * 3];
+        for j in 0..height {
+            let (start, weights) = f.y.of(j);
+            for x in 0..width {
+                for c in 0..3 {
+                    let sum: i64 = weights
+                        .iter()
+                        .enumerate()
+                        .map(|(k, &w)| {
+                            let sy = (start + k).clamp(f.rows.0, f.rows.1 - 1).min(last_y);
+                            i64::from(w) * filtered(sy, x, c)
+                        })
+                        .sum();
+                    let round = 1i64 << (2 * WEIGHT_BITS - 1);
+                    out[3 * (j * width + x) + c] =
+                        ((sum + round) >> (2 * WEIGHT_BITS)).clamp(0, 255) as u8;
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn resampling_equals_its_per_pixel_definition() {
+        // Small frames keep the definition fast; the crops reach past every
+        // frame edge, and the layouts cover upscaling, downscaling and a
+        // stretched width.
+        let layouts = [
+            (320, 180, HudLayout::Auto),
+            (640, 360, HudLayout::Auto),
+            (2400, 1350, HudLayout::Auto),
+            (320, 180, HudLayout::Stretched4x3),
+            (320, 240, HudLayout::Auto),
+        ];
+        let crops = [
+            (RectI::new(1700, 0, 1920, 60).unwrap(), HudAnchor::Right),
+            (RectI::new(0, 1000, 200, 1080).unwrap(), HudAnchor::Left),
+            (RectI::new(900, 500, 1020, 560).unwrap(), HudAnchor::Center),
+        ];
+        for (w, h, layout) in layouts {
+            let g = HudGeometry::for_layout(w, h, layout);
+            let data: Vec<u8> = (0..3 * w * h)
+                .map(|i| (u64::from(i) * 7919 % 251) as u8)
+                .collect();
+            let frame = RgbView::new(&data, w, h, 3 * w as usize).unwrap();
+            let sampler = HudSampler::new(g);
+            for (roi, anchor) in crops {
+                let mut buf = HudCrop::default();
+                let crop = sampler.crop(&frame, roi, anchor, &mut buf).row(0).to_vec();
+                let filters = buf.filters.clone().unwrap();
+                let want = resample_per_pixel(&frame, &filters);
+                assert_eq!(
+                    &want[..crop.len()],
+                    &crop[..],
+                    "{w}x{h} {layout:?} {anchor:?}"
+                );
+                assert_eq!(buf.data, want, "{w}x{h} {layout:?} {anchor:?}");
             }
         }
     }
