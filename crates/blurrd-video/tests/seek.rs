@@ -162,6 +162,30 @@ fn seeker_returns_the_right_picture_for_any_index() {
 }
 
 #[test]
+fn keyframe_seeks_land_on_the_keyframe_before_a_time() {
+    let clip = TempClip::new("keyframes", "mp4");
+    // Keyframes every 30 frames.
+    write_clip(clip.path(), &ClipSpec::cfr(150));
+    let pts = table(clip.path());
+    let mut decoder = Decoder::open(clip.path(), &DecodeOptions::default()).unwrap();
+    for (target, keyframe) in [(100, 90), (30, 30), (149, 120), (0, 0), (59, 30)] {
+        decoder.seek_keyframe(pts.pts(target).unwrap()).unwrap();
+        let frame = decoder.next_frame().unwrap().unwrap();
+        assert!(frame.is_key(), "seek to {target}");
+        assert_eq!(number(&frame), keyframe, "seek to {target}");
+        assert_eq!(Some(frame.pts()), pts.pts(keyframe));
+        // Indices count from the keyframe; decoding goes on from there.
+        assert_eq!(frame.index(), 0);
+        let next = decoder.next_frame().unwrap().unwrap();
+        assert_eq!((next.index(), number(&next)), (1, keyframe + 1));
+    }
+    // A time before the first frame gives the first frame.
+    decoder.seek_keyframe(pts.pts(0).unwrap() - 100).unwrap();
+    let frame = decoder.next_frame().unwrap().unwrap();
+    assert_eq!(number(&frame), 0);
+}
+
+#[test]
 fn seeker_detects_a_table_from_another_file() {
     let clip = TempClip::new("mismatch", "mkv");
     write_clip(clip.path(), &ClipSpec::cfr(60));

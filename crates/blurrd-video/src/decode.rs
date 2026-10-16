@@ -444,6 +444,23 @@ impl Decoder {
         }
     }
 
+    /// Positions the decoder at the keyframe at or before `timestamp`
+    /// (stream time base), for sampling a video whose PTS table is not
+    /// known yet. The next [`Decoder::next_frame`] returns that keyframe
+    /// (or the first frame for a `timestamp` before it). The frames that
+    /// follow carry their PTS, but their indices count from 0 at the
+    /// keyframe: they are not presentation indices of the file.
+    ///
+    /// # Errors
+    ///
+    /// [`VideoError::Ffmpeg`] when seeking fails.
+    pub fn seek_keyframe(&mut self, timestamp: i64) -> Result<(), VideoError> {
+        self.seek_demuxer(timestamp)?;
+        self.next_index = 0;
+        self.last_pts = None;
+        Ok(())
+    }
+
     /// Seeks the demuxer to the keyframe at or before `timestamp` (stream
     /// time base) and resets the decoder.
     fn seek_demuxer(&mut self, timestamp: i64) -> Result<(), VideoError> {
