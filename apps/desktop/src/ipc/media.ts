@@ -22,10 +22,35 @@ export interface ExactPatch {
   readonly image: ImageBitmap;
 }
 
+/** A failed request to the backend and its HTTP status. */
+export class HttpError extends Error {
+  readonly status: number;
+
+  constructor(url: string, status: number) {
+    super(`${url}: HTTP ${status}`);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
 async function fetchOk(url: string, signal: AbortSignal): Promise<Response> {
   const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+  if (!response.ok) throw new HttpError(url, response.status);
   return response;
+}
+
+/**
+ * Whether a failed scheme request is tried again: only when the backend
+ * answered 503 (its request queue was full during a burst), at most
+ * twice. Use with `busyRetryDelay` as a query's `retry`.
+ */
+export function retryWhenBusy(failures: number, error: unknown): boolean {
+  return failures < 2 && error instanceof HttpError && error.status === 503;
+}
+
+/** The pause before retry `failures + 1` of a busy request: 250 ms, then 500 ms. */
+export function busyRetryDelay(failures: number): number {
+  return 250 * 2 ** failures;
 }
 
 /** Decodes the image at `url`. */
@@ -67,6 +92,11 @@ export async function fetchExact(
     })),
   );
   return { frame: info.frame, patches };
+}
+
+/** Loads the image at `url` into an object URL. */
+export async function loadObjectUrl(url: string, signal: AbortSignal): Promise<string> {
+  return URL.createObjectURL(await (await fetchOk(url, signal)).blob());
 }
 
 /** URL of timeline thumbnail `index` of a project. */

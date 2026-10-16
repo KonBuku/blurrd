@@ -1,20 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo } from "react";
 
-import { thumbnailUrl } from "@/ipc/media";
+import { busyRetryDelay, loadObjectUrl, retryWhenBusy, thumbnailUrl } from "@/ipc/media";
 
 /** Width of one thumbnail slot in pixels (16:9 at the strip height). */
 const SLOT = 64;
 
-/** Loads a thumbnail into an object URL, cached for the session. */
+/**
+ * Loads a thumbnail into an object URL, cached for the session. A 503
+ * (the backend's request queue was full) is retried shortly, so a burst
+ * of thumbnails does not leave blank slots.
+ */
 function useThumbnail(url: string) {
   return useQuery({
     queryKey: ["thumbnail", url],
-    queryFn: async ({ signal }) => {
-      const response = await fetch(url, { signal });
-      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
-      return URL.createObjectURL(await response.blob());
-    },
+    queryFn: ({ signal }) => loadObjectUrl(url, signal),
+    retry: retryWhenBusy,
+    retryDelay: busyRetryDelay,
   });
 }
 
