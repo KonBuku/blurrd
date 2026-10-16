@@ -20,6 +20,7 @@ use blurrd_detect::calibration::{Calibrator, MIN_CONFIDENCE};
 use blurrd_detect::chat::LEFT_PANEL_ROI;
 use blurrd_detect::geometry::{HudCrop, HudSampler};
 use blurrd_detect::killfeed::FEED_ROI;
+use blurrd_detect::temporal::killfeed::{KillFeedFrame, KillFeedTracker};
 use blurrd_detect::voice::LEFT_PANEL_ROI as VOICE_PANEL_ROI;
 use blurrd_detect::{
     BannerDetector, BannerTracker, ChatDetector, Detection, KillFeedDetector, RgbView,
@@ -456,6 +457,138 @@ fn voice_entries_are_found_at_720p_on_texture() {
         let panel = sampler.crop(&frame, VOICE_PANEL_ROI, HudAnchor::Left, &mut crop);
         detector.detect(&panel, &mut dets).unwrap();
         assert_eq!(dets.len(), 3, "seed {seed}");
+    }
+}
+
+/// Births of the rows of [`tracked_feed_leaks`]: two of them close
+/// together, so that one row jumps up while the next slides in.
+const FEED_BIRTHS: [u32; 4] = [2, 14, 18, 33];
+
+/// The kill-feed names left readable in source pixels when a video in
+/// `layout`, changed by `filter`, runs through the detector and the tracker
+/// on crops of `sampler`, as `frame: name` strings, with the number of
+/// name-frames checked. Every name at full opacity counts, also while its
+/// row slides in. With `late`, the detector's readings of each new row are
+/// dropped until it has slid into place, as on video where the row is
+/// read only once it has settled: the tracker covers the slide-in from
+/// the row's first frames.
+fn tracked_feed_leaks(
+    layout: Layout,
+    filter: Filter,
+    background: Background,
+    seed: u64,
+    late: bool,
+) -> (usize, Vec<String>) {
+    const VIDEO_FRAMES: u32 = 70;
+    /// Frames from a row's birth until it has slid into place.
+    const SLIDE: u32 = 4;
+    let fonts = FontSet::latin();
+    let mut rng = Rng::new(seed);
+    let kills = FEED_BIRTHS
+        .into_iter()
+        .map(|birth| support::random_kill(&mut rng, birth))
+        .collect();
+    let scene = Scene::new(layout, background, Palette::DEFAULT, VIDEO_FRAMES)
+        .with_kill_feed(&fonts, KillFeedSpec::new(kills));
+    let sampler = HudSampler::new(layout.geometry());
+    let mut detector = KillFeedDetector::new();
+    let mut tracker = KillFeedTracker::new();
+    let mut crop = HudCrop::default();
+    let mut dets = Vec::new();
+    let mut out = Vec::new();
+    let mut fixtures = Vec::new();
+    for f in 0..VIDEO_FRAMES {
+        let fx = scene.render(f);
+        let fx = Fixture {
+            frame: filter.whole_frame(&fx.frame),
+            truth: fx.truth,
+        };
+        let frame = view(&fx.frame);
+        let feed = sampler.crop(&frame, FEED_ROI, HudAnchor::Right, &mut crop);
+        detector.detect(&feed, &mut dets).unwrap();
+        if late && FEED_BIRTHS.iter().any(|&b| (b..b + SLIDE).contains(&f)) {
+            // The newest row is the lowest one.
+            let newest = dets.iter().filter_map(|d| d.row_top).max();
+            dets.retain(|d| d.row_top != newest);
+        }
+        tracker
+            .push(&KillFeedFrame {
+                frame: f,
+                crop: feed,
+                detections: &dets,
+            })
+            .unwrap();
+        tracker.drain_ready(&mut out);
+        fixtures.push(fx);
+    }
+    tracker.finish(&mut out);
+    let mut checked = 0;
+    let mut leaks = Vec::new();
+    for (entry, fx) in out.iter().zip(&fixtures) {
+        let detections: Vec<Detection> = entry
+            .boxes
+            .iter()
+            .map(|b| {
+                let rect = sampler.to_source(b.rect, HudAnchor::Right);
+                Detection {
+                    region: Region::KillFeed,
+                    kind: b.kind,
+                    text: rect,
+                    rect,
+                    row_top: None,
+                }
+            })
+            .collect();
+        let boxes = prepared(fx, layout.sy, &detections);
+        for c in item_coverage(&fx.truth, &boxes) {
+            let item = fx.truth.items.iter().find(|i| i.id == c.id).unwrap();
+            if item.region != Region::KillFeed || item.opacity < 1.0 {
+                continue;
+            }
+            checked += 1;
+            if c.is_leak() {
+                leaks.push(format!(
+                    "{}: {:?} ({} of {} px)",
+                    entry.frame, item.id, c.leaked_pixels, c.glyph_pixels
+                ));
+            }
+        }
+    }
+    (checked, leaks)
+}
+
+#[test]
+fn new_kill_feed_rows_are_covered_at_720p_under_gamma() {
+    // Native 720p video brightened by a gamma filter: the bars of a new row
+    // change the area they slide into less than on plain video, and the
+    // names reach left of their settled place while the row slides in. A
+    // row read only once it has settled is still covered from its first
+    // frames (the real case also lost the template while the row slid
+    // in; the fixture's rows are followed back, so this guards the
+    // outcome), and right-aligned victim names whose last glyph fades are
+    // covered up to the portrait.
+    let layout = Layout::wide(1280, 720);
+    for (seed, (gamma, background)) in [
+        (0.6, Background::white_sky()),
+        (0.6, Background::teal_wall(2)),
+        (0.75, Background::dusk()),
+        (0.75, Background::noise(3)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for late in [false, true] {
+            let (checked, leaks) = tracked_feed_leaks(
+                layout,
+                Filter::Gamma(gamma),
+                background,
+                1700 + seed as u64,
+                late,
+            );
+            let what = format!("gamma {gamma} seed {seed} late {late}");
+            assert!(checked > 300, "{what}: {checked} name-frames");
+            assert!(leaks.is_empty(), "{what}: {leaks:#?}");
+        }
     }
 }
 

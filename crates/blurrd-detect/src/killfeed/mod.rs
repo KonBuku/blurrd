@@ -82,7 +82,11 @@ const VICTIM_COLOUR_X0: i32 = 1790;
 const INNER_MARGIN: i32 = 4;
 /// The first row's top is never above this line (`FEED_Y_TOP`).
 const FEED_Y_TOP: i32 = 88;
-/// Horizontal padding of a name's blur box around its text.
+/// Horizontal padding of a name's blur box around its text. A victim name
+/// read up to the right alignment is right-aligned: its box reaches the
+/// end of the victim text search whatever was read of its last glyph
+/// (measured at 720p under gamma 1.33: a fading last glyph read short left
+/// 13 px of the name unblurred for 50 frames).
 const NAME_PAD_X: i32 = 5;
 /// The blur box covers the row's text band: from the row top + 5 to the
 /// row top + 28 (text runs from + 10 to + 24, descenders to + 28).
@@ -311,7 +315,11 @@ fn name_detection(kind: NameKind, text: RectI, top: i32) -> Detection {
         rect: RectI {
             x0: text.x0 - NAME_PAD_X,
             y0: top + NAME_BAND.0,
-            x1: text.x1 + NAME_PAD_X,
+            x1: if kind == NameKind::Victim && text.x1 > RIGHT_ALIGN {
+                (text.x1 + NAME_PAD_X).max(VICTIM_TEXT_X1)
+            } else {
+                text.x1 + NAME_PAD_X
+            },
             y1: (top + NAME_BAND.1).max(text.y1 + DESCENDER),
         },
         row_top: Some(top),
