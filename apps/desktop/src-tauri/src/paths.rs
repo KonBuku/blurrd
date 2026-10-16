@@ -5,9 +5,10 @@
 //! and folder to the asset protocol's scope (folders with everything
 //! inside them). That scope is therefore the list of user-chosen paths:
 //! the commands accept a path only when the scope allows it, after making
-//! it absolute and canonical. Paths the backend wrote itself (the saved
-//! queue, the preview proxy) are added to the scope when they are handed
-//! to the frontend.
+//! it absolute and canonical. Paths the backend hands to the frontend
+//! itself are added to the scope: the files of the saved queue, and the
+//! preview proxy when it plays through the asset protocol (only when the
+//! media server could not start).
 
 use std::path::{Component, Path, PathBuf, Prefix};
 

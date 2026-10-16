@@ -2,15 +2,15 @@
 //! preview's video source, for videos of every size. The asset protocol
 //! is used only when this server cannot start: on WebView2 it hands
 //! every range through the webview's resource callback in pieces of
-//! about 1 MB, which made it about three times slower to read and to
-//! seek, and slower still while the window's thread is busy.
+//! about 1 MB, which made reading about three times and seeking about
+//! 2.5 times slower, and slower still while the window's thread is busy.
 //!
 //! The server listens on 127.0.0.1 only, on a port the system picks,
 //! allows only the window's origin to read its answers (CORS), and
 //! answers `GET` and `HEAD` for `/<token>/<id>`: the token is random per
 //! app start and compared in constant time, the id names a file the
-//! backend registered (an opened video, until its project closes), so no
-//! other file can be read.
+//! backend registered (an opened video or its preview proxy, until the
+//! project closes), so no other file can be read.
 //! A single range (`bytes=a-b`, `a-`, `-n`) answers 206 with the part, a
 //! range past the end 416; other `Range` headers (several ranges, other
 //! units, malformed) are ignored and the whole file is sent, as RFC 9110

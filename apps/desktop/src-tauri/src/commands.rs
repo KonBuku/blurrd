@@ -26,8 +26,10 @@ use tauri::ipc::Channel;
 use uuid::Uuid;
 
 use crate::jobs::EventOut;
-use crate::media::{asset_url, video_url};
+use crate::media::video_url;
+use crate::media_server::MediaServer;
 use crate::output;
+use crate::paths::UserPaths;
 use crate::projects::OpenProject;
 use crate::session::SessionEntry;
 use crate::state::AppState;
@@ -191,9 +193,7 @@ pub(crate) async fn open_project(
 #[tauri::command]
 pub(crate) fn close_project(state: State<'_, AppState>, project_id: String) {
     if state.projects.close(&project_id) {
-        if let Some(media) = &state.media {
-            media.forget(&project_id);
-        }
+        forget_media(state.media.as_deref(), &project_id);
         state.exact.close(&project_id);
     }
 }
@@ -201,12 +201,47 @@ pub(crate) fn close_project(state: State<'_, AppState>, project_id: String) {
 /// The summary of `project` with its media URLs.
 fn summary(state: &AppState, project: &OpenProject) -> ProjectSummary {
     let proxy = project.dir().proxy();
-    let proxy_url = proxy.is_file().then(|| {
-        state.paths.add_file(&proxy);
-        asset_url(&proxy)
-    });
-    let media_url = video_url(state.media.as_deref(), project.id(), project.source());
+    let (media_url, proxy_url) = media_urls(
+        state.media.as_deref(),
+        &state.paths,
+        project.id(),
+        project.source(),
+        proxy.is_file().then_some(proxy.as_path()),
+    );
     project.summary(media_url, proxy_url)
+}
+
+/// The media server id of the preview proxy of project `project_id`.
+fn proxy_media_id(project_id: &str) -> String {
+    format!("{project_id}/proxy")
+}
+
+/// The URLs of project `id`'s source and of its preview proxy (when it
+/// exists), both from the media server when it runs. Without the server
+/// they are asset protocol URLs, and the proxy, a file the backend
+/// wrote, is added to that protocol's scope so it can be served.
+fn media_urls(
+    media: Option<&MediaServer>,
+    paths: &UserPaths,
+    id: &str,
+    source: &Path,
+    proxy: Option<&Path>,
+) -> (String, Option<String>) {
+    let proxy_url = proxy.map(|proxy| {
+        if media.is_none() {
+            paths.add_file(proxy);
+        }
+        video_url(media, &proxy_media_id(id), proxy)
+    });
+    (video_url(media, id, source), proxy_url)
+}
+
+/// Stops serving the source and the proxy of project `id`.
+fn forget_media(media: Option<&MediaServer>, id: &str) {
+    if let Some(media) = media {
+        media.forget(id);
+        media.forget(&proxy_media_id(id));
+    }
 }
 
 /// The project `id`.
@@ -478,4 +513,97 @@ pub(crate) async fn export_preset(
         state.presets.export(&id, &file, include_kept_names)
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::path::PathBuf;
+
+    use super::{forget_media, media_urls};
+    use crate::media::asset_url;
+    use crate::media_server::MediaServer;
+    use crate::paths::UserPaths;
+    use crate::paths::tests::TestScope;
+
+    /// A folder with a source video and its proxy.
+    fn files(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("blurrd-commands-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("clip.mp4");
+        let proxy = dir.join("proxy.mp4");
+        std::fs::write(&source, b"source").unwrap();
+        std::fs::write(&proxy, b"proxy").unwrap();
+        (dir, source, proxy)
+    }
+
+    /// The status and body of a GET of `url`.
+    fn get(url: &str) -> (u16, String) {
+        let (address, resource) = url
+            .strip_prefix("http://")
+            .unwrap()
+            .split_once('/')
+            .unwrap();
+        let mut stream = TcpStream::connect(address).unwrap();
+        write!(
+            stream,
+            "GET /{resource} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).unwrap();
+        let status = answer.split_whitespace().nth(1).unwrap().parse().unwrap();
+        let body = answer.split_once("\r\n\r\n").unwrap().1.to_owned();
+        (status, body)
+    }
+
+    #[test]
+    fn source_and_proxy_play_from_the_media_server_until_closed() {
+        let (dir, source, proxy) = files("server");
+        let server = MediaServer::start("http://tauri.localhost").unwrap();
+        let paths = UserPaths::new(Box::new(TestScope::default()));
+
+        let (media_url, proxy_url) =
+            media_urls(Some(&server), &paths, "abc", &source, Some(&proxy));
+        let proxy_url = proxy_url.unwrap();
+        assert!(media_url.starts_with("http://127.0.0.1:"), "{media_url}");
+        assert!(proxy_url.starts_with("http://127.0.0.1:"), "{proxy_url}");
+        assert_ne!(media_url, proxy_url);
+        assert_eq!(get(&media_url), (200, "source".to_owned()));
+        assert_eq!(get(&proxy_url), (200, "proxy".to_owned()));
+        // The server serves the proxy, so the asset scope does not grow.
+        assert!(paths.existing(&proxy).is_err());
+
+        // No proxy yet: no proxy URL.
+        let (_, none) = media_urls(Some(&server), &paths, "abc", &source, None);
+        assert_eq!(none, None);
+
+        // Closing the project stops serving both.
+        forget_media(Some(&server), "abc");
+        assert_eq!(get(&media_url).0, 404);
+        assert_eq!(get(&proxy_url).0, 404);
+        // Other projects are not affected.
+        let (other, _) = media_urls(Some(&server), &paths, "other", &source, None);
+        forget_media(Some(&server), "abc");
+        assert_eq!(get(&other).0, 200);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_the_server_source_and_proxy_use_the_asset_protocol() {
+        let (dir, source, proxy) = files("asset");
+        let paths = UserPaths::new(Box::new(TestScope::default()));
+
+        let (media_url, proxy_url) = media_urls(None, &paths, "abc", &source, Some(&proxy));
+        assert_eq!(media_url, asset_url(&source));
+        assert_eq!(proxy_url, Some(asset_url(&proxy)));
+        // The asset protocol serves only files in its scope.
+        assert!(paths.existing(&proxy).is_ok());
+        assert!(paths.existing(&source).is_err());
+        // Nothing to forget without the server.
+        forget_media(None, "abc");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
