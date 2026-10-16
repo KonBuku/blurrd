@@ -9,7 +9,8 @@ mod synthetic;
 use std::sync::Mutex;
 
 use blurrd_core::{
-    EncoderSetting, ErrorKind, JobEvent, JobId, Region, RegionSet, Stage, VerifyState, WarningCode,
+    EncoderSetting, ErrorKind, JobEvent, JobId, Mode, Region, RegionSet, Stage, VerifyState,
+    WarningCode,
 };
 use blurrd_engine::{
     AnalyzeRequest, CancellationToken, Engine, EngineConfig, LOOKAHEAD_MAX, OcrSetup, ProgressSink,
@@ -197,24 +198,24 @@ fn analysis_maps_other_resolutions_onto_the_reference_hud() {
 }
 
 #[test]
-fn analysis_runs_on_other_aspect_ratios() {
-    // Frames that are not 16:9 keep their aspect ratio at the reference
-    // scale and the HUD elements their edges. Native 4:3 (at 960 and at
-    // 1080 lines), 16:10 and 21:9 match the HUD geometry the analysis
-    // assumes before calibration, so their kill feed and banner leak
-    // nothing. A stretched 4:3 game and a pillarboxed one fill 16:9
-    // frames; their HUD is found by the calibration of milestone I2, so
-    // here they only have to analyse without an error.
+fn analysis_calibrates_other_aspect_ratios() {
+    // The calibration finds the HUD in every layout: frames that are not
+    // 16:9 keep their aspect ratio at the reference scale and the HUD
+    // elements their edges (native 4:3 at 960 and at 1080 lines, 16:10,
+    // 21:9); a 4:3 game stretched to fill a 16:9 frame widens the HUD, a
+    // pillarboxed one moves it in by the bars. Every kill feed and banner
+    // name is covered, and a layout the calibration found raises no
+    // warning.
     let checked: RegionSet = [Region::KillFeed, Region::Banner].into_iter().collect();
     let layouts = [
-        (Layout::native_4x3(1280, 960), true),
-        (Layout::native_4x3(1440, 1080), true),
-        (Layout::wide_16x10(1920, 1200), true),
-        (Layout::wide(2560, 1080), true),
-        (Layout::stretched_4x3(1920, 1080), false),
-        (Layout::pillarbox(1920, 1080), false),
+        Layout::native_4x3(1280, 960),
+        Layout::native_4x3(1440, 1080),
+        Layout::wide_16x10(1920, 1200),
+        Layout::wide(2560, 1080),
+        Layout::stretched_4x3(1920, 1080),
+        Layout::pillarbox(1920, 1080),
     ];
-    for (k, (layout, assumed)) in layouts.into_iter().enumerate() {
+    for (k, layout) in layouts.into_iter().enumerate() {
         let (width, height) = (layout.width, layout.height);
         let work = Workdir::new(&format!("analysis-aspect-{k}"));
         let scene = synthetic::hud_scene(layout, 90, 21 + k as u64);
@@ -230,9 +231,12 @@ fn analysis_runs_on_other_aspect_ratios() {
             .unwrap_or_else(|e| panic!("{width}x{height}: {e:?}"));
         let project = &analysis.project;
         assert_eq!(project.plan().validate(width, height), Ok(()));
-        if !assumed {
-            continue;
-        }
+        assert!(
+            project.geometry.confidence >= 0.5,
+            "{width}x{height}: {:?}",
+            project.geometry
+        );
+        assert_eq!(project.detector.mode, Mode::Tight, "{width}x{height}");
         let summary = synthetic::evaluate(project, &scene, checked);
         let leaks: u64 = checked
             .iter()
@@ -240,12 +244,35 @@ fn analysis_runs_on_other_aspect_ratios() {
             .sum();
         assert!(summary.item_frames > 0, "{width}x{height}");
         assert_eq!(leaks, 0, "{width}x{height}: {summary:?}");
-        // Sizes other than 16:9 are flagged for checking.
         let warned = events.take().iter().any(
             |e| matches!(e, JobEvent::Warning { code, .. } if *code == WarningCode::CalibrationLow),
         );
-        assert!(warned, "{width}x{height}");
+        assert!(!warned, "{width}x{height}");
     }
+}
+
+#[test]
+fn analysis_without_hud_structure_is_safe_and_warned() {
+    // Nothing on screen confirms where the HUD is: the analysis keeps the
+    // layout of the frame size, draws Safe boxes and says so.
+    let work = Workdir::new("analysis-uncalibrated");
+    let scene = synthetic::empty_scene(Layout::stretched_4x3(1920, 1080), 60, 5);
+    let clip = work.path("clip.mkv");
+    synthetic::write_clip(&clip, &scene);
+    let events = Events::default();
+    let analysis = engine(&work)
+        .analyze(
+            &request(clip, RegionSet::all()),
+            &events,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    assert!(analysis.project.geometry.confidence < 0.5);
+    assert_eq!(analysis.project.detector.mode, Mode::Safe);
+    let warned = events.take().iter().any(
+        |e| matches!(e, JobEvent::Warning { code, .. } if *code == WarningCode::CalibrationLow),
+    );
+    assert!(warned);
 }
 
 #[test]

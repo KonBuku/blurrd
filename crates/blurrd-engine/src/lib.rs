@@ -4,10 +4,12 @@
 //! jobs. It grows with the milestones that need it; so far it holds:
 //!
 //! - [`Engine`]: the configuration and the jobs.
-//! - [`Engine::analyze`]: the analysis job. A bounded frame pipeline
-//!   decodes the video once, cuts the HUD crops on a fixed pool of
-//!   workers, runs every region's detectors and temporal models in frame
-//!   order and turns their boxes into the project's tracks; pass 0 of the
+//! - [`Engine::analyze`]: the analysis job. It first calibrates the HUD
+//!   geometry (and an HDR video's paper white) from keyframes sampled
+//!   over the video. A bounded frame pipeline then decodes the video
+//!   once, cuts the HUD crops on a fixed pool of workers, runs every
+//!   region's detectors and temporal models in frame order and turns
+//!   their boxes into the project's tracks; pass 0 of the
 //!   verification reads the protected zones on an OCR worker, and a
 //!   preview worker writes thumbnails and, for videos the desktop app's
 //!   player cannot play, a preview proxy. The project, the PTS table and

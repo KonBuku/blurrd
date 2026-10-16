@@ -2,15 +2,16 @@
 //! and temporal models of some regions over the frames in order and
 //! returns the boxes of every frame that became final.
 
-use blurrd_core::{AppError, Confidence, RectI, Region, RegionSet};
+use blurrd_core::{AppError, Confidence, Mode, RectI, Region, RegionSet};
 use blurrd_detect::banner::BannerBox;
+use blurrd_detect::killfeed::BarHues;
 use blurrd_detect::scene_cut::SceneCutDetector;
 use blurrd_detect::screens::{self, Anchor};
 use blurrd_detect::temporal::killfeed::{FrameBoxes, KillFeedFrame};
 use blurrd_detect::voice::{MEASURE_PORTRAIT, VoiceFrame, VoiceFrameBoxes};
 use blurrd_detect::{
-    BannerDetector, BannerTracker, ChatDetector, ChatTracker, Detection, KillFeedDetector,
-    KillFeedTracker, ScreenDetector, VoiceDetector, VoiceTracker,
+    BannerDetector, BannerTracker, ChatDetector, ChatTracker, ClassParams, Detection,
+    KillFeedDetector, KillFeedTracker, ScreenDetector, VoiceDetector, VoiceTracker,
 };
 
 use super::frame::FrameCrops;
@@ -86,15 +87,21 @@ pub(crate) trait Stage: Send {
 
 /// The stages for `regions`: the kill feed alone (the costliest detector),
 /// banner plus voice plus chat, and the screen surfaces, so they can run on
-/// three threads.
-pub(crate) fn stages(regions: RegionSet, map: HudMap) -> Vec<Box<dyn Stage>> {
+/// three threads. The HUD trackers draw their boxes in `mode`; the kill
+/// feed reads the video's learned bar colours `hues` first.
+pub(crate) fn stages(
+    regions: RegionSet,
+    map: HudMap,
+    mode: Mode,
+    hues: Option<&BarHues>,
+) -> Vec<Box<dyn Stage>> {
     let mut out: Vec<Box<dyn Stage>> = Vec::new();
     if regions.contains(Region::KillFeed) {
-        out.push(Box::new(KillFeedStage::new(map)));
+        out.push(Box::new(KillFeedStage::new(map, mode, hues)));
     }
     let panel = [Region::Banner, Region::VoiceChat, Region::TextChat];
     if panel.iter().any(|&r| regions.contains(r)) {
-        out.push(Box::new(PanelStage::new(regions, map)));
+        out.push(Box::new(PanelStage::new(regions, map, mode)));
     }
     if Region::SCREENS.iter().any(|&r| regions.contains(r)) {
         out.push(Box::new(ScreenStage::new(regions, map)));
@@ -128,11 +135,17 @@ struct KillFeedStage {
 }
 
 impl KillFeedStage {
-    fn new(map: HudMap) -> Self {
+    fn new(map: HudMap, mode: Mode, hues: Option<&BarHues>) -> Self {
+        let detector = match hues {
+            Some(hues) => KillFeedDetector::with_params(hues.params(&ClassParams::default())),
+            None => KillFeedDetector::new(),
+        };
+        let mut tracker = KillFeedTracker::new();
+        tracker.set_mode(mode);
         Self {
             map,
-            detector: KillFeedDetector::new(),
-            tracker: KillFeedTracker::new(),
+            detector,
+            tracker,
             detections: Vec::new(),
             ready: Vec::new(),
         }
@@ -208,7 +221,13 @@ struct PanelStage {
 }
 
 impl PanelStage {
-    fn new(regions: RegionSet, map: HudMap) -> Self {
+    fn new(regions: RegionSet, map: HudMap, mode: Mode) -> Self {
+        let mut banner_tracker = BannerTracker::new();
+        banner_tracker.set_mode(mode);
+        let mut voice_tracker = VoiceTracker::new();
+        voice_tracker.set_mode(mode);
+        let mut chat_tracker = ChatTracker::new();
+        chat_tracker.set_mode(mode);
         Self {
             map,
             enabled: [
@@ -217,14 +236,14 @@ impl PanelStage {
                 regions.contains(Region::TextChat),
             ],
             banner: BannerDetector::new(),
-            banner_tracker: BannerTracker::new(),
+            banner_tracker,
             banner_ready: Vec::new(),
             voice: VoiceDetector::new(),
-            voice_tracker: VoiceTracker::new(),
+            voice_tracker,
             voice_ready: Vec::new(),
             cuts: SceneCutDetector::default(),
             chat: ChatDetector::new(),
-            chat_tracker: ChatTracker::new(),
+            chat_tracker,
             chat_ready: Vec::new(),
             detections: Vec::new(),
         }

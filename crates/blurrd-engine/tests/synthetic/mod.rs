@@ -107,6 +107,12 @@ pub fn hud_scene(layout: Layout, frames: u32, seed: u64) -> Scene {
         .with_chat(&fonts, ChatSpec::new(Language::English, messages))
 }
 
+/// A scene of `frames` frames in `layout` without any HUD element: only
+/// the noise background.
+pub fn empty_scene(layout: Layout, frames: u32, seed: u64) -> Scene {
+    Scene::new(layout, Background::noise(seed), Palette::DEFAULT, frames)
+}
+
 /// Encodes every frame of `scene` into `path` (FFV1 in Matroska, 60 fps,
 /// BT.709 limited range).
 pub fn write_clip(path: &Path, scene: &Scene) {

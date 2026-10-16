@@ -13,42 +13,14 @@
 //! per resolution: a 1080p recording is simply the case where the
 //! reference frame is the frame.
 
-use blurrd_core::{HudGeometry, HudLayout, RectI};
+use blurrd_core::{HudGeometry, RectI};
 use blurrd_detect::screens::{Anchor, ScreenMap};
 use blurrd_detect::{ImageError, RgbView};
 use blurrd_video::RgbImage;
 
-/// Reference frame size.
-pub(crate) const REFERENCE: (u32, u32) = (1920, 1080);
-
 /// Reference pixels per pixel of the downscaled whole-frame view that the
 /// screen gates and the scene-cut detector read (4 × 4 means).
 pub(crate) const QUARTER: u32 = 4;
-
-/// The HUD geometry of a `width × height` recording before calibration:
-/// a 16:9 HUD scaled with the frame height, anchored to the frame's edges
-/// and centre. Exact for every 16:9 recording at the game's default HUD
-/// scale; other aspect ratios need the calibrated geometry. Returns the
-/// geometry and whether the frame is 16:9.
-pub(crate) fn assumed_geometry(width: u32, height: u32) -> (HudGeometry, bool) {
-    let scale = height as f32 / REFERENCE.1 as f32;
-    let wide = u64::from(width) * 9 == u64::from(height) * 16;
-    let geometry = HudGeometry {
-        sx: scale,
-        sy: scale,
-        anchor_left: 0.0,
-        anchor_right: width as f32,
-        anchor_center: width as f32 / 2.0,
-        oy: 0.0,
-        layout: if wide {
-            HudLayout::Wide16x9
-        } else {
-            HudLayout::Auto
-        },
-        ..HudGeometry::default()
-    };
-    (geometry, wide)
-}
 
 /// Reference pixels ↔ source pixels for one recording.
 #[derive(Debug, Clone, Copy)]
@@ -290,27 +262,15 @@ pub(crate) fn quarter(image: &RgbImage, out: &mut RgbImage) {
 
 #[cfg(test)]
 mod tests {
-    use blurrd_core::{HudLayout, RectI};
+    use blurrd_core::{HudGeometry, HudLayout, RectI};
     use blurrd_detect::screens::Anchor;
     use blurrd_video::RgbImage;
 
-    use super::{Crop, HudMap, assumed_geometry, quarter};
-
-    #[test]
-    fn the_assumed_geometry_scales_with_the_height() {
-        let (g, wide) = assumed_geometry(1920, 1080);
-        assert!(wide && g.layout == HudLayout::Wide16x9);
-        assert!((g.sx - 1.0).abs() < 1e-6);
-        let (g, wide) = assumed_geometry(2560, 1440);
-        assert!(wide);
-        assert!((g.sy - 4.0 / 3.0).abs() < 1e-6);
-        let (g, wide) = assumed_geometry(1920, 1200);
-        assert!(!wide && g.layout == HudLayout::Auto);
-    }
+    use super::{Crop, HudMap, quarter};
 
     #[test]
     fn maps_reference_boxes_by_anchor() {
-        let (g, _) = assumed_geometry(1280, 720);
+        let g = HudGeometry::for_layout(1280, 720, HudLayout::Auto);
         let map = HudMap::new(&g, 1280, 720);
         let feed = RectI::new(1782, 140, 1835, 163).unwrap();
         // Right-anchored: 1280 - (1920 - x) * 2/3.
@@ -321,7 +281,7 @@ mod tests {
         assert_eq!(map.reference_size(), (1920, 1080));
         assert!(!map.is_identity());
         assert_eq!(map.reference_rect(feed, Anchor::Right), feed);
-        let (g, _) = assumed_geometry(1920, 1080);
+        let g = HudGeometry::for_layout(1920, 1080, HudLayout::Auto);
         let map = HudMap::new(&g, 1920, 1080);
         assert_eq!(map.source_rect(feed, Anchor::Right), Some(feed));
         assert!(map.is_identity());
@@ -331,7 +291,7 @@ mod tests {
     fn other_aspect_ratios_keep_their_width() {
         // 21:9 at 1080 lines: the reference frame is the frame, and
         // right-anchored elements move with the right edge.
-        let (g, _) = assumed_geometry(2560, 1080);
+        let g = HudGeometry::for_layout(2560, 1080, HudLayout::Auto);
         let map = HudMap::new(&g, 2560, 1080);
         assert!(map.is_identity());
         let feed = RectI::new(660, 80, 1920, 412).unwrap();
@@ -340,7 +300,7 @@ mod tests {
             RectI::new(1300, 80, 2560, 412).unwrap()
         );
         // Native 4:3 at 960 lines becomes 1440 × 1080.
-        let (g, _) = assumed_geometry(1280, 960);
+        let g = HudGeometry::for_layout(1280, 960, HudLayout::Auto);
         let map = HudMap::new(&g, 1280, 960);
         assert_eq!(map.reference_size(), (1440, 1080));
         assert_eq!(

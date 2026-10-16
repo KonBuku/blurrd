@@ -1,5 +1,6 @@
 //! The analysis job: decode, detect, track; writes the project.
 
+mod calibrate;
 mod frame;
 mod pass0;
 mod pipeline;
@@ -11,10 +12,11 @@ use std::path::PathBuf;
 
 use blurrd_blur::PixelParams;
 use blurrd_core::{
-    AppError, BlurParams, DetectorInfo, ErrorKind, HudGeometry, JobEvent, JobId, JobKind,
-    JobSummary, MediaInfo, Mode, Project, ProjectMedia, RegionSet, Sensitivity, Stage,
+    AppError, BlurParams, DetectorInfo, ErrorKind, HudGeometry, HudLayout, JobEvent, JobId,
+    JobKind, JobSummary, MediaInfo, Mode, Project, ProjectMedia, RegionSet, Sensitivity, Stage,
     TemporalParams, VerifyState, WarningCode,
 };
+use blurrd_detect::killfeed::BarHues;
 use blurrd_video::{
     DecodeOptions, DecodePurpose, DecoderChoice, EncodeOptions, HwDecode, PtsTable, RgbConverter,
     VideoColour,
@@ -29,7 +31,7 @@ use self::tracks::TrackBuilder;
 use crate::cache::{self, ProjectDir};
 use crate::dictionary::Pass0Stats;
 use crate::engine::Engine;
-use crate::hud::{HudMap, assumed_geometry};
+use crate::hud::HudMap;
 use crate::job::{Job, internal};
 
 /// The most frames any temporal model may hold a frame before its boxes
@@ -126,6 +128,10 @@ pub(crate) struct Prepared {
     pub(crate) fingerprint: blurrd_core::Fingerprint,
     pub(crate) geometry: HudGeometry,
     pub(crate) map: HudMap,
+    /// Tight, or Safe where the calibration cannot be trusted.
+    pub(crate) mode: Mode,
+    /// The kill feed's learned bar colours.
+    pub(crate) hues: Option<BarHues>,
     pub(crate) colour: VideoColour,
     pub(crate) converter: RgbConverter,
     pub(crate) decode: DecodeOptions,
@@ -133,9 +139,9 @@ pub(crate) struct Prepared {
 }
 
 impl Engine {
-    /// Probes `input` and prepares its analysis: geometry, colour
-    /// conversion, decoder, OCR. Emits the warnings that apply to the
-    /// whole video. `beside_render` tells that a render decodes the same
+    /// Probes `input` and prepares its analysis: calibrated geometry,
+    /// colour conversion, decoder, OCR. Emits the warnings that apply to
+    /// the whole video. `beside_render` tells that a render decodes the same
     /// video at the same time (a streaming run).
     pub(crate) fn prepare_analysis(
         &self,
@@ -147,35 +153,46 @@ impl Engine {
         job.stage(Stage::Probe);
         let fingerprint = cache::fingerprint(input)?;
         let info = blurrd_video::probe(input)?;
-        let (geometry, wide) = assumed_geometry(info.width, info.height);
-        // The blur scales its blocks with the HUD; refuse videos whose HUD
-        // it cannot scale to before spending an analysis on them.
+        // The blur scales its blocks with the HUD (with the frame height in
+        // every layout); refuse videos whose HUD it cannot scale to before
+        // spending an analysis on them.
         let colour = VideoColour::from_info(&info.color, info.height);
-        if let Err(error) =
-            PixelParams::new(&BlurParams::default(), geometry.sy, colour.yuv_colour())
-        {
+        let sy = HudGeometry::for_layout(info.width, info.height, HudLayout::Auto).sy;
+        if let Err(error) = PixelParams::new(&BlurParams::default(), sy, colour.yuv_colour()) {
             return Err(AppError::new(
                 ErrorKind::UnsupportedMedia,
                 "The video is too small or too large to blur reliably.",
             )
             .with_detail(format!("{}x{}: {error}", info.width, info.height)));
         }
-        if !wide {
+        let calibration = calibrate::calibrate(input, &info, colour, job)?;
+        let geometry = calibration.geometry;
+        let mut mode = Mode::Tight;
+        if let Some(doubt) = calibration.doubt {
+            mode = Mode::Safe;
             job.warning(
                 WarningCode::CalibrationLow,
                 format!(
-                    "The HUD position of a {}x{} video is not calibrated; boxes assume a 16:9 HUD \
-                     scaled to the frame height. Check the result.",
+                    "In this {}x{} video {doubt}. Safe boxes cover the whole name slots; check \
+                     the result.",
                     info.width, info.height
                 ),
                 None,
             );
         }
-        let converter = RgbConverter::new(colour);
-        if converter.is_tone_mapped() {
+        let converter = match calibration.paper_white {
+            Some(nits) => RgbConverter::with_paper_white(colour, nits),
+            None => RgbConverter::new(colour),
+        };
+        if converter.is_tone_mapped() && calibration.paper_white.is_none() {
+            mode = Mode::Safe;
             job.warning(
                 WarningCode::HdrToneMapped,
-                String::from("The video is HDR; the detectors read it tone-mapped to SDR."),
+                String::from(
+                    "The video is HDR and the brightness of its HUD could not be measured; the \
+                     detectors read it tone-mapped with a reference white, and Safe boxes cover \
+                     the whole name slots.",
+                ),
                 None,
             );
         }
@@ -206,6 +223,8 @@ impl Engine {
             info,
             fingerprint,
             geometry,
+            mode,
+            hues: calibration.hues,
             colour,
             converter,
             decode,
@@ -285,6 +304,8 @@ impl Engine {
             fingerprint,
             geometry,
             map,
+            mode,
+            hues,
             colour,
             converter,
             decode,
@@ -304,7 +325,7 @@ impl Engine {
             input: &req.input,
             decode,
             cropper: Cropper::new(map, colour, converter.clone(), req.regions, pass0.is_some()),
-            stages: stages::stages(req.regions, map),
+            stages: stages::stages(req.regions, map, mode, hues.as_ref()),
             sources: stages::sources(req.regions),
             pass0,
             previews,
@@ -334,23 +355,11 @@ impl Engine {
         }
         let pts = PtsTable::new(info.time_base, output.pts)?;
         pts.write(&dir.pts())?;
-        let media = ProjectMedia {
-            path: req.input.clone(),
-            fingerprint,
-            width: info.width,
-            height: info.height,
-            fps: info.fps,
-            time_base: info.time_base,
-            frame_count: pts.len(),
-            pts_sha256: cache::pts_sha256(&pts),
-            is_vfr: info.is_vfr,
-            has_b_frames: info.has_b_frames,
-            keyframes_sha256: cache::keyframes_sha256(info.keyframes.as_deref()),
-        };
+        let media = project_media(req, &info, fingerprint, &pts);
         let detector = DetectorInfo {
             version: format!("detect/{}", blurrd_core::VERSION),
             regions: req.regions,
-            mode: Mode::Tight,
+            mode,
             sensitivity: Sensitivity::default(),
             temporal: TemporalParams::default(),
         };
@@ -379,6 +388,29 @@ impl Engine {
             },
             project,
         })
+    }
+}
+
+/// The media section of the project of `req`'s video, described by
+/// `info`, with its fingerprint and PTS table.
+fn project_media(
+    req: &AnalyzeRequest,
+    info: &MediaInfo,
+    fingerprint: blurrd_core::Fingerprint,
+    pts: &PtsTable,
+) -> ProjectMedia {
+    ProjectMedia {
+        path: req.input.clone(),
+        fingerprint,
+        width: info.width,
+        height: info.height,
+        fps: info.fps,
+        time_base: info.time_base,
+        frame_count: pts.len(),
+        pts_sha256: cache::pts_sha256(pts),
+        is_vfr: info.is_vfr,
+        has_b_frames: info.has_b_frames,
+        keyframes_sha256: cache::keyframes_sha256(info.keyframes.as_deref()),
     }
 }
 
