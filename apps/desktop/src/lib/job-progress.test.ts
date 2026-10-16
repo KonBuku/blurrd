@@ -86,6 +86,53 @@ describe("operation progress", () => {
     expect(operationSteps(progress)).toEqual(["BlurEncode", "Mux"]);
   });
 
+  it("keeps the bar of a run job going forward over both of its passes", () => {
+    const progress = (frame: number, total = 200): JobEvent => ({
+      type: "Progress",
+      job: JOB,
+      frame,
+      total,
+      fps: 100,
+      eta_ms: 1000,
+    });
+    const shown: number[] = [];
+    const events: JobEvent[] = [
+      { type: "Started", job: JOB, kind: "Run", total_frames: 200 },
+      { type: "Stage", job: JOB, stage: "Detect" },
+      progress(50),
+      progress(200),
+      // The render of the edited project counts frames from 0 again.
+      { type: "Stage", job: JOB, stage: "Probe" },
+      { type: "Stage", job: JOB, stage: "BlurEncode" },
+      progress(0),
+      progress(100),
+      progress(200),
+    ];
+    events.reduce(
+      (state, event) => {
+        const next = applyJobEvent(state, event);
+        shown.push(operationFraction(next) ?? -1);
+        return next;
+      },
+      startStep(waitingOperation("export", ["Run"]), 0),
+    );
+    expect(shown).toEqual([0, 0, 0.125, 0.5, 0.5, 0.5, 0.5, 0.75, 1]);
+
+    // One pass (analysis and render streamed together): the render
+    // starts early and the frames count for the whole job.
+    const streamed = fold(
+      ["Run"],
+      [
+        { type: "Started", job: JOB, kind: "Run", total_frames: 200 },
+        progress(20),
+        { type: "Stage", job: JOB, stage: "BlurEncode" },
+        progress(10),
+      ],
+    );
+    expect(operationFraction(streamed)).toBeCloseTo(0.05);
+    expect(operationFraction(applyJobEvent(streamed, progress(150)))).toBeCloseTo(0.75);
+  });
+
   it("adds a stage the plan did not list as an extra step", () => {
     const progress = fold(["Render"], [{ type: "Stage", job: JOB, stage: "Probe" }]);
     expect(operationSteps(progress)).toEqual(["Probe", "BlurEncode", "Mux"]);
