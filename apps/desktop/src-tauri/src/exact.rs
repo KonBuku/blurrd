@@ -14,8 +14,9 @@
 //! are kept until another frame, revision or setting is asked for, and
 //! the parsed project file until the file changes, so a warm request
 //! neither decodes nor parses. The seeker (decoder and a frame cache
-//! sized by [`seeker_cache_bytes`]) closes after [`IDLE_CLOSE`] without a
-//! request, for example when Exact is switched off.
+//! sized by [`seeker_cache_bytes`]) and the parsed project are dropped
+//! after [`IDLE_CLOSE`] without a request, for example when Exact is
+//! switched off.
 
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime};
@@ -76,6 +77,8 @@ struct Parsed {
     project: String,
     stamp: (u64, Option<SystemTime>),
     analysed: Arc<Project>,
+    /// When a request last used it.
+    used: Instant,
 }
 
 /// What the renderer keeps between requests.
@@ -83,7 +86,8 @@ struct Parsed {
 struct State {
     open: Option<Open>,
     parsed: Option<Parsed>,
-    /// Whether a thread watches for the seeker going idle.
+    /// Whether a thread watches for the seeker and the parsed project
+    /// going idle.
     watched: bool,
 }
 
@@ -118,21 +122,28 @@ impl ExactRenderer {
         let stamp = std::fs::metadata(project.dir().project())
             .ok()
             .map(|meta| (meta.len(), meta.modified().ok()));
-        if let Some(stamp) = stamp
-            && let Some(parsed) = &lock(&self.state).parsed
-            && parsed.project == project.id()
-            && parsed.stamp == stamp
-        {
-            return Ok(Arc::clone(&parsed.analysed));
+        if let Some(stamp) = stamp {
+            let mut guard = lock(&self.state);
+            if let Some(parsed) = &mut guard.parsed
+                && parsed.project == project.id()
+                && parsed.stamp == stamp
+            {
+                parsed.used = Instant::now();
+                return Ok(Arc::clone(&parsed.analysed));
+            }
         }
         // Read after the stamp: a change in between is seen next time.
         let analysed = Arc::new(project.analysed()?);
         if let Some(stamp) = stamp {
-            lock(&self.state).parsed = Some(Parsed {
+            let mut guard = lock(&self.state);
+            guard.parsed = Some(Parsed {
                 project: project.id().to_owned(),
                 stamp,
                 analysed: Arc::clone(&analysed),
+                used: Instant::now(),
             });
+            // Also when no seeker opens after it (a failed decode).
+            self.keep_watched(&mut guard);
         }
         Ok(analysed)
     }
@@ -302,15 +313,20 @@ impl ExactRenderer {
                 });
             }
         }
-        if !guard.watched {
-            guard.watched = self.watch();
-        }
+        self.keep_watched(&mut guard);
         Ok(guard)
     }
 
-    /// Starts the thread that drops the seeker and the parsed project
-    /// once no request used them for the idle time; it ends with them.
-    /// Answers whether it runs.
+    /// Makes sure a thread watches the state of `guard` for idleness.
+    fn keep_watched(&self, guard: &mut State) {
+        if !guard.watched {
+            guard.watched = self.watch();
+        }
+    }
+
+    /// Starts the thread that drops the seeker and the parsed project,
+    /// each once no request used it for the idle time; it ends when both
+    /// are gone. Answers whether it runs.
     fn watch(&self) -> bool {
         let state: Weak<Mutex<State>> = Arc::downgrade(&self.state);
         let idle = self.idle;
@@ -322,14 +338,16 @@ impl ExactRenderer {
                     std::thread::sleep(poll);
                     let Some(state) = state.upgrade() else { return };
                     let mut guard = lock(&state);
-                    let idle_for = guard.open.as_ref().map(|open| open.used.elapsed());
-                    if idle_for.is_none_or(|elapsed| elapsed >= idle) {
-                        let closed = guard.open.take();
-                        guard.parsed = None;
+                    let closed = guard.open.take_if(|open| open.used.elapsed() >= idle);
+                    guard.parsed.take_if(|parsed| parsed.used.elapsed() >= idle);
+                    let done = guard.open.is_none() && guard.parsed.is_none();
+                    if done {
                         guard.watched = false;
-                        drop(guard);
-                        // The decoder's thread ends outside the lock.
-                        drop(closed);
+                    }
+                    drop(guard);
+                    // The decoder's thread ends outside the lock.
+                    drop(closed);
+                    if done {
                         return;
                     }
                 }
@@ -358,6 +376,12 @@ impl ExactRenderer {
     #[cfg(test)]
     fn is_open(&self) -> bool {
         lock(&self.state).open.is_some()
+    }
+
+    /// Whether a parsed project is kept.
+    #[cfg(test)]
+    fn is_parsed(&self) -> bool {
+        lock(&self.state).parsed.is_some()
     }
 
     /// The blurred pixels of the patches of `frame`, before the JPEG.
@@ -638,7 +662,8 @@ mod tests {
     }
 
     /// A warm request parses nothing, a changed project file is parsed
-    /// again, and the seeker closes once no request came for a while.
+    /// again, and the seeker and the parsed project are dropped once no
+    /// request came for a while.
     #[test]
     fn the_project_is_parsed_once_and_the_seeker_closes_when_idle() {
         use std::sync::Arc;
@@ -680,6 +705,16 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         while exact.is_open() {
             assert!(Instant::now() < deadline, "the seeker stayed open");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!exact.is_parsed());
+        // A project parsed without a seeker opening after it (a request
+        // whose decode failed) is dropped as well.
+        exact.analysed(&project).unwrap();
+        assert!(exact.is_parsed() && !exact.is_open());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while exact.is_parsed() {
+            assert!(Instant::now() < deadline, "the parsed project stayed");
             std::thread::sleep(Duration::from_millis(20));
         }
         // It opens again on the next request, and closes with its project.
