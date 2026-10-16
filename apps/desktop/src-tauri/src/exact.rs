@@ -11,9 +11,14 @@
 //! comes from a [`FrameSeeker`] that stays open on the last project and
 //! keeps the frames around the last request decoded, so stepping through
 //! frames is answered from memory ("warm"). The patches of the last frame
-//! are kept until another frame, revision or setting is asked for.
+//! are kept until another frame, revision or setting is asked for, and
+//! the parsed project file until the file changes, so a warm request
+//! neither decodes nor parses. The seeker (decoder and a frame cache
+//! sized by [`seeker_cache_bytes`]) closes after [`IDLE_CLOSE`] without a
+//! request, for example when Exact is switched off.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::{Duration, Instant, SystemTime};
 
 use blurrd_blur::{BlurBackend, CpuBlur, PixelParams, PreparedBox, prepare_boxes};
 use blurrd_core::{
@@ -29,6 +34,17 @@ use crate::projects::{OpenProject, lock};
 const JPEG_QUALITY: u8 = 90;
 /// Margin around a leak's box in its crop, in source pixels at 1080p.
 const CROP_MARGIN: f32 = 6.0;
+/// Frames the seeker's cache holds: it decodes two GOPs (about 120
+/// frames) ahead of a request and keeps about half as many behind; with
+/// less room it drops its own prefetch and seeks again (measured: 70 ms
+/// stalls every few dozen frames at 1080p60 with 128 MiB).
+const SEEKER_CACHE_FRAMES: usize = 180;
+/// Bounds of the seeker's frame cache.
+const SEEKER_CACHE_MIN: usize = 128 << 20;
+const SEEKER_CACHE_MAX: usize = 512 << 20;
+/// Time without a request after which the seeker and the parsed project
+/// are dropped.
+const IDLE_CLOSE: Duration = Duration::from_secs(30);
 
 /// One rendered patch.
 #[derive(Debug, Clone)]
@@ -51,11 +67,30 @@ struct Open {
     project: String,
     seeker: FrameSeeker,
     last: Option<LastFrame>,
+    /// When a request last used the seeker.
+    used: Instant,
+}
+
+/// The last project file read, and the size and time of change it had.
+struct Parsed {
+    project: String,
+    stamp: (u64, Option<SystemTime>),
+    analysed: Arc<Project>,
+}
+
+/// What the renderer keeps between requests.
+#[derive(Default)]
+struct State {
+    open: Option<Open>,
+    parsed: Option<Parsed>,
+    /// Whether a thread watches for the seeker going idle.
+    watched: bool,
 }
 
 /// Renders Exact patches and leak crops.
 pub(crate) struct ExactRenderer {
-    open: Mutex<Option<Open>>,
+    state: Arc<Mutex<State>>,
+    idle: Duration,
 }
 
 impl std::fmt::Debug for ExactRenderer {
@@ -67,9 +102,39 @@ impl std::fmt::Debug for ExactRenderer {
 impl ExactRenderer {
     /// A renderer with no project open.
     pub(crate) fn new() -> Self {
+        Self::closing_after(IDLE_CLOSE)
+    }
+
+    /// A renderer whose seeker closes after `idle` without a request.
+    fn closing_after(idle: Duration) -> Self {
         Self {
-            open: Mutex::new(None),
+            state: Arc::default(),
+            idle,
         }
+    }
+
+    /// The analysed project, parsed again only when its file changed.
+    fn analysed(&self, project: &OpenProject) -> Result<Arc<Project>, AppError> {
+        let stamp = std::fs::metadata(project.dir().project())
+            .ok()
+            .map(|meta| (meta.len(), meta.modified().ok()));
+        if let Some(stamp) = stamp
+            && let Some(parsed) = &lock(&self.state).parsed
+            && parsed.project == project.id()
+            && parsed.stamp == stamp
+        {
+            return Ok(Arc::clone(&parsed.analysed));
+        }
+        // Read after the stamp: a change in between is seen next time.
+        let analysed = Arc::new(project.analysed()?);
+        if let Some(stamp) = stamp {
+            lock(&self.state).parsed = Some(Parsed {
+                project: project.id().to_owned(),
+                stamp,
+                analysed: Arc::clone(&analysed),
+            });
+        }
+        Ok(analysed)
     }
 
     /// The patches of `frame` (clamped to the video) of `project`, which
@@ -85,7 +150,7 @@ impl ExactRenderer {
         frame: u32,
         settings: Option<&ExactSettings>,
     ) -> Result<ExactFrame, AppError> {
-        let analysed = project.analysed()?;
+        let analysed = self.analysed(project)?;
         let frame = frame.min(analysed.media.frame_count.saturating_sub(1));
         let settings = resolved(&analysed, settings);
         let patches = self.patches(project, &analysed, frame, &settings)?;
@@ -115,7 +180,7 @@ impl ExactRenderer {
         roi: &str,
         settings: Option<&ExactSettings>,
     ) -> Result<Vec<u8>, AppError> {
-        let analysed = project.analysed()?;
+        let analysed = self.analysed(project)?;
         let settings = resolved(&analysed, settings);
         self.patches(project, &analysed, frame, &settings)?
             .into_iter()
@@ -139,9 +204,9 @@ impl ExactRenderer {
         index: usize,
         clear: bool,
     ) -> Result<Vec<u8>, AppError> {
-        let analysed = project.analysed()?;
+        let analysed = self.analysed(project)?;
         let leak = project
-            .verify_report()?
+            .report_of(&analysed)?
             .and_then(|report| report.leaks.get(index).cloned())
             .ok_or_else(|| {
                 AppError::new(ErrorKind::NotFound, "The leak does not exist.")
@@ -174,7 +239,7 @@ impl ExactRenderer {
             ..analysed.blur
         };
         let mut guard = self.seeker(project)?;
-        let open = guard.as_mut().ok_or_else(|| internal("no seeker"))?;
+        let open = guard.open.as_mut().ok_or_else(|| internal("no seeker"))?;
         let decoded = open.seeker.frame(leak.frame_range.f0)?;
         let (_, roi) = blurred(project, &analysed, &blur, &decoded, crop, &boxes)?;
         encode(project, &roi)
@@ -189,7 +254,7 @@ impl ExactRenderer {
         settings: &ExactSettings,
     ) -> Result<Vec<Patch>, AppError> {
         let mut guard = self.seeker(project)?;
-        let open = guard.as_mut().ok_or_else(|| internal("no seeker"))?;
+        let open = guard.open.as_mut().ok_or_else(|| internal("no seeker"))?;
         if let Some(last) = &open.last
             && last.frame == frame
             && last.revision == analysed.revision
@@ -217,25 +282,65 @@ impl ExactRenderer {
         Ok(patches)
     }
 
-    /// The seeker of `project`, opened when another project (or none) was
-    /// open.
-    fn seeker(&self, project: &OpenProject) -> Result<MutexGuard<'_, Option<Open>>, AppError> {
-        let mut guard = lock(&self.open);
-        if guard
-            .as_ref()
-            .is_none_or(|open| open.project != project.id())
-        {
-            // Close the previous decoder before opening the next one.
-            *guard = None;
-            let seeker =
-                FrameSeeker::open(project.source(), project.pts()?, SeekerOptions::default())?;
-            *guard = Some(Open {
-                project: project.id().to_owned(),
-                seeker,
-                last: None,
-            });
+    /// The state with the seeker of `project`, opened when another
+    /// project (or none) was open, and marked as used now.
+    fn seeker(&self, project: &OpenProject) -> Result<MutexGuard<'_, State>, AppError> {
+        let mut guard = lock(&self.state);
+        match &mut guard.open {
+            Some(open) if open.project == project.id() => open.used = Instant::now(),
+            _ => {
+                // Close the previous decoder before opening the next one.
+                guard.open = None;
+                let mut options = SeekerOptions::default();
+                options.cache_bytes = seeker_cache_bytes(project.info());
+                let seeker = FrameSeeker::open(project.source(), project.pts()?, options)?;
+                guard.open = Some(Open {
+                    project: project.id().to_owned(),
+                    seeker,
+                    last: None,
+                    used: Instant::now(),
+                });
+            }
+        }
+        if !guard.watched {
+            guard.watched = self.watch();
         }
         Ok(guard)
+    }
+
+    /// Starts the thread that drops the seeker and the parsed project
+    /// once no request used them for the idle time; it ends with them.
+    /// Answers whether it runs.
+    fn watch(&self) -> bool {
+        let state: Weak<Mutex<State>> = Arc::downgrade(&self.state);
+        let idle = self.idle;
+        let poll = (idle / 4).clamp(Duration::from_millis(10), Duration::from_secs(5));
+        let spawned = std::thread::Builder::new()
+            .name("blurrd-exact-idle".to_owned())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(poll);
+                    let Some(state) = state.upgrade() else { return };
+                    let mut guard = lock(&state);
+                    let idle_for = guard.open.as_ref().map(|open| open.used.elapsed());
+                    if idle_for.is_none_or(|elapsed| elapsed >= idle) {
+                        let closed = guard.open.take();
+                        guard.parsed = None;
+                        guard.watched = false;
+                        drop(guard);
+                        // The decoder's thread ends outside the lock.
+                        drop(closed);
+                        return;
+                    }
+                }
+            });
+        spawned.is_ok()
+    }
+
+    /// Whether a seeker is open.
+    #[cfg(test)]
+    fn is_open(&self) -> bool {
+        lock(&self.state).open.is_some()
     }
 
     /// The blurred pixels of the patches of `frame`, before the JPEG.
@@ -246,12 +351,20 @@ impl ExactRenderer {
         frame: u32,
         settings: Option<&ExactSettings>,
     ) -> Result<Vec<(RectI, YuvRoi)>, AppError> {
-        let analysed = project.analysed()?;
+        let analysed = self.analysed(project)?;
         let settings = resolved(&analysed, settings);
         let mut guard = self.seeker(project)?;
-        let open = guard.as_mut().ok_or_else(|| internal("no seeker"))?;
+        let open = guard.open.as_mut().ok_or_else(|| internal("no seeker"))?;
         blurred_rects(project, &analysed, &settings, &mut open.seeker, frame)
     }
+}
+
+/// The seeker's frame cache for a video like `info`: room for
+/// [`SEEKER_CACHE_FRAMES`] decoded frames, within 128 to 512 MiB (720p:
+/// about 250 MiB, 1080p and above: 512 MiB).
+fn seeker_cache_bytes(info: &blurrd_core::MediaInfo) -> usize {
+    let frame = info.width as usize * info.height as usize * 3 / 2;
+    (frame * SEEKER_CACHE_FRAMES).clamp(SEEKER_CACHE_MIN, SEEKER_CACHE_MAX)
 }
 
 /// `settings`, or the blur and regions of `analysed` without them.
@@ -505,6 +618,59 @@ mod tests {
         bytes.extend_from_slice(u);
         bytes.extend_from_slice(v.unwrap_or_default());
         bytes
+    }
+
+    /// A warm request parses nothing, a changed project file is parsed
+    /// again, and the seeker closes once no request came for a while.
+    #[test]
+    fn the_project_is_parsed_once_and_the_seeker_closes_when_idle() {
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        use blurrd_core::{JobEvent, JobId};
+        use blurrd_engine::{AnalyzeRequest, CancellationToken, ProgressSink};
+
+        use super::ExactRenderer;
+        use crate::tasks::tests::open;
+
+        struct Quiet;
+        impl ProgressSink for Quiet {
+            fn emit(&self, _: JobEvent) {}
+        }
+
+        let media = std::env::temp_dir().join(format!("blurrd-app-idle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&media);
+        std::fs::create_dir_all(&media).unwrap();
+        let clip = media.join("noise.mkv");
+        write_noise_clip(&clip, 640, 360, 8);
+        let (engine, project, work) = open(&clip, "exact-idle");
+        let mut req = AnalyzeRequest::new(JobId(uuid::Uuid::now_v7()), project.source().into());
+        req.verify = false;
+        req.previews = false;
+        engine
+            .analyze(&req, &Quiet, &CancellationToken::new())
+            .unwrap();
+
+        let exact = ExactRenderer::closing_after(Duration::from_millis(600));
+        let first = exact.analysed(&project).unwrap();
+        assert!(Arc::ptr_eq(&first, &exact.analysed(&project).unwrap()));
+        project.set_overrides(first.revision, Vec::new()).unwrap();
+        let changed = exact.analysed(&project).unwrap();
+        assert_eq!(changed.revision, first.revision + 1);
+
+        exact.frame(&project, 3, None).unwrap();
+        assert!(exact.is_open());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while exact.is_open() {
+            assert!(Instant::now() < deadline, "the seeker stayed open");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // It opens again on the next request.
+        exact.frame(&project, 4, None).unwrap();
+        assert!(exact.is_open());
+        drop(exact);
+        std::fs::remove_dir_all(&work).unwrap();
+        std::fs::remove_dir_all(&media).unwrap();
     }
 
     /// Exports `project` with `settings` through the job queue as a

@@ -272,10 +272,23 @@ impl OpenProject {
     ///
     /// The I/O and schema errors of reading it.
     pub(crate) fn verify_report(&self) -> Result<Option<VerifyReport>, AppError> {
-        let Some(name) = self.project().and_then(|project| project.verify.report) else {
+        match self.project() {
+            Some(project) => self.report_of(&project),
+            None => Ok(None),
+        }
+    }
+
+    /// The verification report `project` (this file's analysed project)
+    /// names, if it names one.
+    ///
+    /// # Errors
+    ///
+    /// The I/O and schema errors of reading it.
+    pub(crate) fn report_of(&self, project: &Project) -> Result<Option<VerifyReport>, AppError> {
+        let Some(name) = &project.verify.report else {
             return Ok(None);
         };
-        read_report(&self.report_path(&name)?).map(Some)
+        read_report(&self.report_path(name)?).map(Some)
     }
 
     /// Replaces the edits with `overrides` (the full list) when the
