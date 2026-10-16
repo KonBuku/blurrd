@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import type { AppError } from "@/bindings/AppError";
+import type { ExactSettings } from "@/bindings/ExactSettings";
 import type { ProjectSummary } from "@/bindings/ProjectSummary";
 import type { Region } from "@/bindings/Region";
 import type { TrackSet } from "@/bindings/TrackSet";
@@ -26,6 +27,8 @@ export interface LoadedProject {
   readonly colour: ColourModel;
   /** Detector regions the blur applies to (Manual boxes always apply). */
   readonly enabled: ReadonlySet<Region>;
+  /** The blur and regions an export would use, for the Exact patches. */
+  readonly exactSettings: ExactSettings;
 }
 
 /** The preview project of `path`: loading, failed or loaded. */
@@ -77,6 +80,7 @@ export function useProject(path: string): ProjectState {
       params: pixelParams(blur, project.data.sy),
       colour: colourModel(media.color.matrix, media.color.range),
       enabled: new Set(regions),
+      exactSettings: { blur, enabled: [...regions] },
     };
   }, [project.data, tracks.data, clock, overrides, blur, regions]);
   const failure = project.error ?? tracks.error ?? pts.error;

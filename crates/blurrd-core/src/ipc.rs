@@ -172,6 +172,19 @@ pub struct ExactPatchInfo {
     pub rect: RectI,
 }
 
+/// The export settings an Exact request blurs with: the `settings` query
+/// of `blurrd://exact/...` URLs, as JSON. The patches then show what an
+/// export of the file with these settings writes, whatever the cached
+/// project holds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ExactSettings {
+    /// The blur of the export.
+    pub blur: BlurParams,
+    /// The detector regions the export blurs (manual boxes always are).
+    pub enabled: RegionSet,
+}
+
 /// What `blurrd://exact/<project>/<frame>.json` answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

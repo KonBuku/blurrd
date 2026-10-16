@@ -1,5 +1,6 @@
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type CSSProperties } from "react";
 
+import type { ExactSettings } from "@/bindings/ExactSettings";
 import { fetchExact, type ExactPatch } from "@/ipc/media";
 import { prepareBoxes } from "@/lib/blur-geometry";
 import { logWarning } from "@/lib/log";
@@ -20,15 +21,24 @@ export interface BlurCanvasProps {
   readonly onUnavailable: (message: string) => void;
 }
 
-/** Exact patches of one frame. */
+/** Exact patches of one frame, blurred with the settings `key` names. */
 interface ExactState {
   readonly frame: number;
+  readonly key: string;
   readonly patches: readonly ExactPatch[];
 }
 
-/** The Exact patches to draw on `frame`: only patches of that very frame. */
-function patchesFor(frame: number, on: boolean, exact: ExactState | null): readonly ExactPatch[] {
-  return on && exact?.frame === frame ? exact.patches : [];
+/**
+ * The Exact patches to draw on `frame`: only patches of that very frame
+ * made with the current settings (`key`).
+ */
+function patchesFor(
+  frame: number,
+  key: string,
+  on: boolean,
+  exact: ExactState | null,
+): readonly ExactPatch[] {
+  return on && exact?.frame === frame && exact.key === key ? exact.patches : [];
 }
 
 /** Blurs the boxes of `frame` over the uploaded picture and draws it in `mode`. */
@@ -72,6 +82,8 @@ export function BlurCanvas({ video, controller, data, style, onUnavailable }: Bl
   const exactOn = usePreviewStore((state) => state.exact);
   const playing = usePlaybackStore((state) => state.playing);
   const { width, height } = data.project.media;
+  // The settings as text: a new blur or region choice fetches new patches.
+  const exactKey = useMemo(() => JSON.stringify(data.exactSettings), [data.exactSettings]);
 
   // A presented frame: upload it and draw it with the current view.
   const show = useEffectEvent((mediaTime: number) => {
@@ -82,7 +94,7 @@ export function BlurCanvas({ video, controller, data, style, onUnavailable }: Bl
     renderer.upload(video, width, height);
     uploadedRef.current = frame;
     setUploaded(frame);
-    paint(renderer, frame, data, mode, split, patchesFor(frame, exactOn, exact));
+    paint(renderer, frame, data, mode, split, patchesFor(frame, exactKey, exactOn, exact));
   });
 
   useEffect(() => {
@@ -125,20 +137,22 @@ export function BlurCanvas({ video, controller, data, style, onUnavailable }: Bl
     const renderer = rendererRef.current;
     const frame = uploadedRef.current;
     if (renderer && frame >= 0)
-      paint(renderer, frame, data, mode, split, patchesFor(frame, exactOn, exact));
-  }, [data, mode, split, exactOn, exact]);
+      paint(renderer, frame, data, mode, split, patchesFor(frame, exactKey, exactOn, exact));
+  }, [data, mode, split, exactKey, exactOn, exact]);
 
-  // Exact: fetch the backend patches of a paused frame.
+  // Exact: fetch the backend patches of a paused frame, again after an
+  // edit (revision) or a change of the blur or the enabled regions.
   useEffect(() => {
     if (!exactOn || playing || uploaded < 0) return undefined;
     const abort = new AbortController();
-    fetchExact(data.project.id, uploaded, data.tracks.revision, abort.signal)
-      .then((result) => setExact(result))
+    const settings = JSON.parse(exactKey) as ExactSettings;
+    fetchExact(data.project.id, uploaded, data.tracks.revision, settings, abort.signal)
+      .then((result) => setExact({ ...result, key: exactKey }))
       .catch((error: unknown) => {
         if (!abort.signal.aborted) logWarning(`preview: exact patches of frame ${uploaded}`, error);
       });
     return () => abort.abort();
-  }, [exactOn, playing, uploaded, data.project.id, data.tracks.revision]);
+  }, [exactOn, playing, uploaded, data.project.id, data.tracks.revision, exactKey]);
 
   return (
     <canvas

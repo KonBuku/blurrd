@@ -75,6 +75,23 @@ test.describe("preview", () => {
         readIndex(px, INDEX_RECT[2]),
       );
     await expect.poll(read).toBe(~37 & 0x3ff);
+    // The patches are made with the inspector's blur and regions: a
+    // region switched off fetches them again without it.
+    const settings = () =>
+      page.evaluate(() =>
+        (window.blurrdMock?.schemeRequests ?? [])
+          .filter((request) => request.path.startsWith("exact/") && request.path.endsWith(".json"))
+          .map((request) => {
+            const value = new URLSearchParams(request.query).get("settings") ?? "null";
+            return JSON.parse(value) as { enabled: string[] } | null;
+          }),
+      );
+    expect((await settings()).at(-1)?.enabled).toContain("KillFeed");
+    await page
+      .getByRole("region", { name: "Inspector" })
+      .getByRole("switch", { name: /^Kill feed/ })
+      .click();
+    await expect.poll(async () => (await settings()).at(-1)?.enabled).not.toContain("KillFeed");
     await page.getByRole("button", { name: "Exact" }).click();
     await expect.poll(read).toBe(37);
   });

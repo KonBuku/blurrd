@@ -8,6 +8,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import type { ExactFrame } from "@/bindings/ExactFrame";
+import type { ExactSettings } from "@/bindings/ExactSettings";
 import type { RectI } from "@/bindings/RectI";
 
 /** URL of `path` on the `blurrd` scheme (`http://blurrd.localhost/…` on Windows). */
@@ -33,24 +34,34 @@ export async function loadImage(url: string, signal: AbortSignal): Promise<Image
   return createImageBitmap(blob);
 }
 
+/** The `settings` query of the Exact URLs. */
+export function exactQuery(settings: ExactSettings): string {
+  return `settings=${encodeURIComponent(JSON.stringify(settings))}`;
+}
+
 /**
- * The Exact patches of `frame`: the decoded frame index the backend
- * reports and its blurred ROI images.
+ * The Exact patches of `frame` at project `revision`: the decoded frame
+ * index the backend reports and its blurred ROI images. `settings` are
+ * the blur and the enabled regions the export would use (the
+ * inspector's, which can differ from the analysis), so the patches show
+ * the export's pixels.
  */
 export async function fetchExact(
   projectId: string,
   frame: number,
   revision: number,
+  settings: ExactSettings,
   signal: AbortSignal,
 ): Promise<{ readonly frame: number; readonly patches: readonly ExactPatch[] }> {
+  const query = `rev=${revision}&${exactQuery(settings)}`;
   const info = (await (
-    await fetchOk(schemeUrl(`exact/${projectId}/${frame}.json`), signal)
+    await fetchOk(`${schemeUrl(`exact/${projectId}/${frame}.json`)}?${query}`, signal)
   ).json()) as ExactFrame;
   const patches = await Promise.all(
     info.patches.map(async (patch) => ({
       rect: patch.rect,
       image: await loadImage(
-        `${schemeUrl(`exact/${projectId}/${info.frame}/${patch.roi}.jpg`)}?rev=${revision}`,
+        `${schemeUrl(`exact/${projectId}/${info.frame}/${patch.roi}.jpg`)}?${query}`,
         signal,
       ),
     })),

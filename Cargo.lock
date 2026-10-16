@@ -444,6 +444,7 @@ dependencies = [
  "blurrd-core",
  "blurrd-engine",
  "blurrd-video",
+ "ffmpeg-the-third",
  "jpeg-encoder",
  "serde",
  "serde_json",

@@ -39,5 +39,9 @@ tracing = { workspace = true, features = ["log"] }
 # v7 job ids, v4 for the media server's random token.
 uuid = { workspace = true, features = ["v4", "v7"] }
 
+[dev-dependencies]
+# Writes the lossless synthetic clip of the Exact fidelity test.
+ffmpeg-the-third = { workspace = true }
+
 [lints]
 workspace = true
