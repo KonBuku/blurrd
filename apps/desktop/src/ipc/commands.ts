@@ -72,6 +72,15 @@ export function openProject(path: string): Promise<ProjectSummary> {
   return invoke<ProjectSummary>("open_project", { path });
 }
 
+/**
+ * Closes the project of a file removed from the queue: the backend stops
+ * serving its video and closes its Exact decoder. Opening the file again
+ * opens a new project.
+ */
+export function closeProject(projectId: string): Promise<void> {
+  return invoke<void>("close_project", { projectId });
+}
+
 /** The tracks and edits of a project. */
 export function getTracks(projectId: string): Promise<TrackSet> {
   return invoke<TrackSet>("get_tracks", { projectId });

@@ -444,6 +444,8 @@ export function installMockBackend(): MockBackend {
       case "cancel_job":
         backend.jobs.cancel((args as { job: string }).job);
         return null;
+      case "close_project":
+        return null;
       case "save_session":
         sessionStorage.setItem(SESSION_KEY, JSON.stringify((args as { entries: unknown }).entries));
         return null;

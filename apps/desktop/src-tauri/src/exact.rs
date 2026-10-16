@@ -337,6 +337,23 @@ impl ExactRenderer {
         spawned.is_ok()
     }
 
+    /// Drops the seeker and the parsed project of project `id` (it was
+    /// closed).
+    pub(crate) fn close(&self, id: &str) {
+        let mut guard = lock(&self.state);
+        let closed = guard.open.take_if(|open| open.project == id);
+        if guard
+            .parsed
+            .as_ref()
+            .is_some_and(|parsed| parsed.project == id)
+        {
+            guard.parsed = None;
+        }
+        drop(guard);
+        // The decoder's thread ends outside the lock.
+        drop(closed);
+    }
+
     /// Whether a seeker is open.
     #[cfg(test)]
     fn is_open(&self) -> bool {
@@ -665,9 +682,13 @@ mod tests {
             assert!(Instant::now() < deadline, "the seeker stayed open");
             std::thread::sleep(Duration::from_millis(20));
         }
-        // It opens again on the next request.
+        // It opens again on the next request, and closes with its project.
         exact.frame(&project, 4, None).unwrap();
         assert!(exact.is_open());
+        exact.close("another project");
+        assert!(exact.is_open());
+        exact.close(project.id());
+        assert!(!exact.is_open());
         drop(exact);
         std::fs::remove_dir_all(&work).unwrap();
         std::fs::remove_dir_all(&media).unwrap();

@@ -10,6 +10,7 @@ const COMMANDS: &[&str] = &[
     "get_session",
     "save_session",
     "open_project",
+    "close_project",
     "get_tracks",
     "get_pts",
     "get_timeline_density",

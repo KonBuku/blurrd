@@ -185,6 +185,19 @@ pub(crate) async fn open_project(
     .await
 }
 
+/// Closes the project of a file the frontend removed: its video is no
+/// longer served and the Exact decoder of it is closed. Unknown ids are
+/// ignored; a later `open_project` opens the file again.
+#[tauri::command]
+pub(crate) fn close_project(state: State<'_, AppState>, project_id: String) {
+    if state.projects.close(&project_id) {
+        if let Some(media) = &state.media {
+            media.forget(&project_id);
+        }
+        state.exact.close(&project_id);
+    }
+}
+
 /// The summary of `project` with its media URLs.
 fn summary(state: &AppState, project: &OpenProject) -> ProjectSummary {
     let proxy = project.dir().proxy();

@@ -78,6 +78,12 @@ impl Projects {
         })
     }
 
+    /// Closes the open project `id` (the frontend removed its file);
+    /// answers whether it was open.
+    pub(crate) fn close(&self, id: &str) -> bool {
+        lock(&self.open).remove(id).is_some()
+    }
+
     /// The fingerprint of the open project of `source`, if there is one.
     pub(crate) fn fingerprint_of(&self, source: &Path) -> Option<Fingerprint> {
         lock(&self.open)

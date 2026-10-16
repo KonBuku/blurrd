@@ -109,6 +109,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::get_session,
             commands::save_session,
             commands::open_project,
+            commands::close_project,
             commands::get_tracks,
             commands::get_pts,
             commands::get_timeline_density,

@@ -405,7 +405,9 @@ like a restart.
 ### Preview
 
 Selecting a recording in the queue opens its project (`open_project`) and
-shows it in the preview frame (`src/features/preview`). The `<video>`
+shows it in the preview frame (`src/features/preview`); removing it from
+the queue closes the project (`close_project`,
+`src/store/project-lifetime.ts`). The `<video>`
 element plays the source; a WebGL 2 canvas on top of it
 (`gl/blur-renderer.ts`) takes every presented frame
 (`requestVideoFrameCallback`, and `seeked` while paused), looks up its

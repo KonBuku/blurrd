@@ -7,7 +7,8 @@
 //! allows only the window's origin to read its answers (CORS), and
 //! answers `GET` and `HEAD` for `/<token>/<id>`: the token is random per
 //! app start and compared in constant time, the id names a file the
-//! backend registered (an opened video), so no other file can be read.
+//! backend registered (an opened video, until its project closes), so no
+//! other file can be read.
 //! A single range (`bytes=a-b`, `a-`, `-n`) answers 206 with the part, a
 //! range past the end 416; other `Range` headers (several ranges, other
 //! units, malformed) are ignored and the whole file is sent, as RFC 9110
@@ -85,6 +86,11 @@ impl MediaServer {
     pub(crate) fn url(&self, id: &str, path: &Path) -> String {
         lock(&self.files).insert(id.to_owned(), path.to_path_buf());
         format!("http://{}/{}/{id}", self.address, self.token)
+    }
+
+    /// Stops serving the file registered under `id`.
+    pub(crate) fn forget(&self, id: &str) {
+        lock(&self.files).remove(id);
     }
 }
 
@@ -687,6 +693,12 @@ mod tests {
         assert_eq!(chunked.header("connection"), Some("close"));
         let mut rest = Vec::new();
         assert_eq!(reader.read_to_end(&mut rest).unwrap(), 0);
+
+        // The file of a closed project is no longer served.
+        server.forget("abc");
+        let mut stream = TcpStream::connect(server.address).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        assert_eq!(ask(&mut stream, &mut reader, &get("")).status, 404);
         let _ = std::fs::remove_file(&path);
     }
 

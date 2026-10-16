@@ -9,6 +9,7 @@
     "allow-get-session",
     "allow-save-session",
     "allow-open-project",
+    "allow-close-project",
     "allow-get-tracks",
     "allow-get-pts",
     "allow-get-timeline-density",
