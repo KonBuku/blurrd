@@ -3,7 +3,8 @@
 //! poorly on WebView2 (every range request goes through the webview's
 //! resource callback and its body is held in memory).
 //!
-//! The server listens on 127.0.0.1 only, on a port the system picks, and
+//! The server listens on 127.0.0.1 only, on a port the system picks,
+//! allows only the window's origin to read its answers (CORS), and
 //! answers `GET` and `HEAD` for `/<token>/<id>`: the token is random per
 //! app start and compared in constant time, the id names a file the
 //! backend registered (an opened video), so no other file can be read.
@@ -44,17 +45,19 @@ pub(crate) struct MediaServer {
 }
 
 impl MediaServer {
-    /// Binds 127.0.0.1 on a free port and serves on a background thread.
+    /// Binds 127.0.0.1 on a free port and serves the page of the window
+    /// at `origin` on a background thread.
     ///
     /// # Errors
     ///
     /// The errors of binding the socket or starting the thread.
-    pub(crate) fn start() -> io::Result<Self> {
+    pub(crate) fn start(origin: &str) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         let address = listener.local_addr()?;
         let token = Uuid::new_v4().simple().to_string();
         let files: Files = Arc::default();
         let server = Server {
+            origin: Arc::from(origin),
             token: token.clone(),
             files: Arc::clone(&files),
             open: Arc::new(AtomicUsize::new(0)),
@@ -79,6 +82,7 @@ impl MediaServer {
 /// The accepting side of the server.
 #[derive(Clone)]
 struct Server {
+    origin: Arc<str>,
     token: String,
     files: Files,
     open: Arc<AtomicUsize>,
@@ -162,8 +166,9 @@ impl Server {
         let length = if size == 0 { 0 } else { end - start + 1 };
         let mut headers = format!(
             "Content-Type: {}\r\nContent-Length: {length}\r\nAccept-Ranges: bytes\r\n\
-             Access-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\n",
-            content_type(&path)
+             Access-Control-Allow-Origin: {}\r\nCache-Control: no-cache\r\n",
+            content_type(&path),
+            self.origin
         );
         if status == 206 {
             let _ = write!(headers, "Content-Range: bytes {start}-{end}/{size}\r\n");
@@ -355,6 +360,9 @@ mod tests {
 
     use super::{MediaServer, parse_range, same_token};
 
+    /// The window's origin in the tests.
+    pub(crate) const ORIGIN: &str = "http://tauri.localhost";
+
     #[test]
     fn ranges_parse_like_rfc_9110() {
         assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
@@ -442,7 +450,7 @@ mod tests {
     #[test]
     fn serves_registered_files_with_ranges_to_token_holders_only() {
         let (path, bytes) = video();
-        let server = MediaServer::start().unwrap();
+        let server = MediaServer::start(ORIGIN).unwrap();
         let url = server.url("abc", &path);
         assert!(url.starts_with("http://127.0.0.1:"), "{url}");
         let target = url.split_once("127.0.0.1:").unwrap().1;
@@ -461,6 +469,7 @@ mod tests {
         assert_eq!(whole.body, bytes);
         assert_eq!(whole.header("accept-ranges"), Some("bytes"));
         assert_eq!(whole.header("content-type"), Some("video/mp4"));
+        assert_eq!(whole.header("access-control-allow-origin"), Some(ORIGIN));
         let middle = ask(&mut stream, &mut reader, &get("Range: bytes=1000-1999\r\n"));
         assert_eq!(middle.status, 206);
         assert_eq!(middle.body, &bytes[1000..2000]);
@@ -509,7 +518,7 @@ mod tests {
 
     #[test]
     fn listens_on_the_loopback_address_only() {
-        let server = MediaServer::start().unwrap();
+        let server = MediaServer::start(ORIGIN).unwrap();
         assert!(server.address.ip().is_loopback());
         // The address of this machine on its network (connecting a UDP
         // socket sends nothing); the server must not answer there.
@@ -545,7 +554,7 @@ mod tests {
         };
         let size = std::fs::metadata(&path).unwrap().len();
         assert!(size >= 1 << 30, "{size}");
-        let server = MediaServer::start().unwrap();
+        let server = MediaServer::start(ORIGIN).unwrap();
         let url = server.url("large", &path);
         let resource = format!("/{}", url.splitn(4, '/').nth(3).unwrap());
         let mut stream = TcpStream::connect(server.address).unwrap();

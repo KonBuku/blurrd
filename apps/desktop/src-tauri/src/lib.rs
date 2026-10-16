@@ -147,7 +147,33 @@ pub fn run() -> Result<(), tauri::Error> {
 fn app_state(app: &AppHandle) -> Result<AppState, Box<dyn std::error::Error>> {
     let config_dir = app.path().app_config_dir()?;
     let paths = UserPaths::new(Box::new(app.asset_protocol_scope()));
-    Ok(AppState::new(&config_dir, paths)?)
+    let origin = app
+        .get_webview_window(MAIN_WINDOW)
+        .and_then(|window| window.url().ok())
+        .map_or_else(|| "null".to_owned(), |url| window_origin(&url));
+    Ok(AppState::new(&config_dir, paths, &origin)?)
+}
+
+/// The origin of a page at `url` as the webview reports it, the value
+/// Tauri's asset protocol allows: app schemes are served from
+/// `http://<scheme>.localhost` on Windows (`<scheme>://localhost`
+/// elsewhere), other pages keep their scheme, host and port.
+fn window_origin(url: &tauri::Url) -> String {
+    match (url.scheme(), url.host_str()) {
+        ("data", _) => "null".to_owned(),
+        (scheme, _) if scheme != "http" && scheme != "https" => {
+            if cfg!(windows) {
+                format!("http://{scheme}.localhost")
+            } else {
+                format!("{scheme}://localhost")
+            }
+        }
+        (scheme, Some(host)) => match url.port() {
+            Some(port) => format!("{scheme}://{host}:{port}"),
+            None => format!("{scheme}://{host}"),
+        },
+        _ => "null".to_owned(),
+    }
 }
 
 /// Opens the settings file in the store plugin, so the frontend can reach
@@ -227,7 +253,7 @@ fn file_arguments(argv: &[String], cwd: &Path) -> Vec<String> {
 mod tests {
     use std::path::Path;
 
-    use super::file_arguments;
+    use super::{file_arguments, window_origin};
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
@@ -249,6 +275,20 @@ mod tests {
             file_arguments(&argv, Path::new(r"D:\work")),
             strings(&[r"D:\work\b.mkv"])
         );
+    }
+
+    #[test]
+    fn window_origins_match_the_asset_protocol() {
+        let origin = |url: &str| window_origin(&tauri::Url::parse(url).unwrap());
+        if cfg!(windows) {
+            assert_eq!(origin("tauri://localhost"), "http://tauri.localhost");
+        }
+        assert_eq!(origin("http://tauri.localhost/"), "http://tauri.localhost");
+        assert_eq!(
+            origin("http://localhost:1420/index.html"),
+            "http://localhost:1420"
+        );
+        assert_eq!(origin("data:text/html,x"), "null");
     }
 
     #[test]

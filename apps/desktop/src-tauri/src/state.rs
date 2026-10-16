@@ -39,11 +39,14 @@ pub(crate) struct AppState {
     pub(crate) media: Option<Arc<MediaServer>>,
     /// The threads answering `blurrd://` requests.
     pub(crate) scheme: Arc<Workers<Pending>>,
+    /// The origin of the window's page, the only one allowed to read the
+    /// scheme's and the media server's answers.
+    pub(crate) origin: Arc<str>,
 }
 
 impl AppState {
     /// The state for an app whose config folder is `config_dir`, checking
-    /// paths with `paths`. The engine caches in `%LOCALAPPDATA%\blurrd`
+    /// paths with `paths`, for a page served from `origin`. The engine caches in `%LOCALAPPDATA%\blurrd`
     /// and verifies with OCR when ONNX Runtime and the models are
     /// installed.
     ///
@@ -51,7 +54,7 @@ impl AppState {
     ///
     /// [`ErrorKind::Internal`] when the job queue or the scheme's threads
     /// cannot start.
-    pub(crate) fn new(config_dir: &Path, paths: UserPaths) -> Result<Self, AppError> {
+    pub(crate) fn new(config_dir: &Path, paths: UserPaths, origin: &str) -> Result<Self, AppError> {
         let mut config = EngineConfig::new(default_cache_dir());
         config.ocr = ocr_setup();
         let ocr = match &config.ocr {
@@ -61,7 +64,7 @@ impl AppState {
             },
         };
         let cache = config.cache_dir.clone();
-        let media = match MediaServer::start() {
+        let media = match MediaServer::start(origin) {
             Ok(server) => Some(Arc::new(server)),
             Err(error) => {
                 tauri_plugin_log::log::warn!(
@@ -94,6 +97,7 @@ impl AppState {
             exact: Arc::new(ExactRenderer::new()),
             media,
             scheme: Arc::new(workers),
+            origin: Arc::from(origin),
         })
     }
 

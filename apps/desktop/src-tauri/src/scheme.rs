@@ -16,7 +16,8 @@
 //! Requests are answered by a few worker threads ([`Workers`]) off the
 //! webview's thread; when [`QUEUED`] requests already wait, more answer
 //! 503 at once. Unknown paths and projects answer 404, failures 500 with
-//! the error message.
+//! the error message. Answers allow the window's origin only (CORS), as
+//! the asset protocol's do.
 //!
 //! [`ExactFrame`]: blurrd_core::ExactFrame
 //! [`ExactSettings`]: blurrd_core::ExactSettings
@@ -123,8 +124,8 @@ impl Pending {
 
     /// Answers 503: too many requests wait.
     pub(crate) fn busy(self) {
-        self.responder
-            .respond(status(StatusCode::SERVICE_UNAVAILABLE, "busy"));
+        let busy = status(StatusCode::SERVICE_UNAVAILABLE, "busy");
+        self.responder.respond(for_window(busy, &self.state.origin));
     }
 }
 
@@ -193,8 +194,23 @@ impl Route {
     }
 }
 
-/// Answers one request of the scheme.
+/// Answers one request of the scheme, for the window's origin.
 pub(crate) fn respond(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    for_window(answer(state, request), &state.origin)
+}
+
+/// `response` readable by the page of the window at `origin` (CORS).
+fn for_window(mut response: Response<Vec<u8>>, origin: &str) -> Response<Vec<u8>> {
+    if let Ok(origin) = header::HeaderValue::from_str(origin) {
+        response
+            .headers_mut()
+            .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    }
+    response
+}
+
+/// The answer to one request, without CORS headers.
+fn answer(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri();
     let path = uri.path().trim_start_matches('/');
     let Some(route) = Route::parse(path, uri.query()) else {
@@ -245,8 +261,6 @@ pub(crate) fn respond(state: &AppState, request: &Request<Vec<u8>>) -> Response<
         Ok((content_type, body)) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, content_type)
-            // The page fetches from its own origin; only it can reach the scheme.
-            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
             .header(header::CACHE_CONTROL, "no-cache")
             .body(body)
             .unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR, "invalid response")),
@@ -305,10 +319,6 @@ fn status(code: StatusCode, message: &str) -> Response<Vec<u8>> {
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("text/plain; charset=utf-8"),
     );
-    response.headers_mut().insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        header::HeaderValue::from_static("*"),
-    );
     response
 }
 
@@ -320,8 +330,20 @@ mod tests {
 
     use blurrd_core::{BlurParams, ExactSettings, Region, RegionSet, Strength};
 
-    use super::{Route, Workers, percent_decoded};
+    use super::{Route, Workers, for_window, percent_decoded, status};
     use crate::media::encode_component;
+
+    #[test]
+    fn answers_allow_the_window_origin_only() {
+        let answer = for_window(
+            status(tauri::http::StatusCode::NOT_FOUND, "x"),
+            "http://tauri.localhost",
+        );
+        assert_eq!(
+            answer.headers()["access-control-allow-origin"],
+            "http://tauri.localhost"
+        );
+    }
 
     /// Two workers and two queue slots: a fifth job waits nowhere.
     #[test]

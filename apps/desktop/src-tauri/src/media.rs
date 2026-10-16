@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn large_videos_play_from_the_loopback_server() {
-        let server = MediaServer::start().unwrap();
+        let server = MediaServer::start("http://tauri.localhost").unwrap();
         let path = Path::new(r"C:\clips\long.mp4");
         assert!(
             video_url(Some(&server), "id", path, LARGE_VIDEO_BYTES)
