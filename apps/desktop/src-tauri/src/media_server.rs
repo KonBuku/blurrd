@@ -13,7 +13,8 @@
 //! range past the end 416; other `Range` headers (several ranges, other
 //! units, malformed) are ignored and the whole file is sent, as RFC 9110
 //! allows. Connections are kept alive, each on its own thread, at most
-//! [`MAX_CONNECTIONS`] at a time; a request body is read and dropped, or
+//! [`MAX_CONNECTIONS`] at a time (more are answered 503 after their
+//! request head was read); a request body is read and dropped, or
 //! the connection closes when it is large or chunked. A request (head
 //! and body) must arrive within [`REQUEST_TIMEOUT`] of its first byte,
 //! so clients that trickle it cannot hold the connection slots.
@@ -22,7 +23,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,6 +35,11 @@ use crate::projects::lock;
 
 /// Most connections served at once; the player needs one or two.
 pub(crate) const MAX_CONNECTIONS: usize = 16;
+/// Connections over the limit answered 503 at once; more are dropped.
+const MAX_TURNED_AWAY: usize = 4;
+/// How long a connection over the limit may take to send its request,
+/// and then to close after the 503.
+const TURN_AWAY_TIME: Duration = Duration::from_secs(1);
 /// How long an idle kept-alive connection stays open.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a request may take to arrive, from its first byte.
@@ -81,6 +87,7 @@ impl MediaServer {
             token: token.clone(),
             files: Arc::clone(&files),
             open: Arc::new(AtomicUsize::new(0)),
+            turned_away: Arc::new(AtomicUsize::new(0)),
             request_timeout,
         };
         std::thread::Builder::new()
@@ -112,6 +119,8 @@ struct Server {
     token: String,
     files: Files,
     open: Arc<AtomicUsize>,
+    /// Connections over the limit being answered 503.
+    turned_away: Arc<AtomicUsize>,
     /// How long a request may take to arrive, from its first byte.
     request_timeout: Duration,
 }
@@ -135,8 +144,7 @@ impl Server {
             };
             if self.open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
                 self.open.fetch_sub(1, Ordering::SeqCst);
-                let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
-                let _ = respond_status(&mut &stream, Reply::CLOSE, 503, "busy");
+                self.turn_away(stream);
                 continue;
             }
             let server = self.clone();
@@ -151,6 +159,27 @@ impl Server {
             if spawned.is_err() {
                 self.open.fetch_sub(1, Ordering::SeqCst);
             }
+        }
+    }
+
+    /// Answers a connection over the limit with 503 on its own thread;
+    /// beyond [`MAX_TURNED_AWAY`] of them it is closed unanswered.
+    fn turn_away(&self, stream: TcpStream) {
+        if self.turned_away.fetch_add(1, Ordering::SeqCst) >= MAX_TURNED_AWAY {
+            self.turned_away.fetch_sub(1, Ordering::SeqCst);
+            return;
+        }
+        let turned_away = Arc::clone(&self.turned_away);
+        let spawned = std::thread::Builder::new()
+            .name("blurrd-media-busy".to_owned())
+            .spawn(move || {
+                if let Err(error) = answer_busy(&stream) {
+                    tauri_plugin_log::log::debug!("media busy answer failed: {error}");
+                }
+                turned_away.fetch_sub(1, Ordering::SeqCst);
+            });
+        if spawned.is_err() {
+            self.turned_away.fetch_sub(1, Ordering::SeqCst);
         }
     }
 
@@ -241,6 +270,42 @@ impl Server {
     }
 }
 
+/// Answers 503 on a connection over the limit. The request head is read
+/// first and whatever else the client sends is read until it closes:
+/// closing a socket with unread data resets the connection, and the
+/// client would see the reset instead of the answer.
+fn answer_busy(stream: &TcpStream) -> io::Result<()> {
+    stream.set_write_timeout(Some(TURN_AWAY_TIME))?;
+    let mut reader = BufReader::new(stream);
+    // A client that sends nothing in time still gets the answer.
+    let head = read_head(&mut reader, Instant::now() + TURN_AWAY_TIME)
+        .ok()
+        .flatten();
+    let reply = Reply {
+        head: head.is_some_and(|head| head.method == "HEAD"),
+        keep_alive: false,
+    };
+    let mut out = stream;
+    respond(
+        &mut out,
+        reply,
+        503,
+        "Service Unavailable",
+        "Retry-After: 1\r\n",
+        b"busy",
+    )?;
+    stream.shutdown(Shutdown::Write)?;
+    let deadline = Instant::now() + TURN_AWAY_TIME;
+    loop {
+        arm(&reader, deadline)?;
+        let unread = reader.fill_buf()?.len();
+        if unread == 0 {
+            return Ok(());
+        }
+        reader.consume(unread);
+    }
+}
+
 /// How the answer to a request is written.
 #[derive(Debug, Clone, Copy)]
 struct Reply {
@@ -251,12 +316,6 @@ struct Reply {
 }
 
 impl Reply {
-    /// The answer on a connection that closes, to a `GET`.
-    const CLOSE: Self = Self {
-        head: false,
-        keep_alive: false,
-    };
-
     fn connection(self) -> &'static str {
         if self.keep_alive {
             "keep-alive"
@@ -863,6 +922,49 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "{}", answer.status);
             std::thread::sleep(Duration::from_millis(50));
         }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A client over the connection limit reads a whole 503 answer,
+    /// not a reset, also when it sent more than its request head.
+    #[test]
+    fn connections_over_the_limit_are_answered_503() {
+        let (path, _) = video("busy");
+        let server = MediaServer::start(ORIGIN).unwrap();
+        let url = server.url("abc", &path);
+        let resource = format!("/{}", url.splitn(4, '/').nth(3).unwrap());
+        // Idle clients take every slot (they may idle for 30 s).
+        let idle: Vec<TcpStream> = (0..MAX_CONNECTIONS)
+            .map(|_| TcpStream::connect(server.address).unwrap())
+            .collect();
+
+        for method in ["GET", "HEAD"] {
+            let mut stream = TcpStream::connect(server.address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            // A request with a body, then a second request: data the
+            // server never answers.
+            let request = format!(
+                "{method} {resource} HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\nbody\
+                 GET {resource} HTTP/1.1\r\nHost: x\r\n\r\n"
+            );
+            stream.write_all(request.as_bytes()).unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let answer = read_answer(&mut reader, method == "HEAD");
+            assert_eq!(answer.status, 503, "{method}");
+            assert_eq!(answer.header("connection"), Some("close"), "{method}");
+            assert_eq!(answer.header("retry-after"), Some("1"), "{method}");
+            if method == "GET" {
+                assert_eq!(answer.body, b"busy");
+            }
+            // Then the server closes cleanly: no body after a HEAD
+            // answer and no reset.
+            let mut rest = Vec::new();
+            reader.read_to_end(&mut rest).unwrap();
+            assert!(rest.is_empty(), "{method}: {rest:?}");
+        }
+        drop(idle);
         let _ = std::fs::remove_file(&path);
     }
 
