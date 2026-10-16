@@ -70,9 +70,10 @@ impl UserPaths {
     /// The folder of the file must exist and is resolved by the system
     /// (links, `8.3` names); the file name is joined to it as it is. Paths
     /// with `.` or `..` segments, names the system would rewrite (trailing
-    /// dots or spaces, `:` streams) and device or other special prefixes
-    /// are refused, so the path that is checked is the path that is
-    /// written. An existing file is resolved like the folder, so a link
+    /// dots or spaces, `:` streams), reserved device names (`NUL`, `CON`,
+    /// `COM1`, also with an extension) and device or other special
+    /// prefixes are refused, so the path that is checked is the path that
+    /// is written. An existing file is resolved like the folder, so a link
     /// cannot lead out of the chosen place.
     ///
     /// # Errors
@@ -178,12 +179,38 @@ fn plain_parts(path: &Path) -> Result<(&Path, &std::ffi::OsStr), AppError> {
                         "a name ends with a dot or space or names a stream",
                     ));
                 }
+                if is_reserved_name(&name) {
+                    return Err(not_plain("a name is reserved for a device"));
+                }
             }
         }
     }
     match (path.parent(), path.file_name()) {
         (Some(folder), Some(name)) => Ok((folder, name)),
         _ => Err(not_plain("it does not name a file")),
+    }
+}
+
+/// Whether `name` is reserved for a device by Win32 (`NUL`, `CON`,
+/// `PRN`, `AUX`, `COM0`-`COM9`, `LPT0`-`LPT9`, `CONIN$`, `CONOUT$`, the
+/// superscript `COM¹`-`LPT³` too): case-insensitive, with any extension
+/// and spaces before it, since `nul.txt` and `CON .json` open the device
+/// too. Behind a verbatim `\\?\` prefix such a name is a plain file
+/// that most programs cannot open or delete, so it is refused as well.
+fn is_reserved_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
+    let upper = stem.to_ascii_uppercase();
+    match upper.as_str() {
+        "NUL" | "CON" | "PRN" | "AUX" | "CONIN$" | "CONOUT$" => true,
+        _ => upper
+            .strip_prefix("COM")
+            .or_else(|| upper.strip_prefix("LPT"))
+            .is_some_and(|digit| {
+                matches!(
+                    digit,
+                    "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            }),
     }
 }
 
@@ -228,7 +255,7 @@ pub(crate) mod tests {
 
     use blurrd_core::ErrorKind;
 
-    use super::{PathScope, UserPaths, has_dot_segments, simplified};
+    use super::{PathScope, UserPaths, has_dot_segments, is_reserved_name, simplified};
 
     /// A scope of explicitly allowed paths and folders, for tests.
     #[derive(Debug, Default)]
@@ -381,6 +408,76 @@ pub(crate) mod tests {
             assert!(paths.target(Path::new(bad)).is_err(), "{bad} was accepted");
         }
         assert!(!other.join("new.json").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn device_names_are_reserved_in_any_spelling() {
+        for reserved in [
+            "NUL",
+            "nul",
+            "Nul.json",
+            "CON",
+            "con.txt",
+            "CON .json",
+            "PRN.mp4",
+            "aux.tar.gz",
+            "COM0",
+            "com1",
+            "COM9.json",
+            "LPT0",
+            "lpt5.mkv",
+            "LPT9",
+            "CONIN$",
+            "conout$.json",
+            "COM¹",
+            "lpt³.json",
+        ] {
+            assert!(is_reserved_name(reserved), "{reserved}");
+        }
+        for plain in [
+            "NULL.json",
+            "nul_preset.json",
+            "console.json",
+            "CON-1.json",
+            "auxiliary.json",
+            "COM",
+            "COM10.json",
+            "LPT.json",
+            "com1x.json",
+            "xCON.json",
+            "CONIN.json",
+            "é.json",
+        ] {
+            assert!(!is_reserved_name(plain), "{plain}");
+        }
+    }
+
+    /// A save target never names a device, also behind `\?\`.
+    #[test]
+    fn save_targets_cannot_name_a_device() {
+        let dir = std::env::temp_dir().join(format!("blurrd-devices-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = paths_below(&dir);
+        let text = simplified(&dir.canonicalize().unwrap())
+            .to_string_lossy()
+            .into_owned();
+        for name in [
+            "NUL",
+            "nul.json",
+            "Con.json",
+            "CON .json",
+            "COM1.json",
+            "lpt9",
+            "CONIN$",
+        ] {
+            for spelling in [format!(r"{text}\{name}"), format!(r"\?\{text}\{name}")] {
+                let refused = paths.target(Path::new(&spelling)).unwrap_err();
+                assert_eq!(refused.kind, ErrorKind::Io, "{spelling}");
+            }
+        }
+        assert!(paths.target(&dir.join("null.json")).is_ok());
+        assert!(paths.target(&dir.join("COM10.json")).is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
