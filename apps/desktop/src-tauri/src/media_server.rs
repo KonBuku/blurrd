@@ -8,9 +8,12 @@
 //! answers `GET` and `HEAD` for `/<token>/<id>`: the token is random per
 //! app start and compared in constant time, the id names a file the
 //! backend registered (an opened video), so no other file can be read.
-//! Range requests (`bytes=a-b`, `a-`, `-n`) answer 206 with the part,
-//! ranges past the end 416. Connections are kept alive, each on its own
-//! thread, at most [`MAX_CONNECTIONS`] at a time.
+//! A single range (`bytes=a-b`, `a-`, `-n`) answers 206 with the part, a
+//! range past the end 416; other `Range` headers (several ranges, other
+//! units, malformed) are ignored and the whole file is sent, as RFC 9110
+//! allows. Connections are kept alive, each on its own thread, at most
+//! [`MAX_CONNECTIONS`] at a time; a request body is read and dropped, or
+//! the connection closes when it is large or chunked.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -30,8 +33,14 @@ use crate::projects::lock;
 pub(crate) const MAX_CONNECTIONS: usize = 16;
 /// How long an idle kept-alive connection stays open.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long writing an answer may stall before the connection closes.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest request head accepted.
 const MAX_HEAD_BYTES: usize = 16 * 1024;
+/// Largest request body read and dropped on a kept-alive connection.
+const MAX_BODY_BYTES: u64 = 64 * 1024;
+/// Longest pause after failed accepts (it doubles from 10 ms).
+const MAX_ACCEPT_BACKOFF: Duration = Duration::from_secs(1);
 
 /// The registered files by id.
 type Files = Arc<Mutex<HashMap<String, PathBuf>>>;
@@ -90,11 +99,25 @@ struct Server {
 
 impl Server {
     fn accept(&self, listener: &TcpListener) {
+        let mut backoff = Duration::ZERO;
         for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
+            let stream = match stream {
+                Ok(stream) => {
+                    backoff = Duration::ZERO;
+                    stream
+                }
+                Err(error) => {
+                    // Out of sockets or handles: wait instead of spinning.
+                    backoff = (backoff * 2).clamp(Duration::from_millis(10), MAX_ACCEPT_BACKOFF);
+                    tauri_plugin_log::log::debug!("media server accept failed: {error}");
+                    std::thread::sleep(backoff);
+                    continue;
+                }
+            };
             if self.open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
                 self.open.fetch_sub(1, Ordering::SeqCst);
-                let _ = respond_status(&mut &stream, 503, "busy", false);
+                let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+                let _ = respond_status(&mut &stream, Reply::CLOSE, 503, "busy");
                 continue;
             }
             let server = self.clone();
@@ -115,53 +138,54 @@ impl Server {
     /// Answers the requests of one connection until it closes.
     fn serve(&self, stream: TcpStream) -> io::Result<()> {
         stream.set_read_timeout(Some(IDLE_TIMEOUT))?;
+        stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
         let mut reader = BufReader::new(stream.try_clone()?);
         let mut writer = stream;
         loop {
             let Some(request) = read_head(&mut reader)? else {
                 return Ok(());
             };
-            let keep_alive = request.keep_alive();
-            self.answer(&request, &mut writer, keep_alive)?;
+            // A body the server cannot skip safely ends the connection
+            // after the answer, so it is never read as the next request.
+            let keep_alive = request.keep_alive() && skip_body(&request, &mut reader)?;
+            let reply = Reply {
+                head: request.method == "HEAD",
+                keep_alive,
+            };
+            self.answer(&request, &mut writer, reply)?;
             if !keep_alive {
                 return Ok(());
             }
         }
     }
 
-    fn answer(&self, request: &Head, out: &mut impl Write, keep_alive: bool) -> io::Result<()> {
-        let head = match request.method.as_str() {
-            "GET" => false,
-            "HEAD" => true,
-            _ => return respond_status(out, 405, "method not allowed", keep_alive),
-        };
+    fn answer(&self, request: &Head, out: &mut impl Write, reply: Reply) -> io::Result<()> {
+        if !matches!(request.method.as_str(), "GET" | "HEAD") {
+            return respond_status(out, reply, 405, "method not allowed");
+        }
         let Some((token, id)) = request.target.trim_start_matches('/').split_once('/') else {
-            return respond_status(out, 404, "not found", keep_alive);
+            return respond_status(out, reply, 404, "not found");
         };
         if !same_token(token.as_bytes(), self.token.as_bytes()) {
-            return respond_status(out, 403, "forbidden", keep_alive);
+            return respond_status(out, reply, 403, "forbidden");
         }
         let Some(path) = lock(&self.files).get(id).cloned() else {
-            return respond_status(out, 404, "not found", keep_alive);
+            return respond_status(out, reply, 404, "not found");
         };
         let Ok(mut file) = File::open(&path) else {
-            return respond_status(out, 404, "not found", keep_alive);
+            return respond_status(out, reply, 404, "not found");
         };
         let size = file.metadata()?.len();
-        let range = match request
+        let range = request
             .header("range")
-            .map(|value| parse_range(value, size))
-        {
-            None => None,
-            Some(Some(range)) => Some(range),
-            Some(None) => {
-                let headers = format!("Content-Range: bytes */{size}\r\n");
-                return respond(out, 416, "range not satisfiable", &headers, b"", keep_alive);
-            }
-        };
+            .map_or(Range::Whole, |value| parse_range(value, size));
         let (status, start, end) = match range {
-            Some((start, end)) => (206, start, end),
-            None => (200, 0, size.saturating_sub(1)),
+            Range::Whole => (200, 0, size.saturating_sub(1)),
+            Range::Part(start, end) => (206, start, end),
+            Range::Unsatisfiable => {
+                let headers = format!("Content-Range: bytes */{size}\r\n");
+                return respond(out, reply, 416, "range not satisfiable", &headers, b"");
+            }
         };
         let length = if size == 0 { 0 } else { end - start + 1 };
         let mut headers = format!(
@@ -181,13 +205,57 @@ impl Server {
             } else {
                 "OK"
             },
-            if keep_alive { "keep-alive" } else { "close" }
+            reply.connection()
         )?;
-        if !head && length > 0 {
+        if !reply.head && length > 0 {
             file.seek(SeekFrom::Start(start))?;
             io::copy(&mut (&mut file).take(length), out)?;
         }
         out.flush()
+    }
+}
+
+/// How the answer to a request is written.
+#[derive(Debug, Clone, Copy)]
+struct Reply {
+    /// A `HEAD` request: headers only, never a body.
+    head: bool,
+    /// Whether the connection stays open afterwards.
+    keep_alive: bool,
+}
+
+impl Reply {
+    /// The answer on a connection that closes, to a `GET`.
+    const CLOSE: Self = Self {
+        head: false,
+        keep_alive: false,
+    };
+
+    fn connection(self) -> &'static str {
+        if self.keep_alive {
+            "keep-alive"
+        } else {
+            "close"
+        }
+    }
+}
+
+/// Reads and drops the body of `request`; answers whether the connection
+/// can serve another request (no body, or a small one with a length).
+fn skip_body(request: &Head, reader: &mut impl BufRead) -> io::Result<bool> {
+    if request.header("transfer-encoding").is_some() {
+        return Ok(false);
+    }
+    let Some(length) = request.header("content-length") else {
+        return Ok(true);
+    };
+    match length.parse::<u64>() {
+        Ok(0) => Ok(true),
+        Ok(length) if length <= MAX_BODY_BYTES => {
+            let skipped = io::copy(&mut reader.take(length), &mut io::sink())?;
+            Ok(skipped == length)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -274,30 +342,54 @@ fn read_head(reader: &mut impl BufRead) -> io::Result<Option<Head>> {
     }))
 }
 
-/// The first and last byte of a `Range` header for a file of `size`
-/// bytes; `None` when the range cannot be satisfied. Only single ranges
-/// are supported (the player asks for nothing else).
-fn parse_range(value: &str, size: u64) -> Option<(u64, u64)> {
-    let spec = value.trim().strip_prefix("bytes=")?;
-    if spec.contains(',') || size == 0 {
-        return None;
-    }
-    let (first, last) = spec.split_once('-')?;
-    let (first, last) = (first.trim(), last.trim());
-    if first.is_empty() {
-        let suffix: u64 = last.parse().ok()?;
-        if suffix == 0 {
-            return None;
-        }
-        return Some((size.saturating_sub(suffix), size - 1));
-    }
-    let start: u64 = first.parse().ok()?;
-    let end = if last.is_empty() {
-        size - 1
-    } else {
-        last.parse::<u64>().ok()?.min(size - 1)
+/// What a `Range` header asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Range {
+    /// The whole file: no range the server serves (several ranges,
+    /// another unit, a malformed header).
+    Whole,
+    /// The first and last byte of a single range.
+    Part(u64, u64),
+    /// A valid single range that lies past the end of the file.
+    Unsatisfiable,
+}
+
+/// The answer to `Range: value` for a file of `size` bytes (RFC 9110
+/// 14.2: a server may ignore any `Range` header, so everything but one
+/// valid byte range is ignored).
+fn parse_range(value: &str, size: u64) -> Range {
+    let Some((unit, spec)) = value.trim().split_once('=') else {
+        return Range::Whole;
     };
-    (start <= end).then_some((start, end))
+    if !unit.trim().eq_ignore_ascii_case("bytes") || spec.contains(',') {
+        return Range::Whole;
+    }
+    let Some((first, last)) = spec.split_once('-') else {
+        return Range::Whole;
+    };
+    let digits = |text: &str| -> Option<Option<u64>> {
+        let text = text.trim();
+        if text.is_empty() {
+            Some(None)
+        } else if text.bytes().all(|b| b.is_ascii_digit()) {
+            text.parse().ok().map(Some)
+        } else {
+            None
+        }
+    };
+    let (Some(first), Some(last)) = (digits(first), digits(last)) else {
+        return Range::Whole;
+    };
+    match (first, last) {
+        (None, None) => Range::Whole,
+        // A suffix: the last `n` bytes.
+        (None, Some(0)) => Range::Unsatisfiable,
+        (None, Some(_)) if size == 0 => Range::Unsatisfiable,
+        (None, Some(suffix)) => Range::Part(size.saturating_sub(suffix), size - 1),
+        (Some(start), Some(end)) if end < start => Range::Whole,
+        (Some(start), _) if start >= size => Range::Unsatisfiable,
+        (Some(start), end) => Range::Part(start, end.map_or(size - 1, |end| end.min(size - 1))),
+    }
 }
 
 /// Compares two tokens in time independent of where they differ.
@@ -323,31 +415,30 @@ fn content_type(path: &Path) -> &'static str {
     }
 }
 
-fn respond_status(
-    out: &mut impl Write,
-    status: u16,
-    text: &str,
-    keep_alive: bool,
-) -> io::Result<()> {
-    respond(out, status, text, "", text.as_bytes(), keep_alive)
+fn respond_status(out: &mut impl Write, reply: Reply, status: u16, text: &str) -> io::Result<()> {
+    respond(out, reply, status, text, "", text.as_bytes())
 }
 
+/// Writes a plain-text answer; the body is left out for `HEAD`, whose
+/// headers still state its length.
 fn respond(
     out: &mut impl Write,
+    reply: Reply,
     status: u16,
     reason: &str,
     headers: &str,
     body: &[u8],
-    keep_alive: bool,
 ) -> io::Result<()> {
     write!(
         out,
         "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\n\
          Content-Length: {}\r\n{headers}Connection: {}\r\n\r\n",
         body.len(),
-        if keep_alive { "keep-alive" } else { "close" }
+        reply.connection()
     )?;
-    out.write_all(body)?;
+    if !reply.head {
+        out.write_all(body)?;
+    }
     out.flush()
 }
 
@@ -358,22 +449,39 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{MediaServer, parse_range, same_token};
+    use super::{MediaServer, Range, parse_range, same_token};
 
     /// The window's origin in the tests.
     pub(crate) const ORIGIN: &str = "http://tauri.localhost";
 
     #[test]
     fn ranges_parse_like_rfc_9110() {
-        assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
-        assert_eq!(parse_range("bytes=900-", 1000), Some((900, 999)));
-        assert_eq!(parse_range("bytes=-100", 1000), Some((900, 999)));
-        assert_eq!(parse_range("bytes=-5000", 1000), Some((0, 999)));
-        assert_eq!(parse_range("bytes=990-2000", 1000), Some((990, 999)));
-        assert_eq!(parse_range("bytes=1000-", 1000), None);
-        assert_eq!(parse_range("bytes=5-1", 1000), None);
-        assert_eq!(parse_range("bytes=0-1,5-6", 1000), None);
-        assert_eq!(parse_range("items=0-1", 1000), None);
+        let part = Range::Part;
+        assert_eq!(parse_range("bytes=0-99", 1000), part(0, 99));
+        assert_eq!(parse_range("bytes=900-", 1000), part(900, 999));
+        assert_eq!(parse_range("bytes=-100", 1000), part(900, 999));
+        assert_eq!(parse_range("bytes=-5000", 1000), part(0, 999));
+        assert_eq!(parse_range("bytes=990-2000", 1000), part(990, 999));
+        assert_eq!(parse_range("Bytes = 1-2", 1000), part(1, 2));
+        // Valid, but past the end.
+        assert_eq!(parse_range("bytes=1000-", 1000), Range::Unsatisfiable);
+        assert_eq!(parse_range("bytes=-0", 1000), Range::Unsatisfiable);
+        assert_eq!(parse_range("bytes=0-", 0), Range::Unsatisfiable);
+        // Ignored: the whole file is sent.
+        for ignored in [
+            "bytes=5-1",
+            "bytes=0-1,5-6",
+            "items=0-1",
+            "bytes=",
+            "bytes=-",
+            "bytes=x-5",
+            "bytes=+1-5",
+            "bytes=1-5x",
+            "bytes 1-5",
+            "bytes=99999999999999999999999-",
+        ] {
+            assert_eq!(parse_range(ignored, 1000), Range::Whole, "{ignored}");
+        }
     }
 
     #[test]
@@ -438,10 +546,10 @@ mod tests {
         read_answer(reader, request.starts_with("HEAD"))
     }
 
-    fn video() -> (PathBuf, Vec<u8>) {
+    fn video(name: &str) -> (PathBuf, Vec<u8>) {
         let dir = std::env::temp_dir().join(format!("blurrd-media-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("clip.mp4");
+        let path = dir.join(format!("{name}.mp4"));
         let bytes: Vec<u8> = (0..100_000u32).map(|i| (i % 251) as u8).collect();
         std::fs::write(&path, &bytes).unwrap();
         (path, bytes)
@@ -449,7 +557,7 @@ mod tests {
 
     #[test]
     fn serves_registered_files_with_ranges_to_token_holders_only() {
-        let (path, bytes) = video();
+        let (path, bytes) = video("ranges");
         let server = MediaServer::start(ORIGIN).unwrap();
         let url = server.url("abc", &path);
         assert!(url.starts_with("http://127.0.0.1:"), "{url}");
@@ -513,6 +621,72 @@ mod tests {
             &format!("POST {resource} HTTP/1.1\r\nContent-Length: 0\r\n\r\n"),
         );
         assert_eq!(posted.status, 405);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// HEAD answers, request bodies and ignored ranges keep a kept-alive
+    /// connection in step: every answer still parses.
+    #[test]
+    fn connections_stay_in_step() {
+        let (path, bytes) = video("in-step");
+        let server = MediaServer::start(ORIGIN).unwrap();
+        let url = server.url("abc", &path);
+        let resource = format!("/{}", url.splitn(4, '/').nth(3).unwrap());
+        let token = resource.split('/').nth(1).unwrap().to_owned();
+        let mut stream = TcpStream::connect(server.address).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let get =
+            |range: &str| format!("GET {resource} HTTP/1.1\r\nHost: 127.0.0.1\r\n{range}\r\n");
+
+        // Ranges the server does not serve: the whole file (RFC 9110).
+        for ignored in ["bytes=0-1,5-6", "items=0-9", "bytes=9-1", "bytes=a-"] {
+            let answer = ask(
+                &mut stream,
+                &mut reader,
+                &get(&format!("Range: {ignored}\r\n")),
+            );
+            assert_eq!(answer.status, 200, "{ignored}");
+            assert_eq!(answer.body, bytes, "{ignored}");
+        }
+        // HEAD answers carry no body, errors included: the next answer on
+        // the connection still parses.
+        for target in [resource.clone(), format!("/{token}/other"), "/x".to_owned()] {
+            let head = ask(
+                &mut stream,
+                &mut reader,
+                &format!("HEAD {target} HTTP/1.1\r\nHost: x\r\n\r\n"),
+            );
+            assert!(matches!(head.status, 200 | 404), "{target}");
+        }
+        // A small request body is skipped, so it is not read as a request.
+        let body = "GET /x HTTP/1.1\r\n\r\n";
+        let posted = ask(
+            &mut stream,
+            &mut reader,
+            &format!(
+                "POST {resource} HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert_eq!(posted.status, 405);
+        let after = ask(&mut stream, &mut reader, &get("Range: bytes=0-9\r\n"));
+        assert_eq!(after.status, 206);
+        assert_eq!(after.body, &bytes[..10]);
+
+        // A chunked body closes the connection after the answer.
+        let chunked = ask(
+            &mut stream,
+            &mut reader,
+            &format!(
+                "GET {resource} HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\
+                 Range: bytes=0-0\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+            ),
+        );
+        assert_eq!(chunked.status, 206);
+        assert_eq!(chunked.header("connection"), Some("close"));
+        let mut rest = Vec::new();
+        assert_eq!(reader.read_to_end(&mut rest).unwrap(), 0);
         let _ = std::fs::remove_file(&path);
     }
 
