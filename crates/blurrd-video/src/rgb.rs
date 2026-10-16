@@ -50,6 +50,8 @@ pub struct RgbImage {
 /// darker than the exactly rounded conversion.
 #[derive(Debug, Clone)]
 struct SdrTables {
+    /// Whether the samples are limited range (16..=235 luma).
+    limited: bool,
     y: [i16; 256],
     r_v: [i16; 256],
     g_u: [i16; 256],
@@ -69,6 +71,7 @@ impl SdrTables {
             std::array::from_fn(|code| f(code as f64).floor() as i16)
         };
         Self {
+            limited: range != SampleRange::Full,
             y: table(&|y| (y - y_offset) * y_scale),
             r_v: table(&|v| 2.0 * (1.0 - kr) * c_scale * (v - 128.0)),
             g_u: table(&|u| -2.0 * kb * (1.0 - kb) / kg * c_scale * (u - 128.0)),
@@ -91,6 +94,107 @@ impl SdrTables {
 }
 
 impl SdrTables {
+    /// The 4 × 4 block means (each channel `(sum + 8) / 16`) of the RGB an
+    /// 8-bit crop `w × h` (even) converts to, laid out like
+    /// [`SdrTables::convert_8bit`]'s input, into `out` (`w / 4 × h / 4`
+    /// pixels; right and bottom remainders narrower than 4 are left out).
+    ///
+    /// Byte for byte the means of [`SdrTables::convert_8bit`]'s output,
+    /// without writing the converted pixels: the clamped values are summed
+    /// in registers, column by column.
+    fn means_4x4(
+        &self,
+        luma: &[u8],
+        (c0, c1): (&[u8], Option<&[u8]>),
+        (w, h): (usize, usize),
+        out: &mut [u8],
+    ) {
+        let (cw, qw) = (w / 2, w / 4);
+        // Per chroma row: the luma terms of its two rows and each channel's
+        // chroma offsets (one per column, repeated for both columns of a
+        // block); the clamped values are summed per column over the four
+        // rows of an output row, then over four columns. The per-column
+        // loops run over equal-length slices, which the compiler vectorises.
+        let mut terms = [vec![0i16; w], vec![0i16; w]];
+        let mut offsets = [vec![0i16; cw], vec![0i16; cw], vec![0i16; cw]];
+        let mut repeated = vec![0i16; w];
+        // Per channel and column, the sum over four rows (at most 4 × 255).
+        let mut columns = [vec![0i16; w], vec![0i16; w], vec![0i16; w]];
+        for (qy, line) in out.chunks_exact_mut(3 * qw).take(h / 4).enumerate() {
+            for channel in &mut columns {
+                channel.fill(0);
+            }
+            for cy in 2 * qy..2 * qy + 2 {
+                for (row, term) in terms.iter_mut().enumerate() {
+                    let codes = &luma[(2 * cy + row) * w..][..w];
+                    // One loop per range, each a plain vectorisable map.
+                    if self.limited {
+                        for (t, &code) in term.iter_mut().zip(codes) {
+                            *t = limited_luma_term(code);
+                        }
+                    } else {
+                        for (t, &code) in term.iter_mut().zip(codes) {
+                            *t = i16::from(code);
+                        }
+                    }
+                }
+                self.chroma_offsets(c0, c1, cy, cw, &mut offsets);
+                for (offset, column) in offsets.iter().zip(&mut columns) {
+                    for (pair, &o) in repeated.as_chunks_mut::<2>().0.iter_mut().zip(offset) {
+                        *pair = [o; 2];
+                    }
+                    for (((sum, &top), &bottom), &o) in column
+                        .iter_mut()
+                        .zip(&terms[0])
+                        .zip(&terms[1])
+                        .zip(&repeated)
+                    {
+                        *sum += (top + o).clamp(0, 255) + (bottom + o).clamp(0, 255);
+                    }
+                }
+            }
+            let [r, g, b] = &columns;
+            let quads = r
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(g.as_chunks::<4>().0)
+                .zip(b.as_chunks::<4>().0);
+            for (px, ((r, g), b)) in line.as_chunks_mut::<3>().0.iter_mut().zip(quads) {
+                *px = [r, g, b].map(|q| ((q[0] + q[1] + q[2] + q[3] + 8) / 16) as u8);
+            }
+        }
+    }
+
+    /// The red, green and blue chroma offsets of chroma row `cy` (`cw`
+    /// samples) into `offsets`.
+    fn chroma_offsets(
+        &self,
+        c0: &[u8],
+        c1: Option<&[u8]>,
+        cy: usize,
+        cw: usize,
+        [r, g, b]: &mut [Vec<i16>; 3],
+    ) {
+        let mut set = |i: usize, u: u8, v: u8| {
+            let (u, v) = (usize::from(u), usize::from(v));
+            r[i] = self.r_v[v];
+            g[i] = self.g_u[u] + self.g_v[v];
+            b[i] = self.b_u[u];
+        };
+        if let Some(v) = c1 {
+            let (us, vs) = (&c0[cy * cw..][..cw], &v[cy * cw..][..cw]);
+            for (i, (&u, &v)) in us.iter().zip(vs).enumerate() {
+                set(i, u, v);
+            }
+        } else {
+            let uvs = c0[2 * cy * cw..][..2 * cw].as_chunks::<2>().0;
+            for (i, &[u, v]) in uvs.iter().enumerate() {
+                set(i, u, v);
+            }
+        }
+    }
+
     /// Converts an 8-bit crop `w` pixels wide (even): `luma` packed rows,
     /// chroma as `(U, Some(V))` planes or one interleaved `(UV, None)`
     /// plane of `w / 2` samples per row, each used for a 2 × 2 block. The
@@ -142,6 +246,16 @@ impl SdrTables {
             }
         }
     }
+}
+
+/// The limited-range luma term of `code`, `(code - 16) × 255 / 219`
+/// rounded down, in arithmetic the compiler can vectorise. The fixed-point
+/// form gives every entry of [`SdrTables`]'s limited-range luma table,
+/// including those where its floating point lands just below a whole
+/// number (checked against the table in the tests).
+#[inline]
+fn limited_luma_term(code: u8) -> i16 {
+    (((i32::from(code) - 16) * 76_305 + 885) >> 16) as i16
 }
 
 /// `(Kr, Kb)` of a matrix.
@@ -325,6 +439,33 @@ impl RgbConverter {
         Ok(())
     }
 
+    /// The 4 × 4 block means of what [`RgbConverter::convert`] makes of
+    /// `roi` (each channel `(sum + 8) / 16`; right and bottom remainders
+    /// narrower than 4 pixels left out), into `out`: a downscaled view
+    /// without converting every pixel. Only 8-bit SDR crops take this
+    /// path; for 10-bit or HDR crops it returns `false` and leaves `out`
+    /// alone, and the caller converts them in full.
+    ///
+    /// # Errors
+    ///
+    /// [`VideoError::Unsupported`] when `roi` holds no copy yet.
+    pub fn convert_means_4x4(&self, roi: &YuvRoi, out: &mut RgbImage) -> Result<bool, VideoError> {
+        let rect = roi
+            .rect()
+            .ok_or_else(|| VideoError::Unsupported(String::from("empty crop")))?;
+        if self.hdr.is_some() || roi.layout() == RoiLayout::P010 {
+            return Ok(false);
+        }
+        let (w, h) = (rect.width() as usize, rect.height() as usize);
+        out.width = (w / 4) as u32;
+        out.height = (h / 4) as u32;
+        out.data.clear();
+        out.data.resize(3 * (w / 4) * (h / 4), 0);
+        self.sdr
+            .means_4x4(roi.luma(), roi.chroma(), (w, h), &mut out.data);
+        Ok(true)
+    }
+
     /// Non-linear R'G'B' in 0..=1 from code values (HDR path).
     fn normalised(&self, y: i32, u: i32, v: i32, ten_bit: bool) -> [f32; 3] {
         let scale = if ten_bit { 4.0 } else { 1.0 };
@@ -347,7 +488,7 @@ impl RgbConverter {
 mod tests {
     use blurrd_blur::{SampleRange, YuvMatrix};
 
-    use super::{HdrTables, SdrTables, hlg_inverse_oetf, pq_eotf};
+    use super::{HdrTables, SdrTables, hlg_inverse_oetf, limited_luma_term, pq_eotf};
     use crate::colour::ColourTransfer;
 
     #[test]
@@ -405,6 +546,61 @@ mod tests {
         let mut interleaved = vec![0; 3 * w * h];
         c.convert_8bit(&luma, (&uv, None), w, &mut interleaved);
         assert_eq!(interleaved, expected);
+    }
+
+    #[test]
+    fn luma_terms_match_the_table() {
+        let limited = SdrTables::new(YuvMatrix::Bt709, SampleRange::Limited);
+        let full = SdrTables::new(YuvMatrix::Bt709, SampleRange::Full);
+        assert!(limited.limited && !full.limited);
+        for code in 0..=255u8 {
+            let i = usize::from(code);
+            assert_eq!(limited_luma_term(code), limited.y[i], "{code}");
+            assert_eq!(i16::from(code), full.y[i], "{code}");
+        }
+    }
+
+    #[test]
+    fn block_means_equal_the_means_of_the_converted_pixels() {
+        // Full-scale noise clamps often (black and white crushes, saturated
+        // chroma); every matrix and range, planar and interleaved chroma,
+        // and sizes with remainders that are left out.
+        let (w, h) = (22, 18);
+        let mut seed = 0x2545_f491_u32;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed >> 24) as u8
+        };
+        let luma: Vec<u8> = (0..w * h).map(|_| next()).collect();
+        let u: Vec<u8> = (0..w / 2 * h / 2).map(|_| next()).collect();
+        let v: Vec<u8> = (0..w / 2 * h / 2).map(|_| next()).collect();
+        let uv: Vec<u8> = u.iter().zip(&v).flat_map(|(&a, &b)| [a, b]).collect();
+        for matrix in [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020] {
+            for range in [SampleRange::Limited, SampleRange::Full] {
+                let c = SdrTables::new(matrix, range);
+                let mut rgb = vec![0u8; 3 * w * h];
+                c.convert_8bit(&luma, (&u, Some(&v)), w, &mut rgb);
+                let (qw, qh) = (w / 4, h / 4);
+                let expected: Vec<u8> = (0..qh * qw * 3)
+                    .map(|i| {
+                        let (qy, qx, ch) = (i / 3 / qw, i / 3 % qw, i % 3);
+                        let sum: u32 = (0..16)
+                            .map(|k| {
+                                u32::from(rgb[3 * ((4 * qy + k / 4) * w + 4 * qx + k % 4) + ch])
+                            })
+                            .sum();
+                        ((sum + 8) / 16) as u8
+                    })
+                    .collect();
+                for chroma in [(&u[..], Some(&v[..])), (&uv[..], None)] {
+                    let mut means = vec![0u8; 3 * qw * qh];
+                    c.means_4x4(&luma, chroma, (w, h), &mut means);
+                    assert_eq!(means, expected, "{matrix:?} {range:?}");
+                }
+            }
+        }
     }
 
     #[test]
