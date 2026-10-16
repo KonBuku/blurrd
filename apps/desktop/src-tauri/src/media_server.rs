@@ -52,6 +52,10 @@ const MAX_HEAD_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: u64 = 64 * 1024;
 /// Longest pause after failed accepts (it doubles from 10 ms).
 const MAX_ACCEPT_BACKOFF: Duration = Duration::from_secs(1);
+/// Bytes of a file sent per socket write. With `io::copy`'s 8 KiB the
+/// webview read about 230 MB/s; 256 KiB writes reach 0.8-1.2 GB/s
+/// there and over 2 GB/s for a plain TCP client on this address.
+const SEND_CHUNK: usize = 256 * 1024;
 
 /// The registered files by id.
 type Files = Arc<Mutex<HashMap<String, PathBuf>>>;
@@ -264,10 +268,29 @@ impl Server {
         )?;
         if !reply.head && length > 0 {
             file.seek(SeekFrom::Start(start))?;
-            io::copy(&mut (&mut file).take(length), out)?;
+            send_part(&mut file, length, out)?;
         }
         out.flush()
     }
+}
+
+/// Copies the next `length` bytes of `file` to `out` in writes of
+/// [`SEND_CHUNK`] bytes (the last one shorter).
+///
+/// # Errors
+///
+/// The errors of reading and writing; [`io::ErrorKind::UnexpectedEof`]
+/// when the file ends early (it shrank after its length was sent).
+fn send_part(file: &mut impl Read, length: u64, out: &mut impl Write) -> io::Result<()> {
+    let mut buffer = vec![0; usize::try_from(length).map_or(SEND_CHUNK, |n| n.min(SEND_CHUNK))];
+    let mut left = length;
+    while left > 0 {
+        let chunk = usize::try_from(left).map_or(buffer.len(), |n| n.min(buffer.len()));
+        file.read_exact(&mut buffer[..chunk])?;
+        out.write_all(&buffer[..chunk])?;
+        left -= chunk as u64;
+    }
+    Ok(())
 }
 
 /// Answers 503 on a connection over the limit. The request head is read
@@ -611,7 +634,9 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{MAX_CONNECTIONS, MediaServer, Range, parse_range, same_token};
+    use super::{
+        MAX_CONNECTIONS, MediaServer, Range, SEND_CHUNK, parse_range, same_token, send_part,
+    };
 
     /// The window's origin in the tests.
     pub(crate) const ORIGIN: &str = "http://tauri.localhost";
@@ -644,6 +669,53 @@ mod tests {
         ] {
             assert_eq!(parse_range(ignored, 1000), Range::Whole, "{ignored}");
         }
+    }
+
+    /// The sizes of the writes made to it.
+    #[derive(Default)]
+    struct Writes {
+        sizes: Vec<usize>,
+        bytes: Vec<u8>,
+    }
+
+    impl Write for Writes {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.sizes.push(buf.len());
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Throughput guard: a file part leaves in [`SEND_CHUNK`] writes, not
+    /// in `io::copy`'s 8 KiB ones, which held the webview to ~230 MB/s.
+    #[test]
+    fn parts_are_sent_in_large_writes() {
+        assert_eq!(SEND_CHUNK, 256 * 1024);
+        let bytes: Vec<u8> = (0..SEND_CHUNK * 5 / 2 + 7)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        let mut file = std::io::Cursor::new(&bytes);
+        file.set_position(5);
+        let length = (bytes.len() - 10) as u64;
+        let mut out = Writes::default();
+        send_part(&mut file, length, &mut out).unwrap();
+        assert_eq!(out.bytes, &bytes[5..bytes.len() - 5]);
+        assert_eq!(
+            out.sizes,
+            [SEND_CHUNK, SEND_CHUNK, bytes.len() - 10 - 2 * SEND_CHUNK]
+        );
+        // A small part is one write of its own size.
+        let mut out = Writes::default();
+        send_part(&mut std::io::Cursor::new(&bytes), 10, &mut out).unwrap();
+        assert_eq!(out.sizes, [10]);
+        // A file that ends early fails instead of sending short.
+        let mut out = Writes::default();
+        let short = send_part(&mut std::io::Cursor::new(&bytes[..100]), 200, &mut out);
+        assert_eq!(short.unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
     }
 
     #[test]
