@@ -298,11 +298,14 @@ impl Calibrator {
 /// The layouts a frame of `width` × `height` pixels whose frames show
 /// pillarbox bars of `bar` pixels (0 for none) can hold, the most likely
 /// first. The layouts without bars are always tried: a dark scene can pass
-/// for bars.
+/// for bars. A 16:9 image scaled to a frame (or between bars) narrower
+/// than 3:2 is tried after the game's own layouts; at wider aspects, such
+/// as 16:10, its HUD lies within the calibration's tolerance of the game's
+/// own layout and the two could not be told apart.
 fn hypotheses(width: u32, height: u32, bar: u32) -> Vec<HudLayout> {
-    let mut layouts = Vec::with_capacity(3);
+    let mut layouts = Vec::with_capacity(5);
+    let bar_px = u16::try_from(bar).unwrap_or(u16::MAX);
     if bar > 0 {
-        let bar_px = u16::try_from(bar).unwrap_or(u16::MAX);
         layouts.push(HudLayout::Pillarbox { bar_px });
     }
     layouts.push(HudGeometry::for_layout(width, height, HudLayout::Auto).layout);
@@ -310,7 +313,19 @@ fn hypotheses(width: u32, height: u32, bar: u32) -> Vec<HudLayout> {
         // A 4:3 game may be stretched to fill a wide frame.
         layouts.push(HudLayout::Stretched4x3);
     }
+    if bar > 0 && is_narrow(width.saturating_sub(2 * bar), height) {
+        layouts.push(HudLayout::Scaled16x9 { bar_px });
+    }
+    if is_narrow(width, height) {
+        layouts.push(HudLayout::Scaled16x9 { bar_px: 0 });
+    }
     layouts
+}
+
+/// Whether an image of `width` × `height` pixels is narrower than 3:2, so
+/// that a 16:9 game scaled into it has a HUD of its own.
+fn is_narrow(width: u32, height: u32) -> bool {
+    width as f32 / height.max(1) as f32 <= 1.5
 }
 
 /// The confidence of a layout that found `names` names where the

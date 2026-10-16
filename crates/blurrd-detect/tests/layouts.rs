@@ -138,9 +138,18 @@ fn prepared(fx: &Fixture, scale: f32, detections: &[Detection]) -> Vec<PreparedB
     out
 }
 
+/// The fixture matrix, and 16:9 games saved at 4:3 frame sizes.
+fn layouts() -> Vec<Layout> {
+    let scaled = [
+        Layout::scaled_16x9(1440, 1080),
+        Layout::scaled_16x9(1024, 768),
+    ];
+    Layout::matrix().into_iter().chain(scaled).collect()
+}
+
 #[test]
 fn calibration_finds_every_layout_and_its_names_are_covered() {
-    for (k, layout) in (0u64..).zip(Layout::matrix()) {
+    for (k, layout) in (0u64..).zip(layouts()) {
         for (p, palette) in (0u64..).zip(Palette::ALL) {
             let scene = scene(layout, palette, 10 * k + p);
             let mut calibrator = Calibrator::new(layout.width, layout.height, HudLayout::Auto);
@@ -376,7 +385,7 @@ fn banner_names_are_covered_in_every_layout() {
     // An ACE banner read through the centred crop of the feed area, over
     // its whole episode (slide-in, settle, hold, fade).
     let fonts = FontSet::latin();
-    for (k, layout) in Layout::matrix().into_iter().enumerate() {
+    for (k, layout) in layouts().into_iter().enumerate() {
         let sampler = HudSampler::new(layout.geometry());
         let name = synth_name(&mut Rng::new(3 + k as u64), NameStyle::Latin(9));
         let spec = BannerSpec {

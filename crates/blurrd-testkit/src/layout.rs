@@ -94,6 +94,22 @@ impl Layout {
         Self::anchored(width, height, kind, sy, sy, bar)
     }
 
+    /// A 16:9 game image scaled to fill a frame of another aspect ratio,
+    /// such as a 1080p recording saved as 1440 × 1080: the whole HUD
+    /// narrows with the image (horizontal scale `W / 1920`).
+    pub fn scaled_16x9(width: u32, height: u32) -> Self {
+        let sy = height as f32 / REF_HEIGHT;
+        let sx = width as f32 / REF_WIDTH;
+        Self::anchored(
+            width,
+            height,
+            HudLayout::Scaled16x9 { bar_px: 0 },
+            sx,
+            sy,
+            0,
+        )
+    }
+
     fn anchored(width: u32, height: u32, kind: HudLayout, sx: f32, sy: f32, bar: u32) -> Self {
         let (w, h) = (width as i32, height as i32);
         let bar_i = bar as i32;
