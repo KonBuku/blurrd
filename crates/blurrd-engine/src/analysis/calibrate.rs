@@ -32,11 +32,11 @@ use crate::hud::{HudMap, rgb_view};
 use crate::job::{Job, canceled};
 
 /// Seconds of video per sampled keyframe.
-const SAMPLE_SPACING_S: f64 = 2.0;
+const SAMPLE_SPACING_S: f64 = 4.0;
 /// Keyframes sampled at least (short clips) ...
 const MIN_SAMPLES: usize = 8;
-/// ... and at most (long videos; the samples cost about 10 ms each).
-const MAX_SAMPLES: usize = 32;
+/// ... and at most (long videos; a sample costs about 10 ms at 1080p).
+const MAX_SAMPLES: usize = 24;
 /// Workers decoding samples at the same time.
 const SAMPLE_WORKERS: usize = 4;
 
@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn samples_are_spread_and_bounded() {
         assert_eq!(sample_times(1.5).len(), MIN_SAMPLES);
-        assert_eq!(sample_times(30.0).len(), 15);
+        assert_eq!(sample_times(60.0).len(), 15);
         assert_eq!(sample_times(3600.0).len(), MAX_SAMPLES);
         let times = sample_times(60.0);
         assert_eq!(times[0], 0.0);
