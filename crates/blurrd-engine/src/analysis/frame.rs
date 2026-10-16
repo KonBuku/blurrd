@@ -4,7 +4,9 @@
 use blurrd_core::{AppError, RectI, Region, RegionSet};
 use blurrd_detect::chat::LEFT_PANEL_ROI;
 use blurrd_detect::killfeed::FEED_ROI;
-use blurrd_detect::screens::{Anchor, FrameView, SurfaceFrame};
+use blurrd_detect::screens::{
+    self, Anchor, FrameView, GateSignal, ScreenSignals, Slot, SurfaceFrame,
+};
 use blurrd_detect::{ImageError, RgbView, ScreenDetector};
 use blurrd_video::{RgbConverter, RgbImage, RoiLayout, VideoColour, VideoFrame, YuvRoi};
 
@@ -121,25 +123,73 @@ impl Cropper {
 
     /// The crops of `frame`, and its screen surfaces read.
     pub(crate) fn crops(&mut self, frame: VideoFrame) -> Result<FrameCrops, AppError> {
-        if self.hud || self.quarter {
-            self.reference.build(&frame, &mut self.image)?;
-        }
         let crop = |this: &Self, rect: RectI, anchor: Anchor| {
             if this.hud {
-                Crop::cut(&this.image, this.map.reference_rect(rect, anchor))
+                Crop::black(this.map.reference_rect(rect, anchor))
             } else {
                 Crop::default()
             }
         };
-        let feed = crop(self, FEED_ROI, Anchor::Right);
-        let banner = self.banner.map(|rect| Crop::cut(&self.image, rect));
-        let left = crop(self, LEFT_PANEL_ROI, Anchor::Left);
+        let mut feed = crop(self, FEED_ROI, Anchor::Right);
+        let mut banner = self.banner.map(Crop::black);
+        let mut left = crop(self, LEFT_PANEL_ROI, Anchor::Left);
         let mut quarter_image = RgbImage::default();
-        if self.quarter {
-            quarter(&self.image, &mut quarter_image);
+        // Whether `self.image` holds this frame at the reference scale.
+        let mut whole = false;
+        if self.reference.identity {
+            // The same bytes as cutting the converted whole frame, without
+            // converting all of it: the crops converted on their own, the
+            // quarter view from block means.
+            for crop in [&mut feed, &mut left].into_iter().chain(banner.as_mut()) {
+                self.reference.convert_into(&frame, crop)?;
+            }
+            if self.quarter && !self.reference.means(&frame, &mut quarter_image)? {
+                self.reference.build(&frame, &mut self.image)?;
+                whole = true;
+                quarter(&self.image, &mut quarter_image);
+            }
+        } else if self.hud || self.quarter {
+            self.reference.build(&frame, &mut self.image)?;
+            whole = true;
+            for crop in [&mut feed, &mut left].into_iter().chain(banner.as_mut()) {
+                crop.fill(&self.image, (0, 0));
+            }
+            if self.quarter {
+                quarter(&self.image, &mut quarter_image);
+            }
         }
         let surfaces = match &mut self.screens {
-            Some(reader) => Some(reader.read(&self.image, &quarter_image, &self.map)?),
+            Some(reader) => {
+                let signals = reader.gate(&quarter_image, &self.map)?;
+                let mut surfaces: [SurfaceFrame; 4] = Default::default();
+                for ((surface, signal), region) in
+                    surfaces.iter_mut().zip(&signals).zip(Region::SCREENS)
+                {
+                    surface.candidate = signal.candidate;
+                    surface.score = signal.score;
+                    if !signal.candidate {
+                        continue;
+                    }
+                    // A frame at the reference scale converts only the
+                    // surface's zone (the same bytes as in the whole frame).
+                    let view = if whole {
+                        FrameView::native(detector_view(&self.image)?)
+                    } else {
+                        let zone = screens::zone(region, self.map.reference_map());
+                        match zone {
+                            Some(zone) => match self.reference.convert_part(&frame, zone)? {
+                                Some(origin) => {
+                                    FrameView::crop(detector_view(&self.reference.part)?, origin)
+                                }
+                                None => continue,
+                            },
+                            None => continue,
+                        }
+                    };
+                    surface.slots = reader.slots(region, &view, &self.map, signal);
+                }
+                Some(surfaces)
+            }
             None => None,
         };
         let native = if self.ocr && !self.map.is_identity() {
@@ -200,6 +250,8 @@ struct ReferenceFrame {
     planes: [Vec<u8>; 3],
     /// The tone-mapped frame at its own size (HDR).
     native: RgbImage,
+    /// A converted part of a frame at the reference scale.
+    part: RgbImage,
     /// The scaler for the current source size.
     scaling: Option<Scaling>,
 }
@@ -221,8 +273,63 @@ impl ReferenceFrame {
             roi: YuvRoi::new(),
             planes: Default::default(),
             native: RgbImage::default(),
+            part: RgbImage::default(),
             scaling: None,
         }
+    }
+
+    /// Converts the part of `crop` that lies inside `frame`, a frame at the
+    /// reference scale, into it.
+    fn convert_into(&mut self, frame: &VideoFrame, crop: &mut Crop) -> Result<(), AppError> {
+        let Some(rect) = crop.rect() else {
+            return Ok(());
+        };
+        if let Some(origin) = self.convert_part(frame, rect)? {
+            crop.fill(&self.part, origin);
+        }
+        Ok(())
+    }
+
+    /// Converts the part of `rect` that lies inside `frame`, a frame at the
+    /// reference scale, into `self.part`; returns where `self.part` starts
+    /// in the frame, or `None` when `rect` is outside it. Every pixel
+    /// converts on its own with the chroma of its 2 × 2 block (the part is
+    /// aligned to even coordinates), so the bytes are those of the
+    /// converted whole frame.
+    fn convert_part(
+        &mut self,
+        frame: &VideoFrame,
+        rect: RectI,
+    ) -> Result<Option<(i32, i32)>, AppError> {
+        let bounds = RectI {
+            x0: 0,
+            y0: 0,
+            x1: frame.width() as i32,
+            y1: frame.height() as i32,
+        };
+        let Some(rect) = rect.intersection(&bounds) else {
+            return Ok(None);
+        };
+        frame.roi_yuv(rect, &mut self.roi)?;
+        self.converter.convert(&self.roi, &mut self.part)?;
+        Ok(Some(
+            self.roi.rect().map_or((rect.x0, rect.y0), |r| (r.x0, r.y0)),
+        ))
+    }
+
+    /// The 4 × 4 means of `frame`, a frame at the reference scale, into
+    /// `out` (the same bytes as [`quarter`] of the converted frame), when
+    /// the converter makes them without converting the frame (8-bit SDR);
+    /// otherwise `false`.
+    fn means(&mut self, frame: &VideoFrame, out: &mut RgbImage) -> Result<bool, AppError> {
+        let whole = RectI {
+            x0: 0,
+            y0: 0,
+            x1: frame.width() as i32,
+            y1: frame.height() as i32,
+        };
+        frame.roi_yuv(whole, &mut self.roi)?;
+        Ok(self.converter.convert_means_4x4(&self.roi, out)?)
     }
 
     /// `frame` at the reference scale, into `out`.
@@ -317,6 +424,11 @@ impl ReferenceFrame {
     }
 }
 
+/// A detector view of `image`.
+fn detector_view(image: &RgbImage) -> Result<RgbView<'_>, AppError> {
+    rgb_view(image).map_err(|e| internal(format!("detector: {e}")))
+}
+
 /// Reads the screen surfaces of single frames: the quarter-scale gates
 /// and, for a candidate surface, the name slots in the reference frame.
 /// Both depend on the frame alone (the readers keep only scratch
@@ -334,32 +446,25 @@ impl ScreenReader {
         }
     }
 
-    /// The surfaces of the reference frame `image`, whose 4 × 4 means are
-    /// `quarter`.
-    fn read(
+    /// The gate signals of the screen surfaces of a reference frame whose
+    /// 4 × 4 means are `quarter`.
+    fn gate(&mut self, quarter: &RgbImage, map: &HudMap) -> Result<ScreenSignals, AppError> {
+        Ok(self.detector.gate(
+            &FrameView::scaled(detector_view(quarter)?, 1.0 / QUARTER as f32),
+            map.reference_map(),
+        ))
+    }
+
+    /// The name slots of candidate surface `region` in `pixels` (the
+    /// reference frame, or the surface's zone of it).
+    fn slots(
         &mut self,
-        image: &RgbImage,
-        quarter: &RgbImage,
+        region: Region,
+        pixels: &FrameView<'_>,
         map: &HudMap,
-    ) -> Result<[SurfaceFrame; 4], AppError> {
-        fn view(image: &RgbImage) -> Result<RgbView<'_>, AppError> {
-            rgb_view(image).map_err(|e| internal(format!("detector: {e}")))
-        }
-        let reference = map.reference_map();
-        let signals = self.detector.gate(
-            &FrameView::scaled(view(quarter)?, 1.0 / QUARTER as f32),
-            reference,
-        );
-        let whole = FrameView::native(view(image)?);
-        let mut surfaces: [SurfaceFrame; 4] = Default::default();
-        for (i, region) in Region::SCREENS.into_iter().enumerate() {
-            let signal = signals[i];
-            surfaces[i].candidate = signal.candidate;
-            surfaces[i].score = signal.score;
-            if signal.candidate {
-                surfaces[i].slots = self.detector.read(region, &whole, reference, &signal);
-            }
-        }
-        Ok(surfaces)
+        signal: &GateSignal,
+    ) -> Option<Vec<Slot>> {
+        self.detector
+            .read(region, pixels, map.reference_map(), signal)
     }
 }

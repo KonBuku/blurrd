@@ -163,33 +163,50 @@ pub(crate) struct Crop {
 }
 
 impl Crop {
-    /// Copies `rect` of `source` (black outside it).
-    pub(crate) fn cut(source: &RgbImage, rect: RectI) -> Self {
-        let w = rect.width() as usize;
-        let mut data = vec![0u8; 3 * w * rect.height() as usize];
-        let bounds = RectI {
-            x0: 0,
-            y0: 0,
-            x1: source.width as i32,
-            y1: source.height as i32,
-        };
-        if let Some(inside) = rect.intersection(&bounds) {
-            let stride = 3 * source.width as usize;
-            let len = 3 * inside.width() as usize;
-            let dx = 3 * (inside.x0 - rect.x0) as usize;
-            for y in inside.y0..inside.y1 {
-                let from = y as usize * stride + 3 * inside.x0 as usize;
-                let to = (y - rect.y0) as usize * 3 * w + dx;
-                data[to..to + len].copy_from_slice(&source.data[from..from + len]);
-            }
-        }
+    /// A black crop of `rect`, to be filled with [`Crop::fill`].
+    pub(crate) fn black(rect: RectI) -> Self {
         Self {
             image: RgbImage {
                 width: rect.width(),
                 height: rect.height(),
-                data,
+                data: vec![0u8; 3 * rect.width() as usize * rect.height() as usize],
             },
             rect: Some(rect),
+        }
+    }
+
+    /// Where the crop lies in the image it came from; `None` for an
+    /// empty crop.
+    pub(crate) fn rect(&self) -> Option<RectI> {
+        self.rect
+    }
+
+    /// Copies the part of the crop's rectangle that `source` holds, where
+    /// `source` shows the image the crop comes from from `origin` (its top
+    /// left pixel) on.
+    pub(crate) fn fill(&mut self, source: &RgbImage, (x, y): (i32, i32)) {
+        let Some(rect) = self.rect else {
+            return;
+        };
+        let bounds = RectI {
+            x0: x,
+            y0: y,
+            x1: x + source.width as i32,
+            y1: y + source.height as i32,
+        };
+        let Some(inside) = rect.intersection(&bounds) else {
+            return;
+        };
+        let (stride, w) = (3 * source.width as usize, 3 * rect.width() as usize);
+        let len = 3 * inside.width() as usize;
+        let (from_x, to_x) = (
+            3 * (inside.x0 - x) as usize,
+            3 * (inside.x0 - rect.x0) as usize,
+        );
+        for row in inside.y0..inside.y1 {
+            let from = (row - y) as usize * stride + from_x;
+            let to = (row - rect.y0) as usize * w + to_x;
+            self.image.data[to..to + len].copy_from_slice(&source.data[from..from + len]);
         }
     }
 
@@ -339,11 +356,22 @@ mod tests {
             height: 2,
             data: (1..=24).collect(),
         };
-        let crop = Crop::cut(&source, RectI::new(2, -1, 6, 1).unwrap());
+        let mut crop = Crop::black(RectI::new(2, -1, 6, 1).unwrap());
+        crop.fill(&source, (0, 0));
         let view = crop.view().unwrap();
         assert_eq!((view.width(), view.height()), (4, 2));
         assert_eq!(view.row(0), &[0; 12]);
         assert_eq!(view.row(1), &[7, 8, 9, 10, 11, 12, 0, 0, 0, 0, 0, 0]);
+
+        // A part of the image that starts elsewhere fills the same pixels.
+        let part = RgbImage {
+            width: 2,
+            height: 1,
+            data: (7..=12).collect(),
+        };
+        let mut from_part = Crop::black(RectI::new(2, -1, 6, 1).unwrap());
+        from_part.fill(&part, (2, 0));
+        assert_eq!(from_part.image, crop.image);
     }
 
     #[test]
