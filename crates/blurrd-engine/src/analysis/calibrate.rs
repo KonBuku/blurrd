@@ -136,7 +136,8 @@ pub(crate) fn calibrate(
 
 /// The times sampled in a video of `duration_s` seconds: one every
 /// [`SAMPLE_SPACING_S`], at least [`MIN_SAMPLES`] and at most
-/// [`MAX_SAMPLES`], spread evenly from the start.
+/// [`MAX_SAMPLES`], spread evenly from the start (seconds after the
+/// stream's first frame).
 fn sample_times(duration_s: f64) -> Vec<f64> {
     let duration = if duration_s.is_finite() {
         duration_s.max(0.0)
@@ -255,10 +256,11 @@ fn whole_frame(frame: &VideoFrame) -> RectI {
 /// what `read` made of it; `None` for a sample that could not be read.
 type Sampled<T> = Option<(i64, f64, T)>;
 
-/// Decodes the keyframe at or before each of `times` (seconds) on up to
-/// [`SAMPLE_WORKERS`] software decoders and hands what `read` makes of
-/// each to `take`, in the order of `times`, with its PTS and the seconds
-/// per PTS tick. Samples that fail are skipped (logged).
+/// Decodes the keyframe at or before each of `times` (seconds after the
+/// first frame) on up to [`SAMPLE_WORKERS`] software decoders and hands
+/// what `read` makes of each to `take`, in the order of `times`, with its
+/// PTS and the seconds per PTS tick. Samples that fail are skipped
+/// (logged).
 fn sample<T: Send>(
     input: &Path,
     times: &[f64],
@@ -319,12 +321,15 @@ fn decode_samples<T>(
     };
     let tb = decoder.time_base();
     let tick = f64::from(tb.num) / f64::from(tb.den.max(1));
+    // Sample times count from the first frame, which need not be at 0.
+    let start = decoder.start_pts().unwrap_or(0);
     for &t in times {
         if job.is_canceled() {
             return;
         }
         let sampled = (|| -> Result<Option<(i64, T)>, VideoError> {
-            decoder.seek_keyframe((t / tick.max(f64::MIN_POSITIVE)).round() as i64)?;
+            let offset = (t / tick.max(f64::MIN_POSITIVE)).round() as i64;
+            decoder.seek_keyframe(start.saturating_add(offset))?;
             let Some(frame) = decoder.next_frame()? else {
                 return Ok(None);
             };

@@ -375,6 +375,13 @@ impl Decoder {
         self.time_base
     }
 
+    /// The PTS of the stream's first frame as the container states it
+    /// (stream time base), or `None` when it does not.
+    pub fn start_pts(&self) -> Option<i64> {
+        let start = self.input.stream(self.stream)?.start_time();
+        (start != ffi::AV_NOPTS_VALUE).then_some(start)
+    }
+
     /// Decodes the next frame in presentation order, or `None` at the end.
     ///
     /// # Errors
