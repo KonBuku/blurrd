@@ -260,7 +260,7 @@ impl Default for ExportSettings {
             codec: Codec::Source,
             encoder: EncoderSetting::Auto,
             rate: RateControl::default(),
-            preset: 4,
+            preset: 3,
             ten_bit: Toggle::Auto,
             split_encode: Toggle::Auto,
             nvenc_sessions: NvencSessions::Auto,
@@ -320,7 +320,7 @@ mod tests {
     fn default_matches_the_documented_format() {
         let expected = serde_json::json!({
             "codec": "Source", "encoder": "Auto", "rate": { "MatchSource": { "max_factor": 1.5 } },
-            "preset": 4, "ten_bit": "Auto", "split_encode": "Auto", "nvenc_sessions": "Auto",
+            "preset": 3, "ten_bit": "Auto", "split_encode": "Auto", "nvenc_sessions": "Auto",
             "keyframes": "MatchSource", "smart_render": false,
             "audio": "Copy", "copy_subtitles": true, "metadata": "Technical",
             "container": "Source", "moov": "Reserve", "trim": null,

@@ -294,7 +294,7 @@ describe("inspector", () => {
         codec: "Hevc",
         encoder: { Named: "hevc_nvenc" },
         rate: { Cq: 18 },
-        preset: 6,
+        preset: 5,
         ten_bit: "On",
         split_encode: "Off",
         nvenc_sessions: "Two",

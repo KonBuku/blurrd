@@ -109,8 +109,10 @@ impl EncodeOptions {
     }
 }
 
-/// Preset used until the M18 quality benchmark picks the default.
-const DEFAULT_PRESET: u8 = 4;
+/// The default preset: p3. At the source's bit rate p2, p3 and p4 (tune
+/// hq or ll, 0 or 2 B-frames) measure within 0.1 VMAF of each other
+/// (about 99.6 on 1080p60 gameplay), and p3 exports faster than p4.
+const DEFAULT_PRESET: u8 = 3;
 /// Peak bit rate factor of the default rate control (match source).
 const DEFAULT_MAX_FACTOR: f32 = 1.5;
 

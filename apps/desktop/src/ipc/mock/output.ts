@@ -82,8 +82,8 @@ export function mockOutput(
       : typeof settings.audio === "string"
         ? 192_000
         : settings.audio.Aac * 1000;
-  // Slower presets are slower; P4 runs at the measured speed.
-  const fps = MOCK_JOB_FPS * (1 + (4 - settings.preset) * 0.15);
+  // Slower presets are slower; P3 (the default) runs at the measured speed.
+  const fps = MOCK_JOB_FPS * (1 + (3 - settings.preset) * 0.15);
   return {
     path,
     est_size: Math.round(((bitrate(settings, media) + audio) * seconds) / 8),

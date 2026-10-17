@@ -44,7 +44,7 @@
             "on_conflict": "AddNumber",
             "template": "{name}_blurrd"
           },
-          "preset": 4,
+          "preset": 3,
           "rate": {
             "MatchSource": {
               "max_factor": 1.5
@@ -440,7 +440,7 @@
               "on_conflict": "AddNumber",
               "template": "{name}_blurrd"
             },
-            "preset": 4,
+            "preset": 3,
             "rate": {
               "MatchSource": {
                 "max_factor": 1.5

@@ -24,7 +24,7 @@ const DEFAULT_BITRATE: f64 = 20_000_000.0;
 /// Bit rate of re-encoded or copied audio when the source does not state
 /// one, in bit/s.
 const DEFAULT_AUDIO_BITRATE: f64 = 192_000.0;
-/// Export speed of a 1080p H.264 export at preset 4 on the reference
+/// Export speed of a 1080p H.264 export at preset 3 on the reference
 /// machine (architecture plan 11.4: a 60 s 1080p60 run in about 6 s).
 /// The estimate scales it with the picture size and the preset until the
 /// benchmark measures this machine.
@@ -138,7 +138,7 @@ pub(crate) fn preview(
         .frame_count
         .map_or(info.duration_s * info.fps.as_f64(), f64::from);
     let pixels = f64::from(info.width) * f64::from(info.height);
-    let preset = 1.0 + (4.0 - f64::from(export.preset)) * 0.15;
+    let preset = 1.0 + (3.0 - f64::from(export.preset)) * 0.15;
     let fps = REFERENCE_FPS * (REFERENCE_PIXELS / pixels.max(1.0)) * preset.max(0.1);
     Ok(OutputPreview {
         path,

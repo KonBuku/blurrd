@@ -64,7 +64,7 @@ export const DEFAULT_EXPORT: ExportSettings = {
   codec: "Source",
   encoder: "Auto",
   rate: { MatchSource: { max_factor: 1.5 } },
-  preset: 4,
+  preset: 3,
   ten_bit: "Auto",
   split_encode: "Auto",
   nvenc_sessions: "Auto",
