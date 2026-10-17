@@ -23,7 +23,7 @@ use blurrd_video::{
 use serde::Serialize;
 
 use crate::analysis::frame::{Cropper, FrameCrops};
-use crate::analysis::pass0::Pass0;
+use crate::analysis::pass0::{Pass0, ZoneReads};
 use crate::cache::{self, ProjectDir};
 use crate::engine::Engine;
 use crate::hud::HudMap;
@@ -292,7 +292,7 @@ fn read_ranges(
     let mut flush = |batch: &mut Vec<(FrameCrops, RegionSet)>| {
         let views: Vec<_> = batch.iter().map(|(crops, on)| (crops, *on)).collect();
         let read = pass0
-            .read_frames(&views, true, &stopped)
+            .read_frames(&views, ZoneReads::ALL, &stopped)
             .map_err(|reason| {
                 AppError::new(ErrorKind::OcrUnavailable, "OCR stopped.").with_detail(reason)
             })?;

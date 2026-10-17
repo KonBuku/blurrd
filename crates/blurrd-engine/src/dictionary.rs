@@ -5,8 +5,10 @@
 //! the detector boxes, so names a detector missed still enter the
 //! dictionary (architecture plan 7.2, step 1). The analysis reads a zone
 //! at the events of its HUD structure and at least every second (see
-//! `analysis::pass0`), the audit every [`DictionaryBuilder::CADENCE`]th
-//! frame and on every frame where a structure signal is on; a crop is
+//! `analysis::pass0`), the audit the same zones on the same frames (for
+//! an analysis whose reads the cache does not hold, every
+//! [`DictionaryBuilder::CADENCE`]th frame and every frame where a
+//! structure signal is on); a crop is
 //! OCR'd only when it changed since the zone was last read
 //! ([`CropDedup`]). Each recognised line is reduced to its name part
 //! with rules per zone (chat sender before the colon, no voice location

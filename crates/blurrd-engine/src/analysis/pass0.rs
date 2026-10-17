@@ -59,6 +59,9 @@ pub(crate) struct Pass0 {
     log: LineLog,
     /// Frames whose zones were read.
     frames: u64,
+    /// The zones an analysis read per frame, in frame order (empty for
+    /// the other jobs, which say what to read per frame).
+    scheduled: Vec<(u32, ZoneReads)>,
 }
 
 impl std::fmt::Debug for Pass0 {
@@ -78,6 +81,8 @@ pub(crate) struct Pass0Parts<'a> {
     pub(crate) whitelist: &'a Whitelist,
     /// The lines read.
     pub(crate) log: &'a LineLog,
+    /// The zones an analysis read per frame ([`Pass0`]).
+    pub(crate) scheduled: &'a [(u32, ZoneReads)],
 }
 
 /// One OCR engine (its own sessions, so readers run at the same time) and
@@ -424,7 +429,7 @@ impl Opening {
             .iter()
             .map(|b| b.zones().iter().map(|z| z.kind).collect())
             .collect();
-        let mut counted = 0u64;
+        let mut scheduled = Vec::new();
         let (runtime, served) = std::thread::scope(|scope| {
             let mut queues: Vec<Sender<Task>> = Vec::with_capacity(builders.len());
             let mut handoffs = Vec::with_capacity(builders.len());
@@ -477,7 +482,7 @@ impl Opening {
                 let Some(read) = dispatch(&plans, &queues, &crops, due) else {
                     break;
                 };
-                counted += u64::from(read);
+                scheduled.extend(read.any().then_some((index, read)));
                 if !seen.regions.is_empty() {
                     log.record(index, HudRead::NONE, seen.regions, Vec::new());
                 }
@@ -506,7 +511,8 @@ impl Opening {
             readers,
             coverage,
             log,
-            frames: counted,
+            frames: scheduled.len() as u64,
+            scheduled,
         })
     }
 }
@@ -591,6 +597,7 @@ impl Pass0 {
             coverage,
             log: line_log(info),
             frames: 0,
+            scheduled: Vec::new(),
         })
     }
 
@@ -641,22 +648,28 @@ impl Pass0 {
             ocr: &mut reader.ocr,
             whitelist: reader.builder.whitelist(),
             log: &self.log,
+            scheduled: &self.scheduled,
         }
     }
 
-    /// Reads the zones of one frame's `crops`: the HUD zones when `hud`
-    /// is set, the screen zones and the full frame when the crops hold
-    /// them; the frame showed the HUD structure of `structure`. Returns
-    /// `false` when `stopped` said to stop first; fails with the reason
-    /// when OCR fails.
+    /// Reads the zones of `reads` that one frame's `crops` hold; the
+    /// frame showed the HUD structure of `structure`. Returns `false` when
+    /// `stopped` said to stop first; fails with the reason when OCR fails.
     pub(crate) fn read(
         &mut self,
         crops: &FrameCrops,
-        hud: bool,
+        reads: ZoneReads,
         structure: RegionSet,
         stopped: &dyn Fn() -> bool,
     ) -> Result<bool, String> {
-        self.read_frames(&[(crops, structure)], hud, stopped)
+        self.read_frames(&[(crops, structure)], reads, stopped)
+    }
+
+    /// Joins the exposures of one name that are up to `frames` frames
+    /// apart into one run, as the analysis whose reads a job follows did
+    /// ([`crate::verify::StructureLog`]).
+    pub(crate) fn set_hud_spacing(&mut self, frames: u32) {
+        self.log.set_hud_spacing(frames);
     }
 
     /// Reads the zones of several frames as [`Self::read`] reads one, each
@@ -666,14 +679,14 @@ impl Pass0 {
     pub(crate) fn read_frames(
         &mut self,
         frames: &[(&FrameCrops, RegionSet)],
-        hud: bool,
+        reads: ZoneReads,
         stopped: &dyn Fn() -> bool,
     ) -> Result<bool, String> {
         if stopped() {
             return Ok(false);
         }
-        let wanted = |kind: ZoneKind| hud || !HudRead::of(kind).any();
-        let hud_read = if hud { HudRead::BOTH } else { HudRead::NONE };
+        let wanted = |kind: ZoneKind| reads.wants(kind);
+        let hud_read = reads.hud;
         let half_second = self.log.half_second();
         let parts: Vec<Result<(Vec<bool>, LineLog), String>> = std::thread::scope(|scope| {
             let workers: Vec<_> = self
@@ -723,8 +736,8 @@ impl Pass0 {
             self.log.absorb(part);
         }
         for ((crops, structure), read) in frames.iter().zip(read) {
-            self.frames += u64::from(hud || read);
-            if hud || !structure.is_empty() {
+            self.frames += u64::from(hud_read.any() || read);
+            if hud_read.any() || !structure.is_empty() {
                 self.log
                     .record(crops.index, hud_read, *structure, Vec::new());
             }
@@ -775,38 +788,29 @@ impl Signals {
 }
 
 /// Queues the zones of `crops` that are `due` for the readers whose zones
-/// `plans` lists, on their `queues`. Returns whether any zone was queued;
-/// `None` when a reader failed (it dropped its queue, and its error ends
-/// pass 0).
+/// `plans` lists, on their `queues`. Returns the zones queued; `None`
+/// when a reader failed (it dropped its queue, and its error ends pass
+/// 0).
 fn dispatch(
     plans: &[Vec<ZoneKind>],
     queues: &[Sender<Task>],
     crops: &Arc<FrameCrops>,
-    due: Due,
-) -> Option<bool> {
-    let wanted = |kind: ZoneKind| match kind {
-        ZoneKind::FeedAndBanner => due.hud.feed,
-        ZoneKind::LeftPanel => due.hud.left,
-        ZoneKind::Screen(region) => Region::SCREENS
-            .iter()
-            .position(|&r| r == region)
-            .is_some_and(|i| due.screens[i]),
-        ZoneKind::FullFrame => true,
-    };
-    let mut read = false;
+    due: ZoneReads,
+) -> Option<ZoneReads> {
+    let mut read = ZoneReads::default();
     for (plan, queue) in plans.iter().zip(queues) {
-        let zones = zones_of(plan, crops, &wanted);
+        let zones = zones_of(plan, crops, &|kind| due.wants(kind));
         if zones.is_empty() {
             continue;
         }
-        read = true;
-        let hud = zones
-            .iter()
-            .fold(HudRead::NONE, |hud, &i| hud.or(HudRead::of(plan[i])));
+        let taken = zones.iter().fold(ZoneReads::default(), |reads, &i| {
+            reads.or(ZoneReads::of(plan[i]))
+        });
+        read = read.or(taken);
         let task = Task {
             crops: Arc::clone(crops),
             zones,
-            hud,
+            hud: taken.hud,
         };
         queue.send(task).ok()?;
     }
@@ -822,13 +826,66 @@ fn zone_of(region: Region) -> ZoneKind {
     }
 }
 
-/// Which zones pass 0 reads on one frame.
+/// Which zones pass 0 reads on one frame (each only where the frame's
+/// crops hold it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct Due {
+pub(crate) struct ZoneReads {
     /// The HUD zones.
-    hud: HudRead,
+    pub(crate) hud: HudRead,
     /// The name zone of each screen surface, in [`Region::SCREENS`] order.
-    screens: [bool; 4],
+    pub(crate) screens: [bool; 4],
+    /// The full frame (its crop exists on the sampled frames only).
+    pub(crate) full: bool,
+}
+
+impl ZoneReads {
+    /// Every zone.
+    pub(crate) const ALL: Self = Self {
+        hud: HudRead::BOTH,
+        screens: [true; 4],
+        full: true,
+    };
+
+    /// The HUD zones of `hud`, the screen surfaces and the full frame.
+    pub(crate) const fn with_hud(hud: HudRead) -> Self {
+        Self { hud, ..Self::ALL }
+    }
+
+    /// Whether a zone of `kind` is read.
+    pub(crate) fn wants(self, kind: ZoneKind) -> bool {
+        match kind {
+            ZoneKind::FeedAndBanner => self.hud.feed,
+            ZoneKind::LeftPanel => self.hud.left,
+            ZoneKind::Screen(region) => Region::SCREENS
+                .iter()
+                .position(|&r| r == region)
+                .is_some_and(|i| self.screens[i]),
+            ZoneKind::FullFrame => self.full,
+        }
+    }
+
+    /// Whether any zone is read.
+    pub(crate) fn any(self) -> bool {
+        self.hud.any() || self.screens.contains(&true) || self.full
+    }
+
+    /// The zones of `self` and of `other`.
+    fn or(self, other: Self) -> Self {
+        Self {
+            hud: self.hud.or(other.hud),
+            screens: std::array::from_fn(|i| self.screens[i] || other.screens[i]),
+            full: self.full || other.full,
+        }
+    }
+
+    /// The one zone of `kind`.
+    fn of(kind: ZoneKind) -> Self {
+        Self {
+            hud: HudRead::of(kind),
+            screens: Region::SCREENS.map(|r| kind == ZoneKind::Screen(r)),
+            full: kind == ZoneKind::FullFrame,
+        }
+    }
 }
 
 /// When pass 0 reads the zones during an analysis.
@@ -920,7 +977,7 @@ impl ReadSchedule {
     /// The zones read on `frame`, where the HUD stages saw `seen` and the
     /// screen surfaces in [`Region::SCREENS`] order are candidates as in
     /// `screens`.
-    fn due(&mut self, frame: u32, seen: &Structure, screens: [bool; 4]) -> Due {
+    fn due(&mut self, frame: u32, seen: &Structure, screens: [bool; 4]) -> ZoneReads {
         let zones = [ZoneKind::FeedAndBanner, ZoneKind::LeftPanel];
         let mut hud = [false; 2];
         for (i, zone) in zones.into_iter().enumerate() {
@@ -934,12 +991,14 @@ impl ReadSchedule {
             hud[i] = clock.due(frame, layout, self) || self.every;
             self.hud[i] = clock;
         }
-        let mut due = Due {
+        let mut due = ZoneReads {
             hud: HudRead {
                 feed: hud[0],
                 left: hud[1],
             },
             screens: [false; 4],
+            // Its crop exists on the sampled frames only.
+            full: true,
         };
         for (i, &candidate) in screens.iter().enumerate() {
             let mut clock = self.screens[i];
@@ -961,7 +1020,7 @@ impl ReadSchedule {
 mod tests {
     use blurrd_core::{Coverage, RegionSet};
 
-    use super::{Due, ReadSchedule, Structure};
+    use super::{ReadSchedule, Structure, ZoneReads};
 
     /// What the HUD stages saw: the kill feed with layout `feed` and the
     /// chat with layout `chat`.
@@ -977,7 +1036,7 @@ mod tests {
         schedule: &mut ReadSchedule,
         frames: u32,
         at: impl Fn(u32) -> (Structure, [bool; 4]),
-        pick: impl Fn(&Due) -> bool,
+        pick: impl Fn(&ZoneReads) -> bool,
     ) -> Vec<u32> {
         (0..frames)
             .filter(|&f| {

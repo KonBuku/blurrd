@@ -10,15 +10,15 @@
 //!
 //! 1. **Coverage.** Every name part in a name slot of every frame pass 0
 //!    read (in an analysis the events of each zone's HUD structure and at
-//!    least one frame a second; in an audit the frames with HUD structure
-//!    and one frame in [`crate::DictionaryBuilder::CADENCE`] elsewhere) is
-//!    compared with the blur boxes the plan has on that frame. A slot counts on frames where
-//!    its region shows its structure and the detectors boxed a name of it
-//!    within a second (a buy menu over the kill feed has no such boxes); a
-//!    screen surface's slots are the rows of its boxes. A part is
-//!    *exposed* when a run of its columns at least half a line high (about
-//!    one glyph) is not covered. The dictionary of this check holds the
-//!    names read in the slots of such frames.
+//!    least one frame a second; in an audit the same zones of the same
+//!    frames, [`StructureLog`]) is compared with the blur boxes the plan
+//!    has on that frame. A slot counts on frames where its region shows
+//!    its structure and the detectors boxed a name of it within a second
+//!    (a buy menu over the kill feed has no such boxes); a screen
+//!    surface's slots are the rows of its boxes. A part is *exposed* when
+//!    a run of its columns at least half a line high (about one glyph) is
+//!    not covered. The dictionary of this check holds the names read in
+//!    the slots of such frames.
 //! 2. **Leak classes.** The blurred pixels of every exposed part are made
 //!    exactly as the render will make them (the blur is local, so
 //!    blurring a crop of the frame gives the output's pixels) and read

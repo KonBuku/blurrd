@@ -4,9 +4,11 @@
 //! The verification during the analysis reads blurred crops made in
 //! memory exactly as the render makes them; the audit reads the file the
 //! render wrote, with the encoder's loss. It reads the protected zones of
-//! the source as pass 0 does (the dictionary lives only in memory), then
-//! the output's pixels of every name part the source showed, not only
-//! the parts the boxes leave open. An output on which a name stays
+//! the source that pass 0 of the analysis read, on the same frames (the
+//! dictionary lives only in memory; the cache keeps which zones were read,
+//! [`StructureLog`]), so it checks what the verification checked. Then it
+//! reads the output's pixels of every name part the source showed, not
+//! only the parts the boxes leave open. An output on which a name stays
 //! readable is renamed `*_UNVERIFIED`.
 
 use std::io::Read as _;
@@ -24,14 +26,14 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::analysis::frame::Cropper;
-use crate::analysis::pass0::Pass0;
+use crate::analysis::pass0::{Pass0, ZoneReads};
 use crate::cache::{self, ProjectDir};
 use crate::dictionary::DictionaryBuilder;
 use crate::engine::Engine;
 use crate::hud::HudMap;
 use crate::job::{Job, canceled};
 use crate::render::{UNVERIFIED_SUFFIX, check_media, unverified_name};
-use crate::verify::{self, Context, PixelSetup, Pixels, StructureLog};
+use crate::verify::{self, Context, HudRead, PixelSetup, Pixels, StructureLog};
 
 /// What to audit.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,14 +47,14 @@ pub struct AuditRequest {
     pub output: PathBuf,
     /// The project the output was rendered with.
     pub project: Project,
-    /// Which frames are read: every [`DictionaryBuilder::CADENCE`]th frame
+    /// Which frames are read: the zones the analysis read on its frames
     /// ([`Coverage::Structure`]) or every frame.
     pub coverage: Coverage,
 }
 
 impl AuditRequest {
-    /// Audits `output`, rendered from `input` with `project`, reading
-    /// every [`DictionaryBuilder::CADENCE`]th frame.
+    /// Audits `output`, rendered from `input` with `project`, reading the
+    /// zones the analysis read on its frames.
     pub fn new(job: JobId, input: PathBuf, output: PathBuf, project: Project) -> Self {
         Self {
             job,
@@ -265,15 +267,23 @@ struct Source<'a> {
     total: u32,
 }
 
-/// Reads `source` with `pass0` (crops cut by `cropper`): the HUD zones of
-/// every frame its coverage asks for, the screen zones and the full frame
-/// where the crops hold them. Returns the frames read.
+/// Reads `source` with `pass0` (crops cut by `cropper`): every zone of
+/// every frame with [`Coverage::EveryFrame`]; otherwise the zones its
+/// analysis read on each frame, or, when the cache does not record them,
+/// the HUD zones of the frames [`DictionaryBuilder::wants`] and the screen
+/// zones and the full frame where the crops hold them. Returns the frames
+/// read.
 fn read_source(
     source: &Source<'_>,
     pass0: &mut Pass0,
     cropper: &mut Cropper,
     job: &Job<'_>,
 ) -> Result<u32, AppError> {
+    // Exposures of one name join into runs as in the analysis it follows.
+    let spacing = source.structure.and_then(StructureLog::hud_spacing);
+    if let Some(spacing) = spacing.filter(|_| source.coverage == Coverage::Structure) {
+        pass0.set_hud_spacing(spacing);
+    }
     let mut decoder = Decoder::open(source.input, &source.decode)?;
     let stopped = || job.is_canceled();
     let mut frames = 0u32;
@@ -290,10 +300,18 @@ fn read_source(
             }
             None => (RegionSet::all(), false),
         };
-        let hud = source.coverage == Coverage::EveryFrame || DictionaryBuilder::wants(index, on);
+        let reads = if source.coverage == Coverage::EveryFrame {
+            ZoneReads::ALL
+        } else if let Some(reads) = source.structure.and_then(|log| log.reads_at(index)) {
+            reads
+        } else if DictionaryBuilder::wants(index, on) {
+            ZoneReads::ALL
+        } else {
+            ZoneReads::with_hud(HudRead::NONE)
+        };
         let crops = cropper.crops(frame)?;
         let read = pass0
-            .read(&crops, hud, structure, &stopped)
+            .read(&crops, reads, structure, &stopped)
             .map_err(|reason| {
                 AppError::new(ErrorKind::OcrUnavailable, "OCR stopped.").with_detail(reason)
             })?;

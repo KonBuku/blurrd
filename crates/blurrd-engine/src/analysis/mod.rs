@@ -558,7 +558,8 @@ fn verify_project(
     let parts = pass0.parts();
     // The audit and the verification of edited ranges read the source
     // again without the detectors; they confirm name slots with these.
-    StructureLog::from_lines(parts.log, project.media.frame_count).write(&dir.structure())?;
+    StructureLog::from_lines(parts.log, parts.scheduled, project.media.frame_count)
+        .write(&dir.structure())?;
     let ctx = Context {
         log: parts.log,
         whitelist: parts.whitelist,
