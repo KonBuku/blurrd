@@ -17,6 +17,19 @@ use crate::components::{Component, Connectivity, components};
 const MAX_COMP_H: i32 = 16;
 /// See [`MAX_COMP_H`].
 const MAX_COMP_W: i32 = 30;
+/// A wider component is a run of glyphs merged into one when it is at
+/// most this wide (a 16-character name, see [`NAME_REACH`]), at least
+/// [`MIN_RUN_H`] tall and fills at most [`MAX_RUN_FILL`] of its bounds:
+/// a frame scaled down horizontally (a 16:9 game saved as 1024 x 768)
+/// blurs the gaps between letters shut (measured: four letters of a real
+/// killer name in one component 45 px wide, 0.57 filled, so only its
+/// last glyph was blurred for 300 frames). Bar and portrait pieces of
+/// glyph height are solid.
+const MAX_RUN_W: i32 = NAME_REACH;
+/// See [`MAX_RUN_W`]: a run spans at least the x-height.
+const MIN_RUN_H: i32 = 8;
+/// See [`MAX_RUN_W`].
+const MAX_RUN_FILL: f32 = 0.7;
 /// Components with less ink are noise.
 const MIN_COMP_AREA: u32 = 3;
 /// Components starting this close to the row top touch the row edge.
@@ -89,6 +102,9 @@ const MISPLACED_BOUNDARY: i32 = 20;
 const MAX_KILLER_TO_WEAPON: i32 = 48;
 /// The killer text search stops this far left of the weapon.
 const WEAPON_GAP: i32 = 6;
+/// White pieces at most this far left of the weapon blob belong to the
+/// icon (see [`weapon_x`]).
+const WEAPON_JOIN: i32 = 2;
 /// Without a weapon blob, the killer text search stops this far left of
 /// the colour boundary (knife and ability icons sit in between).
 const ICON_ZONE: i32 = 40;
@@ -210,13 +226,16 @@ fn text_comps(
 }
 
 /// Whether a component of the row at `top` is text-like for
-/// [`text_comps`]: glyph-sized, clear of the row's edges, or a descender
+/// [`text_comps`]: glyph-sized (or a run of merged glyphs, see
+/// [`MAX_RUN_W`]), clear of the row's edges, or a descender
 /// starting at or right of `descenders_from`.
 fn is_text_comp(c: &Comp, top: i32, descenders_from: i32) -> bool {
     let (w, h) = (c.x1 - c.x0, c.bottom - c.top);
+    let merged_run =
+        w <= MAX_RUN_W && h >= MIN_RUN_H && c.area as f32 <= MAX_RUN_FILL * (w * h) as f32;
     c.area >= MIN_COMP_AREA
         && h <= MAX_COMP_H
-        && w <= MAX_COMP_W
+        && (w <= MAX_COMP_W || merged_run)
         && c.top - top >= MIN_COMP_TOP
         && (c.bottom - top <= ROW_H - MIN_COMP_BOTTOM_GAP
             || (c.x0 >= descenders_from
@@ -730,16 +749,17 @@ fn killer_comps(classes: &PixelClasses, top: i32, limit: i32, hard: i32, s: &mut
 
 /// The left edge of the weapon icon: the rightmost solid pure-white blob
 /// left of the colour boundary whose right end sits within 80 px of it
-/// (the headshot and wallbang icons are in between).
+/// (the headshot and wallbang icons are in between), extended left over
+/// the white pieces it continues into ([`WEAPON_JOIN`]).
 fn weapon_x(classes: &PixelClasses, top: i32, xb: i32, s: &mut Scratch) -> Option<i32> {
     let band = RectI::new(FEED_X0, top + 2, xb, top + ROW_H - 2).ok()?;
     find_components(classes, Class::PureWhite, band, s);
-    let mut best: Option<i32> = None;
+    let mut best: Option<Comp> = None;
     for c in s.found.iter().map(to_comp) {
         let (w, h) = (c.x1 - c.x0, c.bottom - c.top);
         // The prototype starts its "rightmost" search at offset 0 with a
         // strict comparison, so a blob at the band's left edge never wins.
-        let right_of_best = c.x0 > best.unwrap_or(FEED_X0);
+        let right_of_best = c.x0 > best.map_or(FEED_X0, |b| b.x0);
         if (10..=25).contains(&h)
             && (12..=140).contains(&w)
             && c.area >= 40
@@ -747,10 +767,24 @@ fn weapon_x(classes: &PixelClasses, top: i32, xb: i32, s: &mut Scratch) -> Optio
             && c.x1 >= xb - 80
             && right_of_best
         {
-            best = Some(c.x0);
+            best = Some(c);
         }
     }
-    best
+    let mut weapon = best?;
+    // A frame scaled down horizontally splits the icon (measured at
+    // 1024 x 768: the stock of a rifle 11 px wide, too narrow to win, so
+    // the killer name ended at the stock and was not blurred); its pieces
+    // touch the blob and span at least half its height beside it.
+    while let Some(piece) = s.found.iter().map(to_comp).find(|c| {
+        c.x0 < weapon.x0
+            && c.x1 + WEAPON_JOIN >= weapon.x0
+            && c.top < weapon.bottom
+            && weapon.top < c.bottom
+            && 2 * (c.bottom - c.top) >= weapon.bottom - weapon.top
+    }) {
+        weapon.x0 = piece.x0;
+    }
+    Some(weapon.x0)
 }
 
 #[cfg(test)]
@@ -783,6 +817,22 @@ mod tests {
         assert!(!on_line(&comps[0], 100));
         // No big glyph: the row top stays.
         assert_eq!(line_top(&[], 100), 100);
+    }
+
+    #[test]
+    fn keeps_glyphs_merged_into_one_run() {
+        // Measured at 1024 x 768 (row top 96): four letters of a killer
+        // name in one component 45 px wide, 283 px of ink. A solid piece of
+        // the same size is a bar or portrait part.
+        let run = |area: u32| Comp {
+            x0: 1635,
+            x1: 1680,
+            top: 107,
+            bottom: 118,
+            area,
+        };
+        assert!(is_text_comp(&run(283), 96, 1700));
+        assert!(!is_text_comp(&run(460), 96, 1700));
     }
 
     #[test]
