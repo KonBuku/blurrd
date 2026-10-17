@@ -34,7 +34,7 @@ use crate::dictionary::Pass0Stats;
 use crate::engine::Engine;
 use crate::hud::HudMap;
 use crate::job::{Job, internal};
-use crate::verify::{self, Context, PixelSetup, Pixels};
+use crate::verify::{self, Context, PixelSetup, Pixels, StructureLog};
 
 /// The most frames any temporal model may hold a frame before its boxes
 /// are final (plan 5.4): banner episodes need about 180, the kill-feed
@@ -524,6 +524,9 @@ fn verify_project(
     } = source;
     let coverage = pass0.coverage();
     let parts = pass0.parts();
+    // The audit and the verification of edited ranges read the source
+    // again without the detectors; they confirm name slots with these.
+    StructureLog::from_lines(parts.log, project.media.frame_count).write(&dir.structure())?;
     let ctx = Context {
         log: parts.log,
         whitelist: parts.whitelist,

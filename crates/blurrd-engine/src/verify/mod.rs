@@ -42,6 +42,7 @@
 
 mod pixels;
 mod scan;
+mod structure;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -56,6 +57,7 @@ use blurrd_ocr::{LeakMatcher, NameDictionary, NameMatch, Whitelist};
 
 pub(crate) use self::pixels::{PixelSetup, Pixels};
 use self::scan::{Run, Select};
+pub(crate) use self::structure::StructureLog;
 use crate::cache;
 use crate::dictionary::{DictionaryBuilder, SourceLine, ZoneKind};
 use crate::job::{Job, internal};

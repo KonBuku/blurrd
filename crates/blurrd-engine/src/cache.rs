@@ -128,6 +128,12 @@ impl ProjectDir {
         self.dir.join("pts.bin")
     }
 
+    /// The HUD structure signals of the analysis
+    /// ([`crate::verify::StructureLog`]).
+    pub(crate) fn structure(&self) -> PathBuf {
+        self.dir.join("structure.bin")
+    }
+
     /// The thumbnail folder.
     pub(crate) fn thumbs(&self) -> PathBuf {
         self.dir.join("thumbs")

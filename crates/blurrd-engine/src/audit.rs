@@ -31,7 +31,7 @@ use crate::engine::Engine;
 use crate::hud::HudMap;
 use crate::job::{Job, canceled};
 use crate::render::{check_media, unverified_name};
-use crate::verify::{self, Context, PixelSetup, Pixels};
+use crate::verify::{self, Context, PixelSetup, Pixels, StructureLog};
 
 /// What to audit.
 #[derive(Debug, Clone, PartialEq)]
@@ -175,10 +175,16 @@ impl Engine {
             regions,
             Some(pass0.reads()),
         );
+        let dir = ProjectDir::new(&config.cache_dir, &project.media.fingerprint);
+        let structure = StructureLog::read(&dir.structure(), pts.len());
+        if structure.is_none() {
+            tracing::warn!("no structure signals of the analysis; every region counts as on");
+        }
         let source = Source {
             input: &req.input,
             decode: decoder(&info),
             coverage: req.coverage,
+            structure: structure.as_ref(),
             total: pts.len(),
         };
         let frames = read_source(&source, &mut pass0, &mut cropper, job)?;
@@ -250,6 +256,8 @@ struct Source<'a> {
     decode: DecodeOptions,
     /// Which frames' HUD zones are read.
     coverage: Coverage,
+    /// The structure signals of its analysis, when the cache holds them.
+    structure: Option<&'a StructureLog>,
     /// Its frames.
     total: u32,
 }
@@ -268,12 +276,21 @@ fn read_source(
     let mut frames = 0u32;
     while let Some(frame) = decoder.next_frame()? {
         let index = frame.index();
-        let hud = source.coverage == Coverage::EveryFrame || DictionaryBuilder::wants(index, false);
+        // The analysis' structure signals gate the slots as they did in
+        // its verification. Without them (an analysis without OCR) every
+        // region counts as showing its structure; the plan's boxes then
+        // confirm the slots alone.
+        let (structure, on) = match source.structure {
+            Some(log) => {
+                let on = log.at(index);
+                (on, !on.is_empty())
+            }
+            None => (RegionSet::all(), false),
+        };
+        let hud = source.coverage == Coverage::EveryFrame || DictionaryBuilder::wants(index, on);
         let crops = cropper.crops(frame)?;
-        // Without the detectors every region counts as showing its
-        // structure; the plan's boxes confirm the slots.
         let read = pass0
-            .read(&crops, hud, RegionSet::all(), &stopped)
+            .read(&crops, hud, structure, &stopped)
             .map_err(|reason| {
                 AppError::new(ErrorKind::OcrUnavailable, "OCR stopped.").with_detail(reason)
             })?;

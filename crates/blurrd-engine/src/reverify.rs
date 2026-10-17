@@ -29,7 +29,7 @@ use crate::engine::Engine;
 use crate::hud::HudMap;
 use crate::job::{Job, canceled};
 use crate::render::check_media;
-use crate::verify::{self, Context, PixelSetup, Pixels};
+use crate::verify::{self, Context, PixelSetup, Pixels, StructureLog};
 
 /// What to verify again.
 #[derive(Debug, Clone, PartialEq)]
@@ -169,11 +169,14 @@ impl Engine {
         let map = HudMap::new(&project.geometry, info.width, info.height);
         let mut cropper =
             Cropper::new(map, colour, converter.clone(), regions, Some(pass0.reads()));
+        let dir = ProjectDir::new(&config.cache_dir, &project.media.fingerprint);
+        let structure = StructureLog::read(&dir.structure(), pts.len());
         let source = Source {
             input: &req.input,
             decode: &decode,
             pts: &pts,
             ranges: &ranges,
+            structure: structure.as_ref(),
             total,
         };
         let frames = read_ranges(&source, &mut pass0, &mut cropper, job)?;
@@ -259,6 +262,8 @@ struct Source<'a> {
     decode: &'a DecodeOptions,
     pts: &'a blurrd_video::PtsTable,
     ranges: &'a [FrameRange],
+    /// The structure signals of its analysis, when the cache holds them.
+    structure: Option<&'a StructureLog>,
     /// Frames in all ranges.
     total: u32,
 }
@@ -280,11 +285,16 @@ fn read_ranges(
             let Some(frame) = decoder.next_frame()? else {
                 break;
             };
+            let structure = source
+                .structure
+                .map_or(RegionSet::all(), |log| log.at(frame.index()));
             let crops = cropper.crops(frame)?;
-            // Without the detectors every region counts as showing its
-            // structure; the plan's boxes still confirm the slots.
+            // The analysis' structure signals gate the slots as they did in
+            // its verification; without them (an analysis without OCR)
+            // every region counts as on and the plan's boxes confirm the
+            // slots alone.
             let read = pass0
-                .read(&crops, true, RegionSet::all(), &stopped)
+                .read(&crops, true, structure, &stopped)
                 .map_err(|reason| {
                     AppError::new(ErrorKind::OcrUnavailable, "OCR stopped.").with_detail(reason)
                 })?;
