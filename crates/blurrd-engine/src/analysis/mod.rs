@@ -152,20 +152,31 @@ impl Engine {
     ) -> Result<Prepared, AppError> {
         job.stage(Stage::Probe);
         let fingerprint = cache::fingerprint(input)?;
-        let info = blurrd_video::probe(input)?;
+        let header = blurrd_video::probe_header(input)?;
         // The blur scales its blocks with the HUD (with the frame height in
         // every layout); refuse videos whose HUD it cannot scale to before
         // spending an analysis on them.
-        let colour = VideoColour::from_info(&info.color, info.height);
-        let sy = HudGeometry::for_layout(info.width, info.height, HudLayout::Auto).sy;
+        let colour = VideoColour::from_info(&header.color, header.height);
+        let sy = HudGeometry::for_layout(header.width, header.height, HudLayout::Auto).sy;
         if let Err(error) = PixelParams::new(&BlurParams::default(), sy, colour.yuv_colour()) {
             return Err(AppError::new(
                 ErrorKind::UnsupportedMedia,
                 "The video is too small or too large to blur reliably.",
             )
-            .with_detail(format!("{}x{}: {error}", info.width, info.height)));
+            .with_detail(format!("{}x{}: {error}", header.width, header.height)));
         }
-        let calibration = calibrate::calibrate(input, &info, colour, job)?;
+        // The calibration reads its samples while the probe scans the
+        // packets; both come before the analysis can start.
+        let (info, samples) = std::thread::scope(|scope| {
+            let scan = scope.spawn(|| blurrd_video::probe(input));
+            let samples = calibrate::read_samples(input, &header, colour, job);
+            match scan.join() {
+                Ok(info) => (info, samples),
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        });
+        let info = info?;
+        let calibration = calibrate::calibrate(input, &info, colour, samples?, job)?;
         let geometry = calibration.geometry;
         let mut mode = Mode::Tight;
         if let Some(doubt) = calibration.doubt {

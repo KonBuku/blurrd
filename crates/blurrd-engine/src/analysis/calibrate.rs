@@ -7,8 +7,8 @@
 //! black bars), and the crops of every frame depend on it, so the
 //! geometry is decided before the pipeline starts. A few keyframes spread
 //! over the video are decoded on their own (a seek and one decoded frame
-//! each, on a few workers) and read by the detectors'
-//! [`Calibrator`]. HDR video is sampled a second time to measure the
+//! each, on a few workers) and read by the detectors' [`Calibrator`]
+//! while the probe scans the video's packets. HDR video is sampled a second time to measure the
 //! paper white in the calibrated HUD crops.
 //!
 //! The analysis covers a calibration it cannot trust with Safe boxes and a
@@ -25,7 +25,7 @@ use blurrd_detect::killfeed::{BarHues, FEED_ROI};
 use blurrd_detect::screens::Anchor;
 use blurrd_video::{
     DecodeOptions, Decoder, HwDecode, PaperWhite, RgbConverter, RgbImage, VideoColour, VideoError,
-    VideoFrame, YuvRoi,
+    VideoFrame, VideoHeader, YuvRoi,
 };
 
 use crate::hud::{HudMap, rgb_view};
@@ -55,28 +55,43 @@ pub(crate) struct VideoCalibration {
     pub(crate) paper_white: Option<f32>,
 }
 
-/// Calibrates the video `input` described by `info` with colours
-/// `colour`.
+/// The sampled frames of a video read by the calibrator before the probe's
+/// packet scan gave the frame rate: the calibrator numbers the samples,
+/// and [`calibrate`] turns the numbers into frame indices.
+pub(crate) struct Samples {
+    /// The calibration; its segments start at sample numbers.
+    calibration: Calibration,
+    /// The PTS of every sample, by number.
+    pts: Vec<i64>,
+    /// Seconds per PTS tick.
+    tick: f64,
+    /// The sampled times, for the paper white of HDR video.
+    times: Vec<f64>,
+    started: std::time::Instant,
+}
+
+/// Samples the video `input` with stream headers `header` and colours
+/// `colour` and reads the samples with the detectors' [`Calibrator`]. It
+/// needs no frame rate, so it runs while the probe scans the packets.
 ///
 /// # Errors
 ///
 /// [`blurrd_core::ErrorKind::Canceled`] when the job is canceled. A
 /// sample that fails to decode is skipped: the analysis reports the
 /// decoder's errors.
-pub(crate) fn calibrate(
+pub(crate) fn read_samples(
     input: &Path,
-    info: &MediaInfo,
+    header: &VideoHeader,
     colour: VideoColour,
     job: &Job<'_>,
-) -> Result<VideoCalibration, AppError> {
+) -> Result<Samples, AppError> {
     let started = std::time::Instant::now();
-    let times = sample_times(info.duration_s);
-    let mut read = 0u32;
+    let times = sample_times(header.duration_s);
     let reference = RgbConverter::new(colour);
-    let fps = f64::from(info.fps.num) / f64::from(info.fps.den.max(1));
-    let mut calibrator = Calibrator::new(info.width, info.height, HudLayout::Auto);
-    let mut first_pts: Option<i64> = None;
+    let mut calibrator = Calibrator::new(header.width, header.height, HudLayout::Auto);
+    let mut pts_read: Vec<i64> = Vec::with_capacity(times.len());
     let mut last_pts: Option<i64> = None;
+    let mut tick = 0.0;
     sample(
         input,
         &times,
@@ -94,15 +109,53 @@ pub(crate) fn calibrate(
                 return;
             }
             last_pts = Some(pts);
-            read += 1;
-            let first = *first_pts.get_or_insert(pts);
-            let index = ((pts - first) as f64 * seconds_per_tick * fps).round() as u32;
+            tick = seconds_per_tick;
             if let Ok(view) = rgb_view(&image) {
-                calibrator.push(index, &view);
+                let number = u32::try_from(pts_read.len()).unwrap_or(u32::MAX);
+                calibrator.push(number, &view);
+                pts_read.push(pts);
             }
         },
     )?;
-    let calibration = calibrator.finish();
+    Ok(Samples {
+        calibration: calibrator.finish(),
+        pts: pts_read,
+        tick,
+        times,
+        started,
+    })
+}
+
+/// Calibrates the video `input` described by `info` with colours `colour`
+/// from its read `samples`.
+///
+/// # Errors
+///
+/// [`blurrd_core::ErrorKind::Canceled`] when the job is canceled while the
+/// paper white of an HDR video is measured.
+pub(crate) fn calibrate(
+    input: &Path,
+    info: &MediaInfo,
+    colour: VideoColour,
+    samples: Samples,
+    job: &Job<'_>,
+) -> Result<VideoCalibration, AppError> {
+    let Samples {
+        mut calibration,
+        pts,
+        tick,
+        times,
+        started,
+    } = samples;
+    let fps = f64::from(info.fps.num) / f64::from(info.fps.den.max(1));
+    let first = pts.first().copied().unwrap_or(0);
+    for segment in &mut calibration.segments {
+        let at = pts
+            .get(segment.first_frame as usize)
+            .copied()
+            .unwrap_or(first);
+        segment.first_frame = ((at - first) as f64 * tick * fps).round() as u32;
+    }
     let frames = super::expected_frames(info);
     let (segment, mut doubt) = choose(&calibration, info.width, info.height, frames);
     let geometry = segment.geometry.clone();
@@ -112,6 +165,7 @@ pub(crate) fn calibrate(
             geometry.confidence, geometry.layout
         ));
     }
+    let reference = RgbConverter::new(colour);
     let paper_white = if reference.is_tone_mapped() {
         measure_paper_white(input, info, &geometry, &reference, &times, job)?
     } else {
@@ -122,7 +176,7 @@ pub(crate) fn calibrate(
         confidence = geometry.confidence,
         hues = segment.hues.is_some(),
         paper_white,
-        samples = read,
+        samples = pts.len(),
         ms = started.elapsed().as_millis(),
         "calibrated"
     );
