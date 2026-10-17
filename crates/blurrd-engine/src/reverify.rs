@@ -87,7 +87,8 @@ pub struct ReverifySummary {
 impl Engine {
     /// Verifies again the frame ranges of a project that edits touched
     /// (`project.verify.unverified_ranges`; the whole video when the
-    /// project has no current verification and lists no range), adds fix
+    /// project was never verified, or has no current verification and
+    /// lists no range), adds fix
     /// boxes where a name stays readable, and saves the project and the
     /// report in the cache.
     ///
@@ -298,18 +299,23 @@ fn read_ranges(
 }
 
 /// The ranges to check: the project's unverified ranges, merged where
-/// they overlap or touch; the whole video when there are none and the
-/// project has no current verification.
+/// they overlap or touch; the whole video when the project was never
+/// verified (no report covers the frames outside the ranges) or lists no
+/// range and has no current verification.
 fn ranges_to_check(project: &Project) -> Vec<FrameRange> {
-    let mut ranges = project.verify.unverified_ranges.clone();
-    let current =
-        project.verify.plan_revision == project.revision && project.verify.report.is_some();
-    if ranges.is_empty() && !current && project.media.frame_count > 0 {
-        ranges.push(FrameRange {
-            f0: 0,
-            f1: project.media.frame_count - 1,
-        });
-    }
+    let verified = project.verify.report.is_some();
+    let current = verified && project.verify.plan_revision == project.revision;
+    let whole = !verified || (project.verify.unverified_ranges.is_empty() && !current);
+    let mut ranges = if whole {
+        project
+            .media
+            .frame_count
+            .checked_sub(1)
+            .map(|f1| vec![FrameRange { f0: 0, f1 }])
+            .unwrap_or_default()
+    } else {
+        project.verify.unverified_ranges.clone()
+    };
     ranges.sort_by_key(|r| r.f0);
     let mut merged: Vec<FrameRange> = Vec::with_capacity(ranges.len());
     for range in ranges {
@@ -405,6 +411,8 @@ mod tests {
     #[test]
     fn ranges_merge_and_default_to_the_whole_video() {
         let mut project = project(600);
+        project.verify.report = Some(String::from("verify-0.json"));
+        project.revision = 1;
         project.verify.unverified_ranges = vec![
             FrameRange::new(300, 340).unwrap(),
             FrameRange::new(10, 20).unwrap(),
@@ -418,14 +426,24 @@ mod tests {
                 FrameRange::new(300, 360).unwrap()
             ]
         );
-        // Never verified: everything.
+        // Verified at an older revision, no range listed: everything.
         project.verify.unverified_ranges.clear();
         assert_eq!(
             ranges_to_check(&project),
             [FrameRange::new(0, 599).unwrap()]
         );
         // Verified and current: nothing.
-        project.verify.report = Some(String::from("verify-0.json"));
+        project.verify.plan_revision = 1;
         assert_eq!(ranges_to_check(&project), []);
+    }
+
+    #[test]
+    fn a_never_verified_project_is_checked_whole_despite_its_ranges() {
+        let mut project = project(600);
+        project.verify.unverified_ranges = vec![FrameRange::new(10, 20).unwrap()];
+        assert_eq!(
+            ranges_to_check(&project),
+            [FrameRange::new(0, 599).unwrap()]
+        );
     }
 }
