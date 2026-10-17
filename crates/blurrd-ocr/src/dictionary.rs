@@ -277,6 +277,10 @@ impl Whitelist {
         "movespeed",
         "aimdownsights",
         "1stshotspread",
+        "machinegun",
+        "sniperrifle",
+        "shotgun",
+        "sidearm",
         // An empty buy-menu slot (German client).
         "leer",
     ];
@@ -306,9 +310,10 @@ impl Whitelist {
         }
     }
 
-    /// Whether the folded text is a listed word.
+    /// Whether the folded text is a listed word or a distance marker of
+    /// a ping or callout (`28m`).
     pub fn contains(&self, folded: &str) -> bool {
-        self.words.contains(folded)
+        self.words.contains(folded) || is_distance(folded)
     }
 
     /// Whether the folded text is a run of listed words without separators
@@ -341,20 +346,41 @@ impl Whitelist {
 
     /// Whether every space-separated word of `text` is listed (a location
     /// line such as "in B Main" or a title such as "TEAM ACE").
+    ///
+    /// Two neighbouring words may form one listed label ("MACHINE GUN" as
+    /// `machinegun`), and a lone `i`, `l` or `1` between two words is the
+    /// separator bar of a buy-menu label ("ODIN | MACHINE GUN") as OCR
+    /// reads it.
     pub fn covers(&self, text: &str) -> bool {
-        let mut any = false;
-        for word in text.split_whitespace() {
-            let folded = fold(word);
-            if folded.is_empty() {
-                continue;
-            }
-            if !self.contains(&folded) {
+        let words: Vec<String> = text
+            .split_whitespace()
+            .map(fold)
+            .filter(|w| !w.is_empty())
+            .collect();
+        let mut i = 0;
+        while let Some(word) = words.get(i) {
+            let inner = i > 0 && i + 1 < words.len();
+            if self.contains(word) || (inner && matches!(word.as_str(), "i" | "l" | "1")) {
+                i += 1;
+            } else if words
+                .get(i + 1)
+                .is_some_and(|next| self.words.contains(&format!("{word}{next}")))
+            {
+                i += 2;
+            } else {
                 return false;
             }
-            any = true;
         }
-        any
+        !words.is_empty()
     }
+}
+
+/// Whether the folded text is a distance marker: digits followed by `m`
+/// (`28m`), as pings and callouts show them next to the HUD.
+fn is_distance(folded: &str) -> bool {
+    folded
+        .strip_suffix('m')
+        .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// How often and how well a name was read.
@@ -478,6 +504,14 @@ mod tests {
         assert!(!list.contains("run"));
         assert!(list.covers("in B Main"));
         assert!(list.covers("ULTIMATE KDA LOADOUT CREDS PING"));
+        assert!(list.covers("ODIN I MACHINE GUN"));
+        assert!(list.covers("Mid Top 28m"));
+        assert!(list.contains("28m"));
+        assert!(!list.contains("m"));
+        assert!(!list.contains("nova28m"));
+        assert!(!list.covers("I Nova"));
+        assert!(!list.covers("Nova I"));
+        assert!(!list.covers("machine Nova"));
         assert!(!list.covers("in B Main with Nova"));
         assert!(!list.covers("   "));
         assert!(list.segments("inasiteteam"));
