@@ -206,7 +206,7 @@ impl Engine {
             .plan()
             .frame_table(&req.project.detector.regions);
         if let Some(kind) = started {
-            job.started(kind, pts.len());
+            job.started(kind, pts.len(), 1);
         }
         let target = RenderTarget {
             output: &req.output,

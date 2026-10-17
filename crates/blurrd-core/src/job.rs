@@ -126,8 +126,14 @@ pub enum JobEvent {
         job: JobId,
         /// What it does.
         kind: JobKind,
-        /// Frames it will process.
+        /// Frames it will process in each pass.
         total_frames: u32,
+        /// Passes over the video it plans; each one counts its frames
+        /// from 0 again. A run analyses and renders in one pass, or in
+        /// two when the project has edits (the render needs the finished
+        /// tracks). A run whose verification adds fix boxes renders once
+        /// more, in a pass beyond this count.
+        passes: u32,
     },
     /// The job entered a stage.
     Stage {
@@ -135,6 +141,8 @@ pub enum JobEvent {
         job: JobId,
         /// The stage.
         stage: Stage,
+        /// The pass the stage belongs to, from 0.
+        pass: u32,
     },
     /// Progress, at most 20 times per second.
     Progress {
@@ -220,12 +228,13 @@ mod tests {
         let event = JobEvent::Stage {
             job,
             stage: Stage::Detect,
+            pass: 1,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(
             json,
             serde_json::json!({ "type": "Stage", "job": "00000000-0000-0000-0000-000000000007",
-                                "stage": "Detect" })
+                                "stage": "Detect", "pass": 1 })
         );
         assert_eq!(serde_json::from_value::<JobEvent>(json).unwrap().job(), job);
     }

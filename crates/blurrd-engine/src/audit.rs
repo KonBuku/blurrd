@@ -137,7 +137,7 @@ impl Engine {
         {
             return Err(mismatch("the output does not have the source's frames"));
         }
-        job.started(JobKind::Audit, pts.len());
+        job.started(JobKind::Audit, pts.len(), 1);
         let config = self.config();
         let setup = config.ocr.as_ref().ok_or_else(|| {
             AppError::new(

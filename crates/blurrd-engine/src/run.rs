@@ -365,7 +365,7 @@ impl Engine {
         job: &Job<'_>,
     ) -> Result<RunReport, AppError> {
         let expected = expected_frames(&prepared.info);
-        job.started(JobKind::Run, expected);
+        job.started(JobKind::Run, expected, 2);
         let analysis = self.run_analysis(analyze, prepared, job, Some(expected), &mut |_, _| {})?;
         let mut render = RenderRequest::new(
             req.job,
@@ -375,6 +375,7 @@ impl Engine {
         );
         render.export = req.export.clone();
         render.accept_unverified = req.accept_unverified;
+        job.next_pass();
         let rendered = self.render_project(&render, job, None, None)?;
         Ok(RunReport {
             analysis: analysis.report,
@@ -404,6 +405,7 @@ impl Engine {
             .iter()
             .any(|t| t.source == TrackSource::OcrFix);
         if fixed {
+            job.next_pass();
             let rerendered = self.render_fixed(req, project, &rendered.output, streamed, job);
             // The streamed output goes unless the new render replaced it
             // under the same name.
@@ -487,7 +489,7 @@ impl Engine {
         job: &Job<'_>,
     ) -> Result<(RenderReport, Arc<PtsTable>), AppError> {
         let pts = Arc::new(blurrd_video::pts_table(input)?);
-        job.started(JobKind::Run, pts.len());
+        job.started(JobKind::Run, pts.len(), 1);
         let render = self.prepare_render(target, info, Arc::clone(&pts), probe, job)?;
         let source = StoreSource {
             store,

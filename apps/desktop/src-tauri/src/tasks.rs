@@ -128,6 +128,7 @@ pub(crate) fn reverify(project: Arc<OpenProject>) -> Work {
             job,
             kind: JobKind::ReverifyRanges,
             total_frames: frames,
+            passes: 1,
         });
         sink.emit(JobEvent::Warning {
             job,

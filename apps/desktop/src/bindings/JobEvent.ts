@@ -21,9 +21,17 @@ job: JobId,
  */
 kind: JobKind, 
 /**
- * Frames it will process.
+ * Frames it will process in each pass.
  */
-total_frames: number, } | { "type": "Stage", 
+total_frames: number, 
+/**
+ * Passes over the video it plans; each one counts its frames
+ * from 0 again. A run analyses and renders in one pass, or in
+ * two when the project has edits (the render needs the finished
+ * tracks). A run whose verification adds fix boxes renders once
+ * more, in a pass beyond this count.
+ */
+passes: number, } | { "type": "Stage", 
 /**
  * The job.
  */
@@ -31,7 +39,11 @@ job: JobId,
 /**
  * The stage.
  */
-stage: Stage, } | { "type": "Progress", 
+stage: Stage, 
+/**
+ * The pass the stage belongs to, from 0.
+ */
+pass: number, } | { "type": "Progress", 
 /**
  * The job.
  */

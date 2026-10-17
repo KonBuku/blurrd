@@ -9,9 +9,10 @@
 //! engine's events and keeps `Progress` ordered and at most 20 per second
 //! whatever thread the engine reports from: a progress event is dropped
 //! when its frame is behind the last one sent in the same pass, or when
-//! one was sent less than 50 ms ago (the last frame always passes). A
-//! `Started` or `Stage` event begins a new pass (a run analyses and then
-//! renders under one job), whose frames start again from 0. The sink
+//! one was sent less than 50 ms ago (the last frame always passes).
+//! `Started`, and a `Stage` of a pass the engine has not reported before
+//! (a run of an edited file analyses and then renders under one job),
+//! begin a pass whose frames start again from 0. The sink
 //! holds its lock while it sends, so the channel's order is the order of
 //! the checks.
 //!
@@ -53,6 +54,7 @@ impl EventOut for Channel<JobEvent> {
 /// Decides which events reach the channel.
 #[derive(Debug, Default)]
 struct ProgressFilter {
+    pass: u32,
     last_frame: Option<u32>,
     last_sent: Option<Instant>,
 }
@@ -65,8 +67,17 @@ impl ProgressFilter {
             JobEvent::Progress { frame, total, .. } => (frame, total),
             // A new pass of the job (a run analyses, then renders the
             // project): its progress starts again from frame 0.
-            JobEvent::Started { .. } | JobEvent::Stage { .. } => {
+            JobEvent::Started { .. } => {
                 *self = Self::default();
+                return true;
+            }
+            JobEvent::Stage { pass, .. } => {
+                if pass != self.pass {
+                    *self = Self {
+                        pass,
+                        ..Self::default()
+                    };
+                }
                 return true;
             }
             _ => return true,
@@ -443,13 +454,17 @@ pub(crate) mod tests {
     fn a_new_pass_starts_its_progress_again() {
         let mut filter = ProgressFilter::default();
         let t0 = Instant::now();
-        let stage = JobEvent::Stage {
+        let stage = |stage, pass| JobEvent::Stage {
             job: JobId(Uuid::nil()),
-            stage: Stage::BlurEncode,
+            stage,
+            pass,
         };
         assert!(filter.admit(&progress(100), t0));
+        // Another stage of the same pass keeps its progress.
+        assert!(filter.admit(&stage(Stage::Verify, 0), t0));
+        assert!(!filter.admit(&progress(50), t0 + PROGRESS_INTERVAL));
         // The render's first frames right after the analysis's last.
-        assert!(filter.admit(&stage, t0));
+        assert!(filter.admit(&stage(Stage::BlurEncode, 1), t0));
         assert!(filter.admit(&progress(0), t0));
         assert!(!filter.admit(&progress(1), t0 + Duration::from_millis(10)));
         assert!(filter.admit(&progress(30), t0 + PROGRESS_INTERVAL));
@@ -466,10 +481,11 @@ pub(crate) mod tests {
         let jobs = Jobs::start().unwrap();
         let recorder = Arc::new(Recorder::default());
         let id = job();
-        let pass = |sink: &super::JobSink, stage| {
+        let pass = |sink: &super::JobSink, stage, pass| {
             sink.emit(JobEvent::Stage {
                 job: sink.job(),
                 stage,
+                pass,
             });
             for frame in 0..200 {
                 sink.emit(JobEvent::Progress {
@@ -490,9 +506,10 @@ pub(crate) mod tests {
                     job: sink.job(),
                     kind: JobKind::Run,
                     total_frames: 200,
+                    passes: 2,
                 });
-                pass(sink, Stage::Detect);
-                pass(sink, Stage::BlurEncode);
+                pass(sink, Stage::Detect, 0);
+                pass(sink, Stage::BlurEncode, 1);
                 sink.emit(finished(sink.job()));
             }),
         );
@@ -583,6 +600,7 @@ pub(crate) mod tests {
                     job: sink.job(),
                     kind,
                     total_frames: 1,
+                    passes: 1,
                 });
                 sink.emit(finished(sink.job()));
             })

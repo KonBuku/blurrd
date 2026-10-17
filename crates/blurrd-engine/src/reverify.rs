@@ -134,7 +134,7 @@ impl Engine {
         check_media(&project, &info, &pts)?;
         let ranges = ranges_to_check(&project);
         let total: u32 = ranges.iter().map(|r| r.f1 - r.f0 + 1).sum();
-        job.started(JobKind::ReverifyRanges, total);
+        job.started(JobKind::ReverifyRanges, total, 1);
         let config = self.config();
         let setup = config.ocr.as_ref().ok_or_else(|| {
             AppError::new(

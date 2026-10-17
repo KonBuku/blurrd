@@ -14,20 +14,6 @@ import { JOB_STAGES, stepsOf } from "./job-stages";
 /** What the user asked for. */
 export type Operation = "analyze" | "export";
 
-/**
- * How the frames of the running job count. A run job passes over the
- * video once (analysis and render together) or twice (an analysis, then
- * the render of a project with edits), counting frames from 0 each time;
- * which one is known only when the render starts. Until then its frames
- * fill the first half of the job (`first`); a render that starts after
- * that pass fills the second half (`second`), otherwise the frames count
- * for the whole job (`single`), as for every other kind of job.
- */
-export type Pass = "single" | "first" | "second";
-
-/** Stages of the render, which a run job's second pass reports. */
-const RENDER_STAGES: ReadonlySet<Stage> = new Set(["BlurEncode", "Mux"]);
-
 /** Where an operation stands. */
 export interface OperationProgress {
   readonly operation: Operation;
@@ -44,8 +30,14 @@ export interface OperationProgress {
   readonly total: number;
   readonly fps: number | null;
   readonly etaMs: number | null;
-  /** How the running job's frames count. */
-  readonly pass: Pass;
+  /**
+   * The pass over the video the running job is in, from 0, and the
+   * passes it planned (`Started`). Each pass counts its frames from 0
+   * and fills an equal share of the job; a run of an edited file
+   * analyses, then renders (two passes).
+   */
+  readonly pass: number;
+  readonly passes: number;
   /** Completion of the running job shown so far (it never goes back). */
   readonly jobShown: number;
   /** Warnings reported so far, newest last. */
@@ -67,7 +59,8 @@ export function waitingOperation(
     total: 0,
     fps: null,
     etaMs: null,
-    pass: "single",
+    pass: 0,
+    passes: 1,
     jobShown: 0,
     warnings: [],
   };
@@ -83,7 +76,8 @@ export function startStep(progress: OperationProgress, step: number): OperationP
     total: 0,
     fps: null,
     etaMs: null,
-    pass: "single",
+    pass: 0,
+    passes: 1,
     jobShown: 0,
   };
 }
@@ -103,7 +97,7 @@ export function applyJobEvent(progress: OperationProgress, event: JobEvent): Ope
       return {
         ...startStep({ ...progress, plan }, step),
         total: event.total_frames,
-        pass: event.kind === "Run" ? "first" : "single",
+        passes: Math.max(event.passes, 1),
       };
     }
     case "Stage": {
@@ -112,15 +106,14 @@ export function applyJobEvent(progress: OperationProgress, event: JobEvent): Ope
         planned.has(event.stage) || progress.extra.includes(event.stage)
           ? progress.extra
           : [...progress.extra, event.stage];
-      const pass = passAt(progress, event.stage);
-      // The second pass counts its frames from 0 again.
-      const restart = pass === "second" && progress.pass !== "second";
+      // A new pass counts its frames from 0 again.
+      const restart = event.pass > progress.pass;
       return {
         ...progress,
         step,
         stage: event.stage,
         extra,
-        pass,
+        pass: Math.max(event.pass, progress.pass),
         ...(restart ? { frame: 0, fps: null, etaMs: null } : {}),
       };
     }
@@ -143,26 +136,15 @@ export function applyJobEvent(progress: OperationProgress, event: JobEvent): Ope
 }
 
 /**
- * The pass of a run job once it reports `stage`: a render that starts
- * after at least half of the frames were analysed is the second pass.
+ * Completion of the running job by its frames; `null` while unknown. A
+ * pass beyond the planned ones (a run rendering again after its
+ * verification added fix boxes) shares the job with the passes before
+ * it; `jobShown` keeps the bar from going back.
  */
-function passAt(progress: OperationProgress, stage: Stage): Pass {
-  if (progress.pass !== "first" || !RENDER_STAGES.has(stage)) return progress.pass;
-  return progress.total > 0 && progress.frame * 2 >= progress.total ? "second" : "single";
-}
-
-/** Completion of the running job by its frames; `null` while unknown. */
 function jobFraction(progress: OperationProgress): number | null {
   if (progress.total <= 0) return null;
   const frames = Math.min(Math.max(progress.frame / progress.total, 0), 1);
-  switch (progress.pass) {
-    case "first":
-      return frames / 2;
-    case "second":
-      return 0.5 + frames / 2;
-    default:
-      return frames;
-  }
+  return (progress.pass + frames) / Math.max(progress.passes, progress.pass + 1);
 }
 
 /** The steps of the processing card's stepper. */

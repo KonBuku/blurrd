@@ -357,7 +357,7 @@ impl Engine {
     fn analyze_job(&self, req: &AnalyzeRequest, job: &Job<'_>) -> Result<Analysis, AppError> {
         let prepared = self.prepare_analysis(req, false, job)?;
         let expected = expected_frames(&prepared.info);
-        job.started(JobKind::Analyze, expected);
+        job.started(JobKind::Analyze, expected, 1);
         self.run_analysis(req, prepared, job, Some(expected), &mut |_, _| {})
     }
 

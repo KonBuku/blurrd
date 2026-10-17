@@ -154,7 +154,7 @@ export class MockJobs {
     this.failNext = null;
     // The command answers first, like the real backend.
     await this.pause(0);
-    state.send({ type: "Started", job, kind, total_frames: totalFrames });
+    state.send({ type: "Started", job, kind, total_frames: totalFrames, passes: 1 });
     const stages = JOB_STAGES[kind];
     const steps = Math.max(
       stages.length * STEPS_PER_STAGE,
@@ -172,7 +172,7 @@ export class MockJobs {
       const stage = stages[at];
       if (stage !== undefined && at !== shown) {
         shown = at;
-        state.send({ type: "Stage", job, stage });
+        state.send({ type: "Stage", job, stage, pass: 0 });
       }
       const frame = Math.round((totalFrames * step) / steps);
       const eta_ms = Math.round(((totalFrames - frame) / MOCK_JOB_FPS) * 1000);

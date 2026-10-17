@@ -29,6 +29,8 @@ pub(crate) struct Job<'a> {
     started: Instant,
     last_progress: Mutex<Option<Instant>>,
     warnings: AtomicU32,
+    /// The current pass over the video, from 0.
+    pass: AtomicU32,
     /// Keeps the machine awake and the process unthrottled while the job
     /// runs (plan 7.4).
     _power: JobPower,
@@ -49,6 +51,7 @@ impl<'a> Job<'a> {
             started: Instant::now(),
             last_progress: Mutex::new(None),
             warnings: AtomicU32::new(0),
+            pass: AtomicU32::new(0),
             _power: JobPower::begin(),
         }
     }
@@ -68,20 +71,29 @@ impl<'a> Job<'a> {
         self.warnings.load(Ordering::Relaxed)
     }
 
-    /// Emits `Started`.
-    pub(crate) fn started(&self, kind: JobKind, total_frames: u32) {
+    /// Emits `Started` for a job of `passes` passes over `total_frames`
+    /// frames each.
+    pub(crate) fn started(&self, kind: JobKind, total_frames: u32, passes: u32) {
         self.sink.emit(JobEvent::Started {
             job: self.id,
             kind,
             total_frames,
+            passes,
         });
     }
 
-    /// Emits `Stage`.
+    /// Begins the next pass over the video: the stages from now on carry
+    /// its index and its progress counts from frame 0.
+    pub(crate) fn next_pass(&self) {
+        self.pass.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Emits `Stage` in the current pass.
     pub(crate) fn stage(&self, stage: Stage) {
         self.sink.emit(JobEvent::Stage {
             job: self.id,
             stage,
+            pass: self.pass.load(Ordering::Relaxed),
         });
     }
 

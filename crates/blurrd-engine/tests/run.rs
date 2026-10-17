@@ -89,9 +89,16 @@ fn a_streamed_run_equals_analysis_then_render() {
         e,
         JobEvent::Started {
             total_frames: 240,
+            passes: 1,
             ..
         }
     )));
+    // One pass: the render's stages belong to the analysis' pass.
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e, JobEvent::Stage { pass, .. } if *pass != 0))
+    );
     assert!(matches!(events.last(), Some(JobEvent::Finished { .. })));
 
     let two_pass = engine(work.path("cache-two-pass"));
@@ -150,14 +157,38 @@ fn cached_overrides_make_the_run_analyse_first() {
     });
     cache::write_project(&project, &analysis.report.project_file).unwrap();
 
+    let events = sink();
     let report = engine
         .run(
             &run_request(&clip, work.path("run.mkv")),
-            &sink(),
+            &events,
             &CancellationToken::new(),
         )
         .unwrap();
     assert!(!report.streamed);
+    // Two passes, announced up front: the analysis' stages in pass 0,
+    // the render's in pass 1.
+    let events = events.events.into_inner().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, JobEvent::Started { passes: 2, .. }))
+    );
+    let stages: Vec<(blurrd_core::Stage, u32)> = events
+        .iter()
+        .filter_map(|e| match *e {
+            JobEvent::Stage { stage, pass, .. } => Some((stage, pass)),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        stages.contains(&(blurrd_core::Stage::Detect, 0)),
+        "{stages:?}"
+    );
+    assert!(
+        stages.contains(&(blurrd_core::Stage::BlurEncode, 1)),
+        "{stages:?}"
+    );
     // The manual box is on every frame.
     assert_eq!(report.render.blurred_frames, 90);
     let saved = cache::read_project(&report.analysis.project_file).unwrap();
