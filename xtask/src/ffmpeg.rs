@@ -316,7 +316,7 @@ fn unpack(archive: &Path, dest: &Path) -> Result<()> {
         // `enclosed_name` rejects absolute paths and `..` components.
         let name = entry
             .enclosed_name()
-            .with_context(|| format!("unsafe path {}", entry.name()))?;
+            .with_context(|| format!("unsafe path {}", entry.name().unwrap_or_default()))?;
         // Strip the archive's top-level folder (`ffmpeg-<version>-r<N>-...`).
         let relative: PathBuf = name.components().skip(1).collect();
         if relative.as_os_str().is_empty() {
