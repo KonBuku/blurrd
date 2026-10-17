@@ -97,11 +97,17 @@ export function BlurCanvas({ video, controller, data, style, onUnavailable }: Bl
     paint(renderer, frame, data, mode, split, patchesFor(frame, exactKey, exactOn, exact));
   });
 
+  // Builds the GPU programs before the first frame needs them.
+  const warmUp = useEffectEvent((renderer: BlurRenderer) => {
+    if (data.params) renderer.warmUp(data.params, data.colour);
+  });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     try {
       rendererRef.current = new BlurRenderer(canvas);
+      warmUp(rendererRef.current);
     } catch (error) {
       if (!(error instanceof WebGlUnavailableError)) throw error;
       logWarning("preview", error);

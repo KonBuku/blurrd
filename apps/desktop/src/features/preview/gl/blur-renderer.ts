@@ -13,7 +13,13 @@
  * `CpuBlur` (docs/development.md, "Preview blur parity").
  */
 import type { RectI } from "@/bindings/RectI";
-import type { ColourModel, Fill, PixelParams, PreparedBox } from "@/lib/blur-geometry";
+import {
+  prepareBoxes,
+  type ColourModel,
+  type Fill,
+  type PixelParams,
+  type PreparedBox,
+} from "@/lib/blur-geometry";
 
 import { BoxGeometryCache, type GridSize, type PackedBox } from "./box-geometry";
 import { GlKit, WebGlUnavailableError, type Program, type Target } from "./gl-kit";
@@ -37,9 +43,12 @@ export type FrameSource = HTMLVideoElement | ImageBitmap | ImageData | HTMLCanva
 
 /** One decoded backend patch (Exact) and where it goes, in source pixels. */
 export interface Patch {
-  readonly image: ImageBitmap;
+  readonly image: ImageBitmap | ImageData;
   readonly rect: RectI;
 }
+
+/** Size of the blank frame `warmUp` draws. */
+const WARM_UP_SIZE = [256, 128] as const;
 
 const FILL_CODE: Readonly<Record<Fill["kind"], number>> = {
   smooth: 0,
@@ -175,6 +184,31 @@ export class BlurRenderer {
       gl.uniform1f(program.uniform("u_split"), split);
       gl.uniform1i(program.uniform("u_height"), this.height);
     });
+  }
+
+  /**
+   * Runs every program once on a small blank frame with `params` and
+   * clears the canvas to black again (its look before the first frame).
+   * A WebGL implementation may build a program's GPU executable at its
+   * first draw (SwiftShader does: the first 1080p frame took 119-125 ms
+   * without this and 48-50 ms with it); this moves that work to mount.
+   */
+  warmUp(params: PixelParams, colour: ColourModel): void {
+    const [width, height] = WARM_UP_SIZE;
+    const blank = new ImageData(width, height);
+    const boxes = prepareBoxes(
+      [{ rect: [32, 32, 224, 96], seed: 1, gridOrigin: [32, 32], blockScale: 1 }],
+      width,
+      height,
+      params,
+    );
+    this.upload(blank, width, height);
+    this.blur(boxes, params, colour, [{ image: blank, rect: [0, 0, 16, 16] }]);
+    this.present("split", width / 2);
+    const { gl } = this;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
   }
 
   /** Reads the output frame (top row first, RGBA), for tests and checks. */
