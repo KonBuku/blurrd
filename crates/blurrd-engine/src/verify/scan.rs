@@ -164,6 +164,15 @@ pub(crate) struct Scan {
     pub(crate) out_of_scope: Vec<Leak>,
 }
 
+/// Which name parts a scan lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Select {
+    /// Parts the boxes do not cover (the verification).
+    Exposed,
+    /// Every part (the audit of an output).
+    All,
+}
+
 /// Where the names of one video can be, with the plan's boxes.
 pub(crate) struct Places<'a> {
     /// The plan's boxes per frame.
@@ -266,12 +275,13 @@ pub(crate) fn exposed(part: RectI, boxes: &[BlurBox], aspect: f32) -> bool {
     false
 }
 
-/// Scans the frames of `ctx.log` for which `inside` holds for exposed
-/// name parts, with the boxes and slots of `places`.
+/// Scans the frames of `ctx.log` for which `inside` holds for the name
+/// parts `select` picks, with the boxes and slots of `places`.
 pub(crate) fn scan(
     ctx: &Context<'_>,
     places: &Places<'_>,
     matcher: &LeakMatcher<'_>,
+    select: Select,
     inside: &dyn Fn(u32) -> bool,
 ) -> Scan {
     let aspect = ctx.geometry.sx / ctx.geometry.sy;
@@ -309,7 +319,11 @@ pub(crate) fn scan(
                         _ => continue,
                     },
                 };
-                if ctx.regions.contains(region) && exposed(part.rect, boxes, aspect) {
+                let picked = match select {
+                    Select::Exposed => exposed(part.rect, boxes, aspect),
+                    Select::All => true,
+                };
+                if ctx.regions.contains(region) && picked {
                     runs.add(
                         region,
                         &part.folded,

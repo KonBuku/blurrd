@@ -24,6 +24,9 @@
 //!   render.
 //! - [`Engine::reverify_ranges`]: the verification of the frame ranges
 //!   edits touched, after the analysis.
+//! - [`Engine::audit`]: OCR over a rendered output, as an end-to-end
+//!   check of what the encoder wrote; an output with a readable name is
+//!   renamed `*_UNVERIFIED`.
 //! - [`dictionary`]: pass 0 of the verification, the in-memory name
 //!   dictionary built by OCR over the protected zones of the source.
 //! - The verification itself: after the detectors, the analysis reads
@@ -41,6 +44,7 @@
 )]
 
 mod analysis;
+mod audit;
 pub mod cache;
 pub mod dictionary;
 mod engine;
@@ -55,6 +59,7 @@ mod slots;
 mod verify;
 
 pub use analysis::{Analysis, AnalyzeReport, AnalyzeRequest, LOOKAHEAD_MAX};
+pub use audit::{AuditReport, AuditRequest};
 pub use dictionary::{
     DictionaryBuilder, NamePart, Pass0Stats, ProtectedZone, SourceLine, ZoneKind, full_frame_zone,
     protected_zones, screen_zones,

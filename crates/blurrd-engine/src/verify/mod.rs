@@ -55,7 +55,7 @@ use blurrd_core::{
 use blurrd_ocr::{LeakMatcher, NameDictionary, NameMatch, Whitelist};
 
 pub(crate) use self::pixels::{PixelSetup, Pixels};
-use self::scan::Run;
+use self::scan::{Run, Select};
 use crate::cache;
 use crate::dictionary::{DictionaryBuilder, SourceLine, ZoneKind};
 use crate::job::{Job, internal};
@@ -214,7 +214,7 @@ pub(crate) fn verify(
     let checks = Checks::new(ctx, plan);
     let matcher = LeakMatcher::new(&checks.dictionary, ctx.whitelist);
     let inside = |f: u32| frames.is_none_or(|ranges| ranges.iter().any(|r| r.contains(f)));
-    let scan = checks.scan(ctx, &matcher, &inside);
+    let scan = checks.scan(ctx, &matcher, Select::Exposed, &inside);
     let mut plan = plan.clone();
     let mut next_id = plan.tracks.iter().map(|t| t.id.0).max().unwrap_or(0) + 1;
     let mut fixes = Vec::new();
@@ -364,6 +364,44 @@ pub(crate) fn plausible_name(folded: &str) -> bool {
     folded.chars().count() >= 3 && folded.chars().any(char::is_alphabetic)
 }
 
+/// Reads the output's pixels of every name part of the frames of
+/// `ctx.log` with `pixels` (which reads a rendered output: no blur is
+/// added) and lists every part still readable as an open leak, without
+/// fixing anything: the audit of an output (plan 7.2 step 8). Emits a
+/// `LeakFound` event per leak.
+///
+/// # Errors
+///
+/// Decoding and OCR errors; a cancellation of `job`.
+pub(crate) fn audit(
+    ctx: &Context<'_>,
+    plan: &BlurPlan,
+    pixels: &mut Pixels<'_>,
+    job: &Job<'_>,
+) -> Result<Outcome, AppError> {
+    let checks = Checks::new(ctx, plan);
+    let matcher = LeakMatcher::new(&checks.dictionary, ctx.whitelist);
+    let scan = checks.scan(ctx, &matcher, Select::All, &|_| true);
+    let mut leaks = Vec::new();
+    for run in &scan.runs {
+        if job.is_canceled() {
+            return Err(crate::job::canceled());
+        }
+        if let Some(found) = read_run(run, plan, pixels, &matcher)? {
+            job.leak(run.first(), run.region, LeakStatus::Open);
+            leaks.push(leak(run, &found, LeakStatus::Open));
+        }
+    }
+    leaks.extend(scan.out_of_scope);
+    leaks.sort_by_key(|l| (l.frame_range.f0, l.frame_range.f1));
+    Ok(Outcome {
+        fixes: Vec::new(),
+        per_region: positive_control(ctx, plan, &|_| true),
+        leaks,
+        frames_checked: ctx.log.iter().filter(|(_, l)| l.hud).count() as u32,
+    })
+}
+
 /// What the checks of one plan over one line log share.
 struct Checks {
     table: FrameBoxTable,
@@ -392,18 +430,20 @@ impl Checks {
         }
     }
 
-    /// The exposed name parts on the frames `inside` holds for, in runs,
-    /// and the out-of-scope names.
+    /// The name parts `select` picks on the frames `inside` holds for,
+    /// in runs, and the out-of-scope names.
     fn scan(
         &self,
         ctx: &Context<'_>,
         matcher: &LeakMatcher<'_>,
+        select: Select,
         inside: &dyn Fn(u32) -> bool,
     ) -> scan::Scan {
         scan::scan(
             ctx,
             &scan::Places::new(ctx, self.slots.clone(), &self.table, &self.presence),
             matcher,
+            select,
             inside,
         )
     }

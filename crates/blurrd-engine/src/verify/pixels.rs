@@ -1,10 +1,11 @@
-//! The blurred pixels of a name part, made as the render makes them, and
-//! their read.
+//! The blurred pixels of a name part, made as the render makes them (or
+//! read from a rendered output), and their read.
 //!
 //! The blur writes only inside its padded boxes and reads only the source
 //! pixels there (the locality guarantee of `blurrd-blur`), so blurring a
 //! crop that holds every padded box touching a part gives exactly the
-//! output's pixels of that part, minus encoder loss.
+//! output's pixels of that part, minus encoder loss. The audit reads the
+//! rendered output itself, with the encoder's loss.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -29,7 +30,7 @@ const SEEKER_CACHE_BYTES: usize = 96 << 20;
 pub(crate) struct Pixels<'a> {
     seeker: FrameSeeker,
     ocr: &'a mut OcrEngine,
-    params: PixelParams,
+    blur: Option<PixelParams>,
     converter: RgbConverter,
     regions: RegionSet,
     /// Natural width over natural height of one source pixel of the HUD.
@@ -53,8 +54,9 @@ impl std::fmt::Debug for Pixels<'_> {
 pub(crate) struct PixelSetup {
     /// How the video decodes.
     pub(crate) decode: DecodeOptions,
-    /// Its blur parameters.
-    pub(crate) params: PixelParams,
+    /// The blur parameters to blur the source with; `None` for a rendered
+    /// output, whose pixels are read as they are.
+    pub(crate) blur: Option<PixelParams>,
     /// Its RGB conversion (the one pass 0 read the source with).
     pub(crate) converter: RgbConverter,
     /// The regions that are blurred.
@@ -89,7 +91,7 @@ impl PixelSetup {
         })?;
         Ok(Self {
             decode,
-            params,
+            blur: Some(params),
             converter,
             regions,
             pixel_aspect: geometry.sy / geometry.sx,
@@ -117,7 +119,7 @@ impl<'a> Pixels<'a> {
         Ok(Self {
             seeker: FrameSeeker::open(input, pts, options)?,
             ocr,
-            params: setup.params,
+            blur: setup.blur,
             converter: setup.converter,
             regions: setup.regions,
             pixel_aspect: setup.pixel_aspect,
@@ -154,13 +156,10 @@ impl<'a> Pixels<'a> {
             x1: exposure.part.x1,
             y1: exposure.line.y1,
         };
-        prepare_boxes(
-            boxes,
-            self.size.0,
-            self.size.1,
-            &self.params,
-            &mut self.prepared,
-        );
+        self.prepared.clear();
+        if let Some(params) = &self.blur {
+            prepare_boxes(boxes, self.size.0, self.size.1, params, &mut self.prepared);
+        }
         let view = covering_view(crop, &self.prepared, self.size);
         frame.roi_yuv(view, &mut self.roi)?;
         let copied = self
@@ -169,14 +168,9 @@ impl<'a> Pixels<'a> {
             .ok_or_else(|| internal("the frame copy for the verification is empty"))?;
         self.prepared
             .retain(|b| b.padded().intersection(&copied) == Some(b.padded()));
-        if let Some(mut planes) = self.roi.as_frame_mut() {
+        if let (Some(params), Some(mut planes)) = (&self.blur, self.roi.as_frame_mut()) {
             CpuBlur
-                .blur(
-                    &mut planes,
-                    (copied.x0, copied.y0),
-                    &self.prepared,
-                    &self.params,
-                )
+                .blur(&mut planes, (copied.x0, copied.y0), &self.prepared, params)
                 .map_err(|e| internal(format!("verification blur: {e}")))?;
         }
         self.converter.convert(&self.roi, &mut self.rgb)?;
