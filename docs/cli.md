@@ -139,8 +139,9 @@ does (one frame in six, or every frame with `--every-frame`), then the
 output's pixels of every name part found there, not only the parts the
 boxes leave open, and lists every name that is still readable. An output
 with a readable name is renamed `<name>_UNVERIFIED.<ext>` and the exit code
-is 3. The report, `audit-<revision>.json` in the cache, carries the
-output's SHA-256.
+is 3. Items that cannot be read with confidence make the result
+`Unverified` but keep the name and exit code 0. The report,
+`audit-<revision>.json` in the cache, carries the output's SHA-256.
 
 | Option              | Meaning                                   |
 | ------------------- | ----------------------------------------- |

@@ -57,8 +57,10 @@ pub(crate) fn audit(
                 },
                 &summary,
             );
+            // Exit code 3 only for a readable name; unverifiable items
+            // alone leave the output's name and the exit code as they are.
             Outcome::Done {
-                unverified: audit.report.summary.state != VerifyState::Clean,
+                unverified: audit.report.summary.state == VerifyState::LeaksRemain,
             }
         }
         Err(error) => Outcome::from_error(&error),
