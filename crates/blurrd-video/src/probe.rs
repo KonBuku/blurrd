@@ -56,11 +56,7 @@ pub fn probe(path: &Path) -> Result<MediaInfo, VideoError> {
         false
     };
 
-    let duration_s = if input.duration() > 0 {
-        input.duration() as f64 / f64::from(ffi::AV_TIME_BASE)
-    } else {
-        streams.duration_s
-    };
+    let duration_s = duration_s(&input, &streams);
     let bitrate = u64::try_from(input.bit_rate()).ok().filter(|&b| b > 0);
 
     Ok(MediaInfo {
@@ -93,6 +89,52 @@ pub fn probe(path: &Path) -> Result<MediaInfo, VideoError> {
         has_subtitles: streams.has_subtitles,
         is_vfr: scan.variable_rate,
     })
+}
+
+/// What the stream headers of a video tell: picture size, colour tags and
+/// duration, as [`probe()`] reports them.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct VideoHeader {
+    /// Picture width in pixels.
+    pub width: u32,
+    /// Picture height in pixels.
+    pub height: u32,
+    /// Duration in seconds (0 when the container does not tell).
+    pub duration_s: f64,
+    /// Colour tags.
+    pub color: blurrd_core::ColorInfo,
+}
+
+/// Reads the stream headers of a video without the packet scan of
+/// [`probe()`], which takes most of a probe's time: work that needs only
+/// the picture size, the colours and the duration can start while the
+/// scan runs.
+///
+/// # Errors
+///
+/// As [`probe()`].
+pub fn probe_header(path: &Path) -> Result<VideoHeader, VideoError> {
+    crate::init()?;
+    let input = input::open(path)?;
+    let video = input::video_stream(&input)?;
+    let streams = describe_streams(&input, video)?;
+    Ok(VideoHeader {
+        width: streams.width,
+        height: streams.height,
+        duration_s: duration_s(&input, &streams),
+        color: streams.color,
+    })
+}
+
+/// The duration of `input` in seconds: the container's, else the video
+/// stream's.
+fn duration_s(input: &format::context::Input, streams: &Streams) -> f64 {
+    if input.duration() > 0 {
+        input.duration() as f64 / f64::from(ffi::AV_TIME_BASE)
+    } else {
+        streams.duration_s
+    }
 }
 
 /// The PTS table of a video as its container lists it: the presentation

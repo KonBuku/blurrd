@@ -11,7 +11,8 @@
 //!   check). Call it before anything else.
 //! - [`probe()`]: everything blurrd needs to know about an input
 //!   ([`blurrd_core::MediaInfo`]): streams, colour tags, HDR, B-frames, edit
-//!   lists and the keyframes as presentation frame indices.
+//!   lists and the keyframes as presentation frame indices;
+//!   [`probe_header`] reads only the stream headers.
 //! - [`Decoder`]: decodes the video stream in presentation order. Every
 //!   [`VideoFrame`] carries its presentation index and PTS.
 //! - [`VideoFrame::roi_yuv`] and [`RgbConverter`]: even-aligned HUD crops
@@ -85,7 +86,7 @@ pub use encode::{
     EncodeOptions, EncodedPacket, EncoderFallback, EncoderInput, VideoEncoder, probe_encoders,
 };
 pub use error::VideoError;
-pub use probe::{probe, pts_table};
+pub use probe::{VideoHeader, probe, probe_header, pts_table};
 pub use proxy::{PROXY_HEIGHT, ProxyWriter};
 pub use pts::PtsTable;
 pub use rgb::{PaperWhite, REFERENCE_WHITE_NITS, RgbConverter, RgbImage};
