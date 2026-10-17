@@ -550,6 +550,19 @@ result lies outside the RGB gamut and the browser's RGB input was already
 clipped); pixels outside the boxes are identical. The test skips without
 reference frames unless `BLURRD_REQUIRE_BLUR_REFERENCE` is set (CI).
 
+On real footage the difference is larger. Measured against the engine
+itself (the CLI's lossless FFV1 render of a 16 s 1080p60 recording with
+kill feed, banner and chat boxes; 12 frames with 2 to 5 boxes, 213,108
+values) in headless Edge 155, the engine of WebView2, with ANGLE on
+Direct3D 11 and on SwiftShader alike, two independent measurements:
+mean 0.51 to 0.64 (at most 0.93 per frame), 99th percentile 3 to 4 (at
+most 8 per frame), maximum 11 to 19; pixels outside the boxes
+identical. In the same setup, 20 seeded random seeks
+on that recording (hardware and software decoding) presented frame N
+every time: the shown number, the frame of `requestVideoFrameCallback`
+and the picture (closest to the engine's decoded frame N, not N ± 1)
+agreed.
+
 The mock backend plays synthetic fixture videos for every opened file
 (`src/ipc/mock/fixture-media.ts`): name plates that appear and slide like
 kill-feed rows, a banner and a chat line, an alignment target and the
