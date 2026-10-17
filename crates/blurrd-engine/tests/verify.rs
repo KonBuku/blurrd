@@ -86,7 +86,12 @@ fn a_clean_analysis_is_verified_and_its_report_holds_no_text() {
     let json = std::fs::read_to_string(&path).unwrap();
     let report: VerifyReport = schema::from_json(&json).unwrap();
     assert_eq!(report.summary, summary);
-    assert!(report.frames_checked >= 100, "{}", report.frames_checked);
+    // The HUD zones are read at their layout events (each change and its
+    // settle read 12 frames later) and at least every second (frames 0, 60
+    // and 120). The scene and the detectors are deterministic, so the
+    // schedule reads exactly these 19 of the 150 frames; any other number
+    // means the read schedule changed.
+    assert_eq!(report.frames_checked, 19);
     for region in [
         Region::KillFeed,
         Region::Banner,

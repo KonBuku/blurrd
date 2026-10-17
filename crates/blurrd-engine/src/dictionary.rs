@@ -3,10 +3,12 @@
 //!
 //! OCR reads the whole protected zones of the unblurred source, not only
 //! the detector boxes, so names a detector missed still enter the
-//! dictionary (architecture plan 7.2, step 1). A zone crop is read every
-//! [`DictionaryBuilder::CADENCE`]th frame and on every frame where a
-//! structure signal is on, and only when it changed since the zone was last
-//! read ([`CropDedup`]). Each recognised line is reduced to its name part
+//! dictionary (architecture plan 7.2, step 1). The analysis reads a zone
+//! at the events of its HUD structure and at least every second (see
+//! `analysis::pass0`), the audit every [`DictionaryBuilder::CADENCE`]th
+//! frame and on every frame where a structure signal is on; a crop is
+//! OCR'd only when it changed since the zone was last read
+//! ([`CropDedup`]). Each recognised line is reduced to its name part
 //! with rules per zone (chat sender before the colon, no voice location
 //! lines, no HUD words) before it enters the in-memory [`NameDictionary`].
 //! Crops carry the pixel aspect ratio of the HUD (`sy / sx`), so OCR
@@ -18,7 +20,7 @@
 //! verification compares with the blur boxes (plan 7.2, steps 2 to 5).
 //! The screen surfaces' name zones are protected zones too while their
 //! gate makes a frame a candidate, and a full-frame zone is read every
-//! half second for names outside every protected zone.
+//! second for names outside every protected zone.
 //!
 //! The analysis job of the engine feeds the builder from its frame
 //! pipeline on an OCR worker; the verification reads the dictionary and
@@ -52,12 +54,32 @@ pub const LEFT_PANEL_ROI: RectI = RectI {
 /// resolution. HUD names are about 11 reference pixels tall; enlarged
 /// twice they are found and separated from the icons next to them most
 /// reliably (measured in M16 against scale 1.5, plan section 18).
-pub const DET_SCALE: f32 = 2.0;
+pub const DET_SCALE: f32 = 1.5;
 
 /// Detection input pixels per reference pixel of the full-frame zone: the
 /// whole frame is read at the reference size, which keeps its detection
 /// input near 1920 × 1088 at every resolution.
 pub const FULL_FRAME_SCALE: f32 = 1.0;
+
+/// Tallest text line of a HUD name slot, in reference rows (names are
+/// about 11 rows high, their line boxes up to about 27).
+pub(crate) const MAX_HUD_LINE_H: f32 = 30.0;
+
+/// Lowest detected line that can be text OCR reads, in reference rows:
+/// below it detection found specks.
+pub(crate) const MIN_LINE_H: f32 = 6.0;
+
+/// Whether a line detected in a zone of `kind` with the box `rect` (source
+/// pixels, `sy` source rows per reference row) can hold a name, so it is
+/// worth recognising: at least [`MIN_LINE_H`] high and wider than high,
+/// and in a HUD zone no taller than [`MAX_HUD_LINE_H`]. The verification
+/// takes no name from the others (it counts only HUD lines of that shape),
+/// and recognition costs per line.
+pub(crate) fn may_hold_name(kind: ZoneKind, rect: RectI, sy: f32) -> bool {
+    let h = rect.height() as f32 / sy.max(f32::EPSILON);
+    let hud = matches!(kind, ZoneKind::FeedAndBanner | ZoneKind::LeftPanel);
+    h >= MIN_LINE_H && (!hud || h <= MAX_HUD_LINE_H) && rect.width() >= rect.height()
+}
 
 /// What a protected zone contains, which decides how its lines are read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -267,6 +289,8 @@ pub struct DictionaryBuilder {
     slots: NameSlots,
     /// Natural width over natural height of one source pixel of the HUD.
     pixel_aspect: f32,
+    /// Source rows per reference row.
+    sy: f32,
     dedup: CropDedup,
     whitelist: Whitelist,
     dictionary: NameDictionary,
@@ -299,11 +323,37 @@ impl DictionaryBuilder {
             last: BTreeMap::new(),
             slots: NameSlots::new(geometry),
             pixel_aspect: geometry.sy / geometry.sx,
+            sy: geometry.sy,
             dedup: CropDedup::new(),
             whitelist: Whitelist::hud_default(),
             dictionary: NameDictionary::new(),
             stats: Pass0Stats::default(),
         }
+    }
+
+    /// Splits the zones into builders of their own, by the group
+    /// `group_of` gives each zone's kind (groups without zones are
+    /// dropped), so several OCR engines can read them at the same time.
+    /// Each builder starts empty.
+    pub(crate) fn split(self, group_of: impl Fn(ZoneKind) -> usize) -> Vec<Self> {
+        let mut groups: BTreeMap<usize, Vec<ProtectedZone>> = BTreeMap::new();
+        for zone in &self.zones {
+            groups.entry(group_of(zone.kind)).or_default().push(*zone);
+        }
+        groups
+            .into_values()
+            .map(|zones| Self {
+                zones,
+                last: BTreeMap::new(),
+                slots: self.slots.clone(),
+                pixel_aspect: self.pixel_aspect,
+                sy: self.sy,
+                dedup: CropDedup::new(),
+                whitelist: self.whitelist.clone(),
+                dictionary: NameDictionary::new(),
+                stats: Pass0Stats::default(),
+            })
+            .collect()
     }
 
     /// The zones and their detection sizes, for [`blurrd_ocr::OcrOptions`].
@@ -349,26 +399,98 @@ impl DictionaryBuilder {
         zone: ZoneId,
         crop: RgbView<'_>,
     ) -> Result<Arc<[SourceLine]>, OcrError> {
-        let (kind, rect) = self
-            .zones
+        let mut lines = self.push_zones(ocr, &[(zone, crop)])?;
+        lines
+            .pop()
+            .ok_or_else(|| OcrError::InvalidInput(format!("{zone} gave no lines")))
+    }
+
+    /// Reads several zone crops in order, as [`Self::push_zone`] would one
+    /// after the other, but recognises the text lines of all of them
+    /// together ([`OcrEngine::read_many`]). Returns the lines of each
+    /// crop.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::push_zone`].
+    pub fn push_zones(
+        &mut self,
+        ocr: &mut OcrEngine,
+        crops: &[(ZoneId, RgbView<'_>)],
+    ) -> Result<Vec<Arc<[SourceLine]>>, OcrError> {
+        /// Where the lines of a crop come from.
+        enum Source {
+            /// Its own read.
+            Read(usize),
+            /// The lines of the zone's last read before these crops.
+            Last(Arc<[SourceLine]>),
+            /// Those of an earlier crop of these (an unchanged crop).
+            Same(usize),
+        }
+        let mut sources = Vec::with_capacity(crops.len());
+        let mut reads = Vec::new();
+        // Per zone, the source of its latest crop so far.
+        let mut latest: BTreeMap<ZoneId, usize> = BTreeMap::new();
+        for (i, &(zone, crop)) in crops.iter().enumerate() {
+            let (kind, rect) = self.zone(zone)?;
+            self.stats.zone_crops += 1;
+            let unchanged = !self.dedup.should_ocr(zone, crop);
+            let source = match (unchanged, latest.get(&zone), self.last.get(&zone)) {
+                (true, Some(&earlier), _) => Source::Same(earlier),
+                (true, None, Some(lines)) => Source::Last(Arc::clone(lines)),
+                _ => {
+                    reads.push((zone, kind, rect, crop));
+                    Source::Read(reads.len() - 1)
+                }
+            };
+            latest.insert(zone, i);
+            sources.push(source);
+        }
+        let started = Instant::now();
+        let views: Vec<(ZoneId, RgbView<'_>)> = reads
+            .iter()
+            .map(|&(zone, _, _, crop)| (zone, crop.with_pixel_aspect(self.pixel_aspect)))
+            .collect();
+        let sy = self.sy;
+        let keep = |crop: usize, rect: RectI| may_hold_name(reads[crop].1, rect, sy);
+        let found = ocr.read_many(&views, &keep)?;
+        self.stats.ocr_seconds += started.elapsed().as_secs_f64();
+        self.stats.zone_crops_read += reads.len() as u64;
+        let mut read_lines: Vec<Arc<[SourceLine]>> = Vec::with_capacity(reads.len());
+        for (&(zone, kind, rect, _), found) in reads.iter().zip(&found) {
+            let lines = self.lines_of(kind, rect, found);
+            self.last.insert(zone, Arc::clone(&lines));
+            read_lines.push(lines);
+        }
+        let mut out: Vec<Arc<[SourceLine]>> = Vec::with_capacity(crops.len());
+        for source in sources {
+            let lines = match source {
+                Source::Read(r) => Arc::clone(&read_lines[r]),
+                Source::Last(lines) => lines,
+                Source::Same(earlier) => Arc::clone(&out[earlier]),
+            };
+            out.push(lines);
+        }
+        Ok(out)
+    }
+
+    /// The kind and source rectangle of `zone`.
+    fn zone(&self, zone: ZoneId) -> Result<(ZoneKind, RectI), OcrError> {
+        self.zones
             .iter()
             .find(|z| z.id == zone)
             .map(|z| (z.kind, z.rect))
-            .ok_or_else(|| OcrError::InvalidInput(format!("{zone} is not a protected zone")))?;
-        self.stats.zone_crops += 1;
-        if !self.dedup.should_ocr(zone, crop)
-            && let Some(lines) = self.last.get(&zone)
-        {
-            return Ok(Arc::clone(lines));
-        }
-        let started = Instant::now();
-        let reads = ocr.read(zone, crop.with_pixel_aspect(self.pixel_aspect))?;
-        self.stats.ocr_seconds += started.elapsed().as_secs_f64();
-        self.stats.zone_crops_read += 1;
-        self.stats.lines += reads.len() as u64;
-        let mut lines = Vec::with_capacity(reads.len());
+            .ok_or_else(|| OcrError::InvalidInput(format!("{zone} is not a protected zone")))
+    }
+
+    /// The source lines of the reads `found` in a crop of a zone of
+    /// `kind` at `rect`; adds the names in a HUD name slot to the
+    /// dictionary.
+    fn lines_of(&mut self, kind: ZoneKind, rect: RectI, found: &[OcrRead]) -> Arc<[SourceLine]> {
+        self.stats.lines += found.len() as u64;
         let hud = matches!(kind, ZoneKind::FeedAndBanner | ZoneKind::LeftPanel);
-        for read in &reads {
+        let mut lines = Vec::with_capacity(found.len());
+        for read in found {
             let line = source_line(kind, (rect.x0, rect.y0), read, &self.whitelist);
             // Only names in a HUD name slot enter the dictionary; the rest
             // is matched against it.
@@ -382,9 +504,7 @@ impl DictionaryBuilder {
             }
             lines.push(line);
         }
-        let lines: Arc<[SourceLine]> = lines.into();
-        self.last.insert(zone, Arc::clone(&lines));
-        Ok(lines)
+        lines.into()
     }
 
     /// Reads every protected zone of a whole source frame
@@ -625,13 +745,29 @@ mod tests {
     use blurrd_core::{HudGeometry, HudLayout, RectI};
     use blurrd_ocr::Whitelist;
 
-    use super::{DictionaryBuilder, ZoneKind, name_parts, protected_zones};
+    use super::{DictionaryBuilder, ZoneKind, may_hold_name, name_parts, protected_zones};
 
     fn names(kind: ZoneKind, text: &str) -> Vec<String> {
         name_parts(kind, text, &Whitelist::hud_default())
             .into_iter()
             .map(|(start, end)| text[start..end].to_owned())
             .collect()
+    }
+
+    #[test]
+    fn recognises_only_lines_that_can_hold_names() {
+        let rect = |w: i32, h: i32| RectI::new(0, 0, w, h).unwrap();
+        let screen = ZoneKind::Screen(blurrd_core::Region::MatchEnd);
+        // A name line of the HUD at 1080p and, twice as tall, at 2160p.
+        assert!(may_hold_name(ZoneKind::FeedAndBanner, rect(80, 18), 1.0));
+        assert!(may_hold_name(ZoneKind::LeftPanel, rect(160, 36), 2.0));
+        // Specks, blobs taller than a HUD line, narrow marks.
+        assert!(!may_hold_name(ZoneKind::FeedAndBanner, rect(40, 5), 1.0));
+        assert!(!may_hold_name(ZoneKind::LeftPanel, rect(200, 40), 1.0));
+        assert!(!may_hold_name(ZoneKind::FullFrame, rect(10, 20), 1.0));
+        // Screens and the full frame keep tall text (match-end names).
+        assert!(may_hold_name(screen, rect(300, 48), 1.0));
+        assert!(may_hold_name(ZoneKind::FullFrame, rect(300, 48), 1.0));
     }
 
     #[test]
@@ -713,7 +849,7 @@ mod tests {
             .iter()
             .map(|z| (z.width, z.height))
             .collect();
-        assert_eq!(sizes, [(2528, 672), (1568, 992)]);
+        assert_eq!(sizes, [(1920, 512), (1184, 736)]);
         assert!(DictionaryBuilder::wants(12, false));
         assert!(!DictionaryBuilder::wants(13, false));
         assert!(DictionaryBuilder::wants(13, true));

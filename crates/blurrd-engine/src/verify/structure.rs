@@ -135,6 +135,7 @@ mod tests {
     use blurrd_core::{Region, RegionSet};
 
     use super::{LineLog, StructureLog};
+    use crate::verify::HudRead;
 
     #[test]
     fn runs_round_trip_and_answer_per_frame() {
@@ -142,13 +143,13 @@ mod tests {
         let both = feed.with(Region::Banner);
         let mut log = LineLog::new(30);
         for frame in 0..10 {
-            log.record(frame, true, RegionSet::empty(), Vec::new());
+            log.record(frame, HudRead::BOTH, RegionSet::empty(), Vec::new());
         }
         for frame in 3..6 {
-            log.record(frame, true, feed, Vec::new());
+            log.record(frame, HudRead::BOTH, feed, Vec::new());
         }
-        log.record(6, true, both, Vec::new());
-        log.record(9, true, feed, Vec::new());
+        log.record(6, HudRead::BOTH, both, Vec::new());
+        log.record(9, HudRead::BOTH, feed, Vec::new());
         let structure = StructureLog::from_lines(&log, 10);
         assert_eq!(structure.runs, [(3, 5, feed), (6, 6, both), (9, 9, feed)]);
         assert_eq!(structure.at(0), RegionSet::empty());

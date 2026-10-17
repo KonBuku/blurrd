@@ -25,7 +25,7 @@ use blurrd_video::{
 use serde::Serialize;
 
 use self::frame::Cropper;
-use self::pass0::Pass0;
+use self::pass0::{Pass0, Warming};
 use self::pipeline::{Pipeline, PipelineOutput};
 use self::previews::Previews;
 use self::tracks::TrackBuilder;
@@ -186,6 +186,9 @@ impl Engine {
             )
             .with_detail(format!("{}x{}: {error}", header.width, header.height)));
         }
+        // The OCR engines are built while the video is probed and
+        // calibrated.
+        let warming = self.warm_up_ocr(req, (header.width, header.height));
         // The calibration reads its samples while the probe scans the
         // packets; both come before the analysis can start.
         let (info, samples) = std::thread::scope(|scope| {
@@ -229,7 +232,7 @@ impl Engine {
             );
         }
         let pass0 = if req.verify {
-            self.open_pass0(&geometry, &info, req, job)
+            self.open_pass0(&geometry, &info, req, warming, job)
         } else {
             None
         };
@@ -264,15 +267,43 @@ impl Engine {
         })
     }
 
-    /// Opens pass 0, or warns that the result stays unverified.
+    /// Starts building the OCR engines of a verifying analysis of a
+    /// `size` video, when OCR is installed.
+    fn warm_up_ocr(&self, req: &AnalyzeRequest, size: (u32, u32)) -> Option<Warming> {
+        let config = self.config();
+        let setup = config.ocr.as_ref().filter(|_| req.verify)?;
+        match Pass0::warm_up(setup, config.adapter, size, req.regions, Pass0::MAX_READERS) {
+            Ok(warming) => Some(warming),
+            Err(reason) => {
+                tracing::debug!(%reason, "the OCR engines are built after the calibration");
+                None
+            }
+        }
+    }
+
+    /// Opens pass 0 with the engines `warming` built, or warns that the
+    /// result stays unverified.
     fn open_pass0(
         &self,
         geometry: &HudGeometry,
         info: &MediaInfo,
         req: &AnalyzeRequest,
+        warming: Option<Warming>,
         job: &Job<'_>,
     ) -> Option<Pass0> {
         let config = self.config();
+        let warmed = match warming.map(std::thread::JoinHandle::join) {
+            Some(Ok(Ok(warmed))) => Some(warmed),
+            Some(Ok(Err(reason))) => {
+                job.warning(
+                    WarningCode::OcrUnavailable,
+                    format!("OCR cannot run ({reason}); the result is not verified."),
+                    None,
+                );
+                return None;
+            }
+            Some(Err(_)) | None => None,
+        };
         let reason = match &config.ocr {
             Some(setup) => match Pass0::open(
                 setup,
@@ -281,6 +312,8 @@ impl Engine {
                 info,
                 req.regions,
                 req.coverage,
+                Pass0::MAX_READERS,
+                warmed,
             ) {
                 Ok(pass0) => return Some(pass0),
                 Err(reason) => reason,
@@ -414,7 +447,9 @@ impl Engine {
                     pixels,
                     dir: &dir,
                 };
-                verify_or_warn(&mut project, &mut pass0, source, job)?
+                let verified = verify_or_warn(&mut project, &mut pass0, source, job);
+                self.release(pass0);
+                verified?
             }
             None => None,
         };

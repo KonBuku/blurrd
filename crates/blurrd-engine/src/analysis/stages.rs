@@ -2,6 +2,8 @@
 //! and temporal models of some regions over the frames in order and
 //! returns the boxes of every frame that became final.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use blurrd_core::{AppError, Confidence, Mode, RectI, Region, RegionSet};
 use blurrd_detect::banner::{self, BannerBox};
 use blurrd_detect::killfeed::BarHues;
@@ -70,13 +72,65 @@ impl Emitted {
     }
 }
 
+/// The HUD regions whose layout [`Structure::layout`] fingerprints, in its
+/// order.
+pub(crate) const LAYOUT_REGIONS: [Region; 4] = [
+    Region::KillFeed,
+    Region::Banner,
+    Region::VoiceChat,
+    Region::TextChat,
+];
+
+/// Reference pixels a row or band edge moves before its layout counts as
+/// changed: detector jitter of a pixel or two keeps the fingerprint.
+const LAYOUT_STEP: i32 = 8;
+
+/// What a stage saw of the HUD structure on one frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Structure {
+    /// The regions whose structure the frame showed (plan 7.2: kill-feed
+    /// rows, a banner gate, voice portraits, the chat box, a screen
+    /// surface gate).
+    pub(crate) regions: RegionSet,
+    /// Per region of [`LAYOUT_REGIONS`], a fingerprint of where its
+    /// structure is (kill-feed rows, the banner plate, the speaking voice
+    /// slots, the chat box bands); 0 for a region this stage does not
+    /// detect. Equal fingerprints on two frames mean the same layout, so
+    /// pass 0 reads a zone again only when it changes (plus a cadence).
+    pub(crate) layout: [u64; 4],
+}
+
+impl Structure {
+    /// Adds what another stage saw on the same frame.
+    pub(crate) fn merge(&mut self, other: &Self) {
+        for region in other.regions.iter() {
+            self.regions.insert(region);
+        }
+        for (mine, theirs) in self.layout.iter_mut().zip(other.layout) {
+            *mine ^= theirs;
+        }
+    }
+
+    /// Sets the layout of `region` to the fingerprint of `parts`.
+    fn set_layout(&mut self, region: Region, parts: impl Hash) {
+        if let Some(i) = LAYOUT_REGIONS.iter().position(|&r| r == region) {
+            let mut hasher = DefaultHasher::new();
+            (region as u8, parts).hash(&mut hasher);
+            self.layout[i] = hasher.finish();
+        }
+    }
+}
+
+/// `y` in steps of [`LAYOUT_STEP`].
+fn layout_step(y: i32) -> i32 {
+    y.div_euclid(LAYOUT_STEP)
+}
+
 /// A detector stage: pushed every frame in order, then finished once.
 pub(crate) trait Stage: Send {
     /// Runs the stage on one frame; boxes that became final go to `out`.
-    /// Returns the regions whose structure the frame showed (plan 7.2:
-    /// kill-feed rows, a banner gate, voice portraits, the chat box, a
-    /// screen surface gate).
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError>;
+    /// Returns the structure the frame showed.
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<Structure, AppError>;
     /// Makes every pushed frame final.
     fn finish(self: Box<Self>, out: &mut Emitted);
     /// Whether the stage reads the HUD (its structure signals drive pass 0).
@@ -178,15 +232,18 @@ impl KillFeedStage {
 }
 
 impl Stage for KillFeedStage {
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError> {
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<Structure, AppError> {
         let view = crops.feed.view().map_err(|e| detector_error(&e))?;
         self.detector
             .detect(&view, &mut self.detections)
             .map_err(|e| detector_error(&e))?;
-        let mut structure = RegionSet::empty();
-        if !self.detector.rows().is_empty() {
-            structure.insert(Region::KillFeed);
+        let mut structure = Structure::default();
+        let rows = self.detector.rows();
+        if !rows.is_empty() {
+            structure.regions.insert(Region::KillFeed);
         }
+        let tops: Vec<i32> = rows.iter().map(|r| layout_step(r.top)).collect();
+        structure.set_layout(Region::KillFeed, tops);
         self.tracker
             .push(&KillFeedFrame {
                 frame: crops.index,
@@ -328,15 +385,19 @@ impl PanelStage {
 }
 
 impl Stage for PanelStage {
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError> {
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<Structure, AppError> {
         let frame = crops.index;
-        let mut structure = RegionSet::empty();
+        let mut structure = Structure::default();
         if self.enabled[0] {
             let view = crops.banner().view().map_err(|e| detector_error(&e))?;
             let seen = self.banner.detect(&view).map_err(|e| detector_error(&e))?;
             if seen.gate {
-                structure.insert(Region::Banner);
+                structure.regions.insert(Region::Banner);
             }
+            structure.set_layout(
+                Region::Banner,
+                (seen.gate, seen.plate.is_some(), seen.name.is_some()),
+            );
             self.banner_tracker
                 .push(frame, &seen, &mut self.banner_ready);
         }
@@ -345,14 +406,17 @@ impl Stage for PanelStage {
             self.voice
                 .detect(&left, &mut self.detections)
                 .map_err(|e| detector_error(&e))?;
-            if self
+            let speaking: Vec<u8> = self
                 .voice
                 .slots()
                 .iter()
-                .any(|s| s.portrait >= MEASURE_PORTRAIT)
-            {
-                structure.insert(Region::VoiceChat);
+                .filter(|s| s.portrait >= MEASURE_PORTRAIT)
+                .map(|s| s.slot)
+                .collect();
+            if !speaking.is_empty() {
+                structure.regions.insert(Region::VoiceChat);
             }
+            structure.set_layout(Region::VoiceChat, speaking);
             let quarter = crops.quarter_view().map_err(|e| detector_error(&e))?;
             let cut = self.cuts.push(&quarter, &[(Region::VoiceChat, left)]);
             self.voice_tracker
@@ -368,9 +432,16 @@ impl Stage for PanelStage {
             self.chat
                 .detect(&left, &mut self.detections)
                 .map_err(|e| detector_error(&e))?;
-            if !self.chat.bands().is_empty() {
-                structure.insert(Region::TextChat);
+            let bands: Vec<(i32, i32)> = self
+                .chat
+                .bands()
+                .iter()
+                .map(|b| (layout_step(b.y0), layout_step(b.y1)))
+                .collect();
+            if !bands.is_empty() {
+                structure.regions.insert(Region::TextChat);
             }
+            structure.set_layout(Region::TextChat, bands);
             self.chat_tracker.push(frame, &self.chat);
             self.chat_tracker.drain_ready(&mut self.chat_ready);
         }
@@ -430,13 +501,13 @@ fn emit_screens(
 }
 
 impl Stage for ScreenStage {
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError> {
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<Structure, AppError> {
         // The crop workers gated and read the frame (see `Cropper`).
         let surfaces = crops
             .surfaces
             .clone()
             .ok_or_else(|| internal("the screen surfaces of a frame were not read"))?;
-        let structure = surfaces
+        let regions = surfaces
             .iter()
             .zip(Region::SCREENS)
             .filter(|(s, _)| s.candidate)
@@ -444,7 +515,10 @@ impl Stage for ScreenStage {
             .collect();
         self.detector.push(crops.index, surfaces, &mut self.ready);
         emit_screens(&self.map, &mut self.ready, Some(crops.index), out);
-        Ok(structure)
+        Ok(Structure {
+            regions,
+            layout: [0; 4],
+        })
     }
 
     fn is_hud(&self) -> bool {

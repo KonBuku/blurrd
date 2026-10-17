@@ -1,6 +1,8 @@
 //! The engine: its configuration and the state shared by its jobs.
 
 use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
+use std::thread::JoinHandle;
 
 use blurrd_core::{AppError, EncoderSetting, Luid};
 
@@ -108,6 +110,8 @@ pub fn default_cache_dir() -> PathBuf {
 #[derive(Debug)]
 pub struct Engine {
     config: EngineConfig,
+    /// Threads releasing what finished jobs held (see [`Engine::release`]).
+    releases: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Engine {
@@ -119,7 +123,27 @@ impl Engine {
     /// the program do not match the ones blurrd was built for.
     pub fn new(config: EngineConfig) -> Result<Self, AppError> {
         blurrd_video::init()?;
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            releases: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Drops `held` on a thread of its own: closing OCR sessions takes
+    /// from a few hundred milliseconds to seconds (DirectML tears its
+    /// devices down), and a job is done before that. Dropping the engine
+    /// waits for these threads, so nothing is still closing when the
+    /// process ends.
+    pub(crate) fn release<T: Send + 'static>(&self, held: T) {
+        let mut releases = self.releases.lock().unwrap_or_else(PoisonError::into_inner);
+        releases.retain(|thread| !thread.is_finished());
+        match std::thread::Builder::new()
+            .name(String::from("blurrd-release"))
+            .spawn(move || drop(held))
+        {
+            Ok(thread) => releases.push(thread),
+            Err(error) => tracing::debug!(%error, "released on the job's thread"),
+        }
     }
 
     /// The configuration.
@@ -130,5 +154,18 @@ impl Engine {
     /// The folder of the cached capability probes.
     pub(crate) fn caps_dir(&self) -> PathBuf {
         self.config.cache_dir.join("caps")
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let releases = self
+            .releases
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
+        for thread in releases.drain(..) {
+            // A panic while dropping has nothing left to report.
+            let _ = thread.join();
+        }
     }
 }

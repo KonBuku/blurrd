@@ -9,9 +9,10 @@
 //! source lines:
 //!
 //! 1. **Coverage.** Every name part in a name slot of every frame pass 0
-//!    read (the frames with HUD structure and one frame in
-//!    [`crate::DictionaryBuilder::CADENCE`] elsewhere) is compared with the
-//!    blur boxes the plan has on that frame. A slot counts on frames where
+//!    read (in an analysis the events of each zone's HUD structure and at
+//!    least one frame a second; in an audit the frames with HUD structure
+//!    and one frame in [`crate::DictionaryBuilder::CADENCE`] elsewhere) is
+//!    compared with the blur boxes the plan has on that frame. A slot counts on frames where
 //!    its region shows its structure and the detectors boxed a name of it
 //!    within a second (a buy menu over the kill feed has no such boxes); a
 //!    screen surface's slots are the rows of its boxes. A part is
@@ -32,7 +33,7 @@
 //! 4. **Positive control.** Per region, the detector's items (tracks) with
 //!    text under them on a read frame count as verified when OCR read that
 //!    text on the source; the others are unverifiable.
-//! 5. **Out of scope.** The full-frame samples (every half second) list
+//! 5. **Out of scope.** The full-frame samples (every second) list
 //!    dictionary names outside every protected zone as information (D8);
 //!    names in a screen surface's name zone whose gate stayed off count as
 //!    exposed parts of that surface.
@@ -59,7 +60,7 @@ pub(crate) use self::pixels::{PixelSetup, Pixels};
 use self::scan::{Run, Select};
 pub(crate) use self::structure::StructureLog;
 use crate::cache;
-use crate::dictionary::{DictionaryBuilder, SourceLine, ZoneKind};
+use crate::dictionary::{DictionaryBuilder, MAX_HUD_LINE_H, MIN_LINE_H, SourceLine, ZoneKind};
 use crate::job::{Job, internal};
 use crate::slots::NameSlots;
 
@@ -71,19 +72,76 @@ const MAX_READS_PER_RUN: usize = 24;
 /// How often a fix box grows before a leak is reported open.
 const FIX_ROUNDS: usize = 3;
 
+/// The HUD zones read on a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct HudRead {
+    /// The kill feed and banner zone.
+    pub(crate) feed: bool,
+    /// The left panel (voice and text chat).
+    pub(crate) left: bool,
+}
+
+impl HudRead {
+    /// Both HUD zones.
+    pub(crate) const BOTH: Self = Self {
+        feed: true,
+        left: true,
+    };
+
+    /// No HUD zone.
+    pub(crate) const NONE: Self = Self {
+        feed: false,
+        left: false,
+    };
+
+    /// The HUD zone of a zone of `kind`, if it is one.
+    pub(crate) fn of(kind: ZoneKind) -> Self {
+        Self {
+            feed: kind == ZoneKind::FeedAndBanner,
+            left: kind == ZoneKind::LeftPanel,
+        }
+    }
+
+    /// Both read on one of the two.
+    pub(crate) fn or(self, other: Self) -> Self {
+        Self {
+            feed: self.feed || other.feed,
+            left: self.left || other.left,
+        }
+    }
+
+    /// Whether a HUD zone was read.
+    pub(crate) fn any(self) -> bool {
+        self.feed || self.left
+    }
+
+    /// Whether the zone that holds the names of `region` was read (for a
+    /// region outside the HUD zones: whether a HUD zone was).
+    fn covers(self, region: Region) -> bool {
+        match region {
+            Region::KillFeed | Region::Banner => self.feed,
+            Region::VoiceChat | Region::TextChat => self.left,
+            _ => self.any(),
+        }
+    }
+}
+
 /// The source lines pass 0 read, per frame. They stay in memory.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LineLog {
     frames: BTreeMap<u32, FrameLines>,
     /// Frames in half a second of the video.
     half_second: u32,
+    /// The most frames between two reads of the HUD zones while a name
+    /// stays on screen: exposures of one name this close form one run.
+    hud_spacing: u32,
 }
 
 /// The lines of one frame, per zone read.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FrameLines {
-    /// Whether the HUD zones were read (the frame counts as checked).
-    pub(crate) hud: bool,
+    /// The HUD zones read (the frame counts as checked for their regions).
+    pub(crate) hud: HudRead,
     /// The HUD regions whose structure the frame showed: only their name
     /// slots hold names on it.
     pub(crate) structure: RegionSet,
@@ -116,30 +174,56 @@ impl LineLog {
         Self {
             frames: BTreeMap::new(),
             half_second: half_second.max(1),
+            hud_spacing: DictionaryBuilder::CADENCE,
         }
     }
 
-    /// Records the lines read on `frame`, where the regions `structure`
-    /// showed their HUD structure (frames in any order; a frame recorded
-    /// twice keeps both sets).
+    /// Sets the most frames between two reads of the HUD zones while a
+    /// name stays on screen (by default [`DictionaryBuilder::CADENCE`]).
+    pub(crate) fn set_hud_spacing(&mut self, frames: u32) {
+        self.hud_spacing = frames.max(1);
+    }
+
+    /// The most frames between two reads of the HUD zones while a name
+    /// stays on screen.
+    pub(crate) fn hud_spacing(&self) -> u32 {
+        self.hud_spacing
+    }
+
+    /// Records the lines read on `frame`, where the HUD zones `hud` were
+    /// read and the regions `structure` showed their HUD structure (frames
+    /// in any order; a frame recorded twice keeps both sets).
     pub(crate) fn record(
         &mut self,
         frame: u32,
-        hud: bool,
+        hud: HudRead,
         structure: RegionSet,
         zones: Vec<Arc<[SourceLine]>>,
     ) {
         let entry = self.frames.entry(frame).or_default();
-        entry.hud |= hud;
+        entry.hud = entry.hud.or(hud);
         for region in structure.iter() {
             entry.structure.insert(region);
         }
         entry.zones.extend(zones);
     }
 
+    /// Adds every frame of `other` (a log of the same video that other
+    /// zones were read into).
+    pub(crate) fn absorb(&mut self, other: Self) {
+        for (frame, lines) in other.frames {
+            self.record(frame, lines.hud, lines.structure, lines.zones);
+        }
+    }
+
     /// Frames in half a second of the video.
     pub(crate) fn half_second(&self) -> u32 {
         self.half_second
+    }
+
+    /// Frames from one full-frame sample to the next: one second.
+    pub(crate) fn full_every(&self) -> u32 {
+        2 * self.half_second
     }
 
     /// Every recorded frame and its lines, in frame order.
@@ -152,20 +236,20 @@ impl LineLog {
         self.frames.range(f0..=f1).map(|(&f, l)| (f, l))
     }
 
-    /// The last frame before `frame` whose HUD zones were read.
-    fn checked_before(&self, frame: u32) -> Option<u32> {
+    /// The last frame before `frame` whose zone of `region` was read.
+    fn checked_before(&self, frame: u32, region: Region) -> Option<u32> {
         self.frames
             .range(..frame)
             .rev()
-            .find(|(_, l)| l.hud)
+            .find(|(_, l)| l.hud.covers(region))
             .map(|(&f, _)| f)
     }
 
-    /// The first frame after `frame` whose HUD zones were read.
-    fn checked_after(&self, frame: u32) -> Option<u32> {
+    /// The first frame after `frame` whose zone of `region` was read.
+    fn checked_after(&self, frame: u32, region: Region) -> Option<u32> {
         self.frames
             .range(frame.saturating_add(1)..)
-            .find(|(_, l)| l.hud)
+            .find(|(_, l)| l.hud.covers(region))
             .map(|(&f, _)| f)
     }
 }
@@ -254,7 +338,11 @@ pub(crate) fn verify(
         fixes,
         per_region: positive_control(ctx, &plan, &inside),
         leaks,
-        frames_checked: ctx.log.iter().filter(|(f, l)| l.hud && inside(*f)).count() as u32,
+        frames_checked: ctx
+            .log
+            .iter()
+            .filter(|(f, l)| l.hud.any() && inside(*f))
+            .count() as u32,
     })
 }
 
@@ -338,10 +426,6 @@ fn confirmed_names(log: &LineLog, slots: &NameSlots, presence: &Presence) -> Nam
     dictionary
 }
 
-/// Tallest text line of a HUD name slot, in reference rows (names are
-/// about 11 rows high, their line boxes up to about 27).
-const MAX_SLOT_LINE_H: f32 = 30.0;
-
 /// Whether `line`, in a name slot of `region` on `frame`, can hold a name
 /// of the region: the region shows its structure (`structure`) and
 /// `presence` confirms the slot; the line is no taller than a HUD line
@@ -355,7 +439,7 @@ pub(crate) fn holds_name(
     presence: &Presence,
 ) -> bool {
     structure.contains(region)
-        && line.rect.height() as f32 <= MAX_SLOT_LINE_H * presence.sy
+        && line.rect.height() as f32 <= MAX_HUD_LINE_H * presence.sy
         && (region != Region::TextChat || line.chat_shaped)
         && presence.confirms(region, frame, line.rect)
 }
@@ -400,7 +484,7 @@ pub(crate) fn audit(
         fixes: Vec::new(),
         per_region: positive_control(ctx, plan, &|_| true),
         leaks,
-        frames_checked: ctx.log.iter().filter(|(_, l)| l.hud).count() as u32,
+        frames_checked: ctx.log.iter().filter(|(_, l)| l.hud.any()).count() as u32,
     })
 }
 
@@ -542,16 +626,17 @@ fn spread(len: usize, max: usize) -> Vec<usize> {
     out
 }
 
-/// The frames a fix of `run` covers. A run of the HUD zones (read on
-/// every frame with structure) reaches from the frame after the last frame
-/// read without the run's exposure to the frame before the next one, at
-/// most a reading interval beyond the run; a run of the full-frame samples
-/// (one frame in half a second) reaches half its sampling gap beyond the
-/// run on both sides, as nothing is known between two samples.
+/// The frames a fix of `run` covers. A run of the protected zones (read at
+/// their events and at least every second) reaches from the frame
+/// after the last frame its zone was read without the run's exposure to
+/// the frame before the next one, at most a reading interval beyond the
+/// run; a run of the full-frame samples (one frame a second) reaches half
+/// its sampling gap beyond the run on both sides, as nothing is known
+/// between two samples.
 fn fix_range(log: &LineLog, run: &Run, frame_count: u32) -> (u32, u32) {
     let (first, last) = (run.first(), run.last());
     let last_frame = frame_count.saturating_sub(1);
-    if run.spacing > DictionaryBuilder::CADENCE {
+    if run.spacing > log.hud_spacing() {
         let reach = (run.spacing / 2).saturating_sub(1);
         return (
             first.saturating_sub(reach),
@@ -560,11 +645,11 @@ fn fix_range(log: &LineLog, run: &Run, frame_count: u32) -> (u32, u32) {
     }
     let gap = run.spacing.saturating_sub(1);
     let f0 = log
-        .checked_before(first)
+        .checked_before(first, run.region)
         .map_or(first.saturating_sub(gap), |f| f + 1)
         .max(first.saturating_sub(gap));
     let f1 = log
-        .checked_after(last)
+        .checked_after(last, run.region)
         .map_or(last.saturating_add(gap), |f| f - 1)
         .min(last.saturating_add(gap))
         .min(last_frame);
@@ -681,7 +766,7 @@ fn positive_control(
 /// blobs on fading panels and textures, which are no text OCR could read.
 fn text_shaped(rect: RectI, sy: f32) -> bool {
     let h = rect.height() as f32 / sy.max(f32::EPSILON);
-    (6.0..=MAX_SLOT_LINE_H).contains(&h) && rect.width() >= rect.height()
+    (MIN_LINE_H..=MAX_HUD_LINE_H).contains(&h) && rect.width() >= rect.height()
 }
 
 /// Whether box `rect` lies over text line `line`: at least 30 % of the
@@ -788,7 +873,7 @@ mod tests {
         TrackSource,
     };
 
-    use super::{LineLog, Presence, covers_text, spread};
+    use super::{HudRead, LineLog, Presence, covers_text, spread};
 
     #[test]
     fn presence_confirms_slots_near_boxes() {
@@ -853,10 +938,25 @@ mod tests {
         }]
         .into();
         for f in [0, 6, 12, 13, 14, 30] {
-            log.record(f, f != 30, RegionSet::all(), vec![line.clone()]);
+            let hud = if f == 30 {
+                HudRead::NONE
+            } else {
+                HudRead::BOTH
+            };
+            log.record(f, hud, RegionSet::all(), vec![line.clone()]);
         }
-        assert_eq!(log.checked_before(12), Some(6));
-        assert_eq!(log.checked_after(14), None);
-        assert_eq!(log.checked_after(13), Some(14));
+        // Frame 9 read only the left panel: checked for the chat, not for
+        // the kill feed.
+        log.record(
+            9,
+            HudRead::of(ZoneKind::LeftPanel),
+            RegionSet::all(),
+            Vec::new(),
+        );
+        assert_eq!(log.checked_before(12, Region::KillFeed), Some(6));
+        assert_eq!(log.checked_before(12, Region::TextChat), Some(9));
+        assert_eq!(log.checked_before(12, Region::Scoreboard), Some(9));
+        assert_eq!(log.checked_after(14, Region::KillFeed), None);
+        assert_eq!(log.checked_after(13, Region::Banner), Some(14));
     }
 }

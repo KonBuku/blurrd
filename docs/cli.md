@@ -47,10 +47,11 @@ the OCR models (or with `--no-verify`) the result is not verified, and
 outputs made from it are named `*_UNVERIFIED`.
 
 With OCR the analysis verifies its result. While the detectors run, OCR
-reads the protected zones of the recording (the kill feed and banner area
-and the left panel on every frame with HUD structure and one frame in six
-elsewhere, a screen surface's names while it is open, the whole frame
-every half second). Afterwards blurrd makes the blurred pixels of every
+reads the protected zones of the recording: the kill feed and banner area
+and the left panel whenever the layout of their HUD items changes (a row,
+a speaker or a chat line comes, moves or goes), again once it has settled
+and at least every second; a screen surface's names the same way
+while it is open; the whole frame every second. Afterwards blurrd makes the blurred pixels of every
 name part the boxes do not cover completely, exactly as the render will,
 and reads them again. A name that stays readable gets an extra box (a fix
 box over the name's slot, grown up to three times) and is listed as a

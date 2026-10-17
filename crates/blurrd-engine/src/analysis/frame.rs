@@ -59,6 +59,20 @@ impl FrameCrops {
         rgb_view(&self.quarter)
     }
 
+    /// Whether this frame holds the crop of a zone of `kind`: the HUD
+    /// zones always, a screen surface's name zone on the frames its gate
+    /// makes a candidate, the full frame on its sampled frames.
+    pub(crate) fn has_zone(&self, kind: ZoneKind) -> bool {
+        match kind {
+            ZoneKind::FeedAndBanner | ZoneKind::LeftPanel => true,
+            ZoneKind::Screen(region) => Region::SCREENS
+                .iter()
+                .position(|&r| r == region)
+                .is_some_and(|i| self.screens[i].is_some()),
+            ZoneKind::FullFrame => self.full.is_some(),
+        }
+    }
+
     /// The source pixels of `rect` (source coordinates) in the area of
     /// `kind`, if this frame holds them all: what OCR reads at native
     /// resolution.

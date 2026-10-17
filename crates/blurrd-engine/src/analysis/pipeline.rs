@@ -27,14 +27,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
-use blurrd_core::{AppError, RegionSet, Track};
+use blurrd_core::{AppError, Track};
 use blurrd_video::{DecodeOptions, Decoder, VideoFrame};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
 use super::frame::{Cropper, FrameCrops};
 use super::pass0::Pass0;
 use super::previews::{PreviewOutput, Previews};
-use super::stages::{Emitted, SOURCES, Stage};
+use super::stages::{Emitted, SOURCES, Stage, Structure};
 use super::tracks::{RegionBox, TrackBuilder};
 use crate::engine::PoolSizes;
 use crate::job::{Job, canceled, internal};
@@ -266,7 +266,7 @@ impl Pipeline<'_> {
         let (crop_tx, crop_rx) = bounded::<Result<FrameCrops, AppError>>(workers * 2);
         let (emit_tx, emit_rx) = unbounded::<Emitted>();
         let hud_stages = stages.iter().filter(|s| s.is_hud()).count();
-        let (signal_tx, signal_rx) = unbounded::<(u32, RegionSet)>();
+        let (signal_tx, signal_rx) = unbounded::<(u32, Structure)>();
         let (to_stages, stage_inputs): (Vec<_>, Vec<_>) = stages
             .iter()
             .map(|_| bounded::<Arc<FrameCrops>>(pools.stage_queue.max(1)))
@@ -384,7 +384,7 @@ type Pass0Worker = Result<std::thread::JoinHandle<Result<Pass0, String>>, String
 fn spawn_pass0(
     pass0: Pass0,
     frames: Receiver<Arc<FrameCrops>>,
-    structure: Receiver<(u32, RegionSet)>,
+    structure: Receiver<(u32, Structure)>,
     hud_stages: usize,
     control: &Control<'_>,
 ) -> Pass0Worker {
@@ -473,7 +473,7 @@ fn run_stage(
     mut stage: Box<dyn Stage>,
     frames: &Receiver<Arc<FrameCrops>>,
     emitted: &Sender<Emitted>,
-    signals: Option<&Sender<(u32, RegionSet)>>,
+    signals: Option<&Sender<(u32, Structure)>>,
     control: &Control<'_>,
 ) -> Result<(), AppError> {
     for crops in frames {

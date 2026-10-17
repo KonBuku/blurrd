@@ -151,6 +151,8 @@ impl Engine {
             &info,
             regions,
             req.coverage,
+            1,
+            None,
         )
         .map_err(|reason| {
             AppError::new(ErrorKind::OcrUnavailable, "OCR cannot run.").with_detail(reason)
@@ -210,6 +212,7 @@ impl Engine {
         let mut reader = Pixels::open(&req.output, out_pts, pixels, parts.ocr)?;
         let outcome = verify::audit(&ctx, &project.plan(), &mut reader, job)?;
         drop(reader);
+        self.release(pass0);
 
         let mut done = self.save_audit(req, &outcome)?;
         done.frames = frames;

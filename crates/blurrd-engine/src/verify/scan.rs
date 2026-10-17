@@ -8,7 +8,7 @@ use blurrd_detect::screens::{Anchor, ScreenMap};
 use blurrd_ocr::{LeakMatcher, NameMatch};
 
 use super::{Context, FrameLines, Presence, union};
-use crate::dictionary::{DictionaryBuilder, ZoneKind, screen_zones};
+use crate::dictionary::{ZoneKind, screen_zones};
 use crate::slots::NameSlots;
 
 /// The scoreboard's name column in reference pixels (centre-anchored):
@@ -287,7 +287,7 @@ pub(crate) fn scan(
     let aspect = ctx.geometry.sx / ctx.geometry.sy;
     let mut runs = Runs::default();
     let mut names = Runs::default();
-    let full_spacing = ctx.log.half_second() * 2;
+    let full_spacing = ctx.log.full_every() * 2;
     for (frame, lines) in ctx.log.iter() {
         if !inside(frame) {
             continue;
@@ -327,7 +327,7 @@ pub(crate) fn scan(
                     runs.add(
                         region,
                         &part.folded,
-                        DictionaryBuilder::CADENCE,
+                        ctx.log.hud_spacing(),
                         Exposure {
                             frame,
                             part: part.rect,
