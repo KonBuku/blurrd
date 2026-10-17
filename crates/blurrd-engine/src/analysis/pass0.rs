@@ -51,8 +51,8 @@ const READER_QUEUE: usize = 64;
 
 /// The OCR side of pass 0, ready to read.
 pub(crate) struct Pass0 {
-    // The runtime must outlive the engines' sessions.
-    _runtime: OrtRuntime,
+    /// The runtime of the engines' sessions (it must outlive them).
+    runtime: OrtRuntime,
     /// The engines and the zones each reads (at least one).
     readers: Vec<Reader>,
     coverage: Coverage,
@@ -206,10 +206,10 @@ fn group_of(kind: ZoneKind, readers: usize) -> usize {
     group % readers.max(1)
 }
 
-/// OCR engines built ahead of an analysis, while the video is probed and
-/// calibrated (creating the sessions takes over a second, mostly
-/// DirectML compiling their graphs), each with the zone sizes it was
-/// built for.
+/// OCR engines built ahead of a pass 0 (while the video is probed and
+/// calibrated, or kept from an earlier pass 0: creating the sessions
+/// takes over a second, mostly DirectML compiling their graphs), each
+/// with the zone sizes it was built for.
 pub(crate) struct Warmed {
     runtime: OrtRuntime,
     engines: Vec<(Vec<ZoneSpec>, Result<OcrEngine, String>)>,
@@ -425,8 +425,6 @@ impl Opening {
             .map(|b| b.zones().iter().map(|z| z.kind).collect())
             .collect();
         let mut counted = 0u64;
-        // The runtime is bound before the readers, so their sessions are
-        // closed first on every path (the runtime must outlive them).
         let (runtime, served) = std::thread::scope(|scope| {
             let mut queues: Vec<Sender<Task>> = Vec::with_capacity(builders.len());
             let mut handoffs = Vec::with_capacity(builders.len());
@@ -504,7 +502,7 @@ impl Opening {
             readers.push(reader);
         }
         Ok(Pass0 {
-            _runtime: runtime,
+            runtime,
             readers,
             coverage,
             log,
@@ -588,7 +586,7 @@ impl Pass0 {
             });
         }
         Ok(Self {
-            _runtime: warmed.runtime,
+            runtime: warmed.runtime,
             readers,
             coverage,
             log: line_log(info),
@@ -599,6 +597,19 @@ impl Pass0 {
     /// What the crop workers cut for this pass 0.
     pub(crate) fn reads(&self) -> OcrReads {
         ocr_reads(self.readers.iter().map(|r| &r.builder), &self.log)
+    }
+
+    /// Its OCR engines, to be used again by a later pass 0 with the same
+    /// zone sizes ([`Self::open`]); what it read is dropped.
+    pub(crate) fn into_warmed(self) -> Warmed {
+        Warmed {
+            engines: self
+                .readers
+                .into_iter()
+                .map(|reader| (reader.builder.zone_specs(), Ok(reader.ocr)))
+                .collect(),
+            runtime: self.runtime,
+        }
     }
 
     /// The counters so far.
@@ -645,29 +656,78 @@ impl Pass0 {
         structure: RegionSet,
         stopped: &dyn Fn() -> bool,
     ) -> Result<bool, String> {
+        self.read_frames(&[(crops, structure)], hud, stopped)
+    }
+
+    /// Reads the zones of several frames as [`Self::read`] reads one, each
+    /// `(crops, structure)` in frame order. The readers read their zones
+    /// at the same time, each on a thread of its own and the lines of all
+    /// the frames in one go.
+    pub(crate) fn read_frames(
+        &mut self,
+        frames: &[(&FrameCrops, RegionSet)],
+        hud: bool,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<bool, String> {
+        if stopped() {
+            return Ok(false);
+        }
         let wanted = |kind: ZoneKind| hud || !HudRead::of(kind).any();
         let hud_read = if hud { HudRead::BOTH } else { HudRead::NONE };
-        let mut read = false;
-        for reader in &mut self.readers {
-            if stopped() {
-                return Ok(false);
+        let half_second = self.log.half_second();
+        let parts: Vec<Result<(Vec<bool>, LineLog), String>> = std::thread::scope(|scope| {
+            let workers: Vec<_> = self
+                .readers
+                .iter_mut()
+                .map(|reader| {
+                    let kinds = reader.kinds();
+                    let zones: Vec<Vec<usize>> = frames
+                        .iter()
+                        .map(|(crops, _)| zones_of(&kinds, crops, &wanted))
+                        .collect();
+                    scope.spawn(move || {
+                        let tasks: Vec<ZoneRead<'_>> = frames
+                            .iter()
+                            .zip(&zones)
+                            .filter(|(_, zones)| !zones.is_empty())
+                            .map(|((crops, _), zones)| ZoneRead {
+                                crops,
+                                zones,
+                                hud: hud_read,
+                            })
+                            .collect();
+                        let mut part = LineLog::new(half_second);
+                        if !tasks.is_empty() {
+                            reader.read(&tasks, &mut part)?;
+                        }
+                        Ok((zones.iter().map(|z| !z.is_empty()).collect(), part))
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| {
+                    worker
+                        .join()
+                        .unwrap_or_else(|_| Err(String::from("an OCR worker panicked")))
+                })
+                .collect()
+        });
+        let mut read = vec![false; frames.len()];
+        // In reader order, as a single reader would have recorded them.
+        for part in parts {
+            let (reads, part) = part?;
+            for (read, this) in read.iter_mut().zip(reads) {
+                *read |= this;
             }
-            let zones = zones_of(&reader.kinds(), crops, &wanted);
-            if zones.is_empty() {
-                continue;
-            }
-            read = true;
-            let task = ZoneRead {
-                crops,
-                zones: &zones,
-                hud: hud_read,
-            };
-            reader.read(&[task], &mut self.log)?;
+            self.log.absorb(part);
         }
-        self.frames += u64::from(hud || read);
-        if hud || !structure.is_empty() {
-            self.log
-                .record(crops.index, hud_read, structure, Vec::new());
+        for ((crops, structure), read) in frames.iter().zip(read) {
+            self.frames += u64::from(hud || read);
+            if hud || !structure.is_empty() {
+                self.log
+                    .record(crops.index, hud_read, *structure, Vec::new());
+            }
         }
         Ok(true)
     }

@@ -22,7 +22,7 @@ use blurrd_video::{
 };
 use serde::Serialize;
 
-use crate::analysis::frame::Cropper;
+use crate::analysis::frame::{Cropper, FrameCrops};
 use crate::analysis::pass0::Pass0;
 use crate::cache::{self, ProjectDir};
 use crate::engine::Engine;
@@ -143,6 +143,8 @@ impl Engine {
             )
         })?;
         let regions = project.detector.regions;
+        // The engines of the previous re-verification are used again
+        // where their zone sizes fit (the same video, as a rule).
         let mut pass0 = Pass0::open(
             setup,
             config.adapter,
@@ -150,8 +152,8 @@ impl Engine {
             &info,
             regions,
             Coverage::EveryFrame,
-            1,
-            None,
+            config.pools.ocr_readers,
+            self.take_ocr(),
         )
         .map_err(|reason| {
             AppError::new(ErrorKind::OcrUnavailable, "OCR cannot run.").with_detail(reason)
@@ -204,7 +206,7 @@ impl Engine {
         let mut reader = Pixels::open(&req.input, pts, pixels, parts.ocr)?;
         let outcome = verify::verify(&ctx, &project.plan(), &mut reader, Some(&ranges), job)?;
         drop(reader);
-        self.release(pass0);
+        self.keep_ocr(pass0.into_warmed());
         verify::warn(&outcome, job);
         let mut done = self.save(project, &outcome, &ranges)?;
         done.summary.frames = frames;
@@ -271,8 +273,12 @@ struct Source<'a> {
     total: u32,
 }
 
+/// Frames whose zones the readers recognise together.
+const BATCH: usize = 8;
+
 /// Reads every frame of the ranges of `source` with `pass0` as pass 0
-/// reads a video (the crops cut by `cropper`); returns the frames read.
+/// reads a video (the crops cut by `cropper`), [`BATCH`] frames at a
+/// time; returns the frames read.
 fn read_ranges(
     source: &Source<'_>,
     pass0: &mut Pass0,
@@ -282,31 +288,43 @@ fn read_ranges(
     let mut decoder = Decoder::open(source.input, source.decode)?;
     let mut frames = 0u32;
     let stopped = || job.is_canceled();
+    let mut batch: Vec<(FrameCrops, RegionSet)> = Vec::with_capacity(BATCH);
+    let mut flush = |batch: &mut Vec<(FrameCrops, RegionSet)>| {
+        let views: Vec<_> = batch.iter().map(|(crops, on)| (crops, *on)).collect();
+        let read = pass0
+            .read_frames(&views, true, &stopped)
+            .map_err(|reason| {
+                AppError::new(ErrorKind::OcrUnavailable, "OCR stopped.").with_detail(reason)
+            })?;
+        if !read {
+            return Err(canceled());
+        }
+        frames += u32::try_from(batch.len()).unwrap_or(u32::MAX);
+        job.progress(frames, source.total);
+        batch.clear();
+        Ok(())
+    };
     for range in source.ranges {
         decoder.seek(range.f0, source.pts)?;
         for _ in range.f0..=range.f1 {
             let Some(frame) = decoder.next_frame()? else {
                 break;
             };
-            let structure = source
-                .structure
-                .map_or(RegionSet::all(), |log| log.at(frame.index()));
-            let crops = cropper.crops(frame)?;
             // The analysis' structure signals gate the slots as they did in
             // its verification; without them (an analysis without OCR)
             // every region counts as on and the plan's boxes confirm the
             // slots alone.
-            let read = pass0
-                .read(&crops, true, structure, &stopped)
-                .map_err(|reason| {
-                    AppError::new(ErrorKind::OcrUnavailable, "OCR stopped.").with_detail(reason)
-                })?;
-            if !read {
-                return Err(canceled());
+            let structure = source
+                .structure
+                .map_or(RegionSet::all(), |log| log.at(frame.index()));
+            batch.push((cropper.crops(frame)?, structure));
+            if batch.len() == BATCH {
+                flush(&mut batch)?;
             }
-            frames += 1;
-            job.progress(frames, source.total);
         }
+    }
+    if !batch.is_empty() {
+        flush(&mut batch)?;
     }
     Ok(frames)
 }

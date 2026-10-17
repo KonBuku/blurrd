@@ -6,6 +6,8 @@ use std::thread::JoinHandle;
 
 use blurrd_core::{AppError, EncoderSetting, Luid};
 
+use crate::analysis::pass0::Warmed;
+
 /// Where the OCR runtime and models are.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -124,11 +126,21 @@ pub fn default_cache_dir() -> PathBuf {
 
 /// Runs blurrd's jobs. Cheap to create; jobs take `&self`, so one engine
 /// can serve several jobs at once.
-#[derive(Debug)]
 pub struct Engine {
     config: EngineConfig,
     /// Threads releasing what finished jobs held (see [`Engine::release`]).
     releases: Mutex<Vec<JoinHandle<()>>>,
+    /// The OCR engines of the last re-verification, kept for the next one
+    /// (see [`Engine::keep_ocr`]).
+    warm_ocr: Mutex<Option<Warmed>>,
+}
+
+impl std::fmt::Debug for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Engine {
@@ -143,7 +155,31 @@ impl Engine {
         Ok(Self {
             config,
             releases: Mutex::new(Vec::new()),
+            warm_ocr: Mutex::new(None),
         })
+    }
+
+    /// Keeps the OCR engines `warmed` for the next re-verification: an
+    /// edit is usually verified again soon after the previous one, and
+    /// building the engines takes over a second. Replaces (and releases)
+    /// the ones kept before.
+    pub(crate) fn keep_ocr(&self, warmed: Warmed) {
+        let previous = self
+            .warm_ocr
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .replace(warmed);
+        if let Some(previous) = previous {
+            self.release(previous);
+        }
+    }
+
+    /// Takes the OCR engines kept by [`Engine::keep_ocr`], if any.
+    pub(crate) fn take_ocr(&self) -> Option<Warmed> {
+        self.warm_ocr
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
     }
 
     /// Drops `held` on a thread of its own: closing OCR sessions takes
@@ -176,6 +212,11 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        // The kept engines close on a release thread too, so all of them
+        // close at the same time.
+        if let Some(warmed) = self.take_ocr() {
+            self.release(warmed);
+        }
         let releases = self
             .releases
             .get_mut()
