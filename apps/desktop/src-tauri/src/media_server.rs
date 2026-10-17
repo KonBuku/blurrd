@@ -2,8 +2,14 @@
 //! preview's video source, for videos of every size. The asset protocol
 //! is used only when this server cannot start: on WebView2 it hands
 //! every range through the webview's resource callback in pieces of
-//! about 1 MB, which made reading about three times and seeking about
-//! 2.5 times slower, and slower still while the window's thread is busy.
+//! about 1 MB. Measured in WebView2 155 with GPU decoding (1080p60 H.264,
+//! 1.26 GiB): its median far seek was a little faster (22-23 ms against
+//! 31 ms), but its tails were slower (90th percentile 103-107 ms against
+//! 59 ms, slowest +1.5 s seek 196-208 ms against 63 ms), its first bytes
+//! took twice as long (7 ms against 3 ms), it read 6 to 8 times slower
+//! (141-147 MB/s against 0.86-1.26 GB/s), held 3 times the host memory,
+//! and its seeks slowed to about 440 ms while the window's thread was
+//! busy, when this server's did not change.
 //!
 //! The server listens on 127.0.0.1 only, on a port the system picks,
 //! allows only the window's origin to read its answers (CORS), and

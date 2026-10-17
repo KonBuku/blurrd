@@ -2,8 +2,9 @@
 //!
 //! Every video plays from the loopback media server (see
 //! [`crate::media_server`]): it answers ranges directly from the file,
-//! which seeks faster and reads more than twice as fast as the asset
-//! protocol, also while the window's thread is busy. Only when the server
+//! with shorter seek tails, 6 to 8 times the throughput of the asset
+//! protocol and no slowdown while the window's thread is busy (the
+//! measurements are in its documentation). Only when the server
 //! could not start do videos play through Tauri's asset protocol, whose
 //! scope holds exactly the files the user chose (see [`crate::paths`]).
 

@@ -288,9 +288,12 @@ media server (`src-tauri/src/media_server.rs`): it listens on 127.0.0.1
 on a random port, answers only URLs with the random token of this app
 start and the id of an opened video or proxy (until `close_project`),
 and answers range requests straight from the file in 256 KiB writes. In
-WebView2 it read about three times faster than the asset protocol,
-seeked about 2.5 times faster and did not slow down while the window's
-thread was busy. Only when the server cannot start do videos play
+WebView2 with GPU decoding it read 6 to 8 times faster than the asset
+protocol and kept seek tails short (90th percentile 59 ms against
+103-107 ms, slowest seek 63 ms against about 200 ms; the asset
+protocol's median far seek was slightly lower, 22-23 ms against
+31 ms), and it did not slow down while the window's thread was busy.
+Only when the server cannot start do videos play
 through the asset protocol (`src-tauri/src/media.rs` logs it).
 
 ### Window shell
