@@ -384,6 +384,84 @@ fn analyze_render_and_run_a_recording() {
     assert!(rendered.is_file());
 }
 
+/// Whether ONNX Runtime and the OCR models are installed (the audit needs
+/// them).
+fn ocr_installed() -> bool {
+    let set = |var| std::env::var_os(var).is_some_and(|v| Path::new(&v).exists());
+    set("ORT_DYLIB_PATH") && set("BLURRD_MODEL_DIR")
+}
+
+#[test]
+fn audit_reads_a_rendered_output() {
+    if !ocr_installed() {
+        eprintln!("skipped: ONNX Runtime or the OCR models are not installed");
+        return;
+    }
+    let (dir, clip, project) = setup("audit", true, false);
+    let rendered = dir.path("rendered.mkv");
+    let out = blurrd(
+        &dir,
+        &[
+            "render",
+            s(&clip),
+            "--plan",
+            s(&project),
+            "-o",
+            s(&rendered),
+            "--encoder",
+            "ffv1",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let out = blurrd(
+        &dir,
+        &[
+            "audit",
+            s(&clip),
+            "--plan",
+            s(&project),
+            "-o",
+            s(&rendered),
+            "--no-gpu",
+            "--json",
+        ],
+        &[],
+    );
+    // A clip without names: nothing is readable, the output keeps its
+    // name.
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let lines = json_lines(&out);
+    let report = lines.last().unwrap();
+    assert_eq!(report["type"], "Report");
+    assert_eq!(report["renamed"], false);
+    assert_eq!(report["output"], s(&rendered));
+    assert_eq!(report["report"]["summary"]["state"], "Clean");
+    assert_eq!(
+        report["report"]["output_sha256"].as_str().map(str::len),
+        Some(64)
+    );
+    assert!(rendered.is_file());
+
+    // People get the leak report.
+    let out = blurrd(
+        &dir,
+        &[
+            "audit",
+            s(&clip),
+            "--plan",
+            s(&project),
+            "-o",
+            s(&rendered),
+            "--no-gpu",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("verify: clean"), "{text}");
+}
+
 #[test]
 fn run_writes_one_output_per_recording() {
     let dir = Workdir::new("run");

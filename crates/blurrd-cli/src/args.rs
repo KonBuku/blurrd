@@ -55,6 +55,9 @@ pub(crate) enum Command {
     Render(RenderArgs),
     /// Analyse and blur recordings in one pass and export them.
     Run(RunArgs),
+    /// Read a rendered output with OCR and report every name that is still
+    /// readable; an output with one is renamed `*_UNVERIFIED`.
+    Audit(AuditArgs),
 }
 
 /// Arguments of `blurrd probe`.
@@ -120,6 +123,23 @@ pub(crate) struct RunArgs {
     pub(crate) detect: DetectArgs,
     #[command(flatten)]
     pub(crate) export: ExportArgs,
+}
+
+/// Arguments of `blurrd audit`.
+#[derive(Debug, Args)]
+pub(crate) struct AuditArgs {
+    /// The recording the output was rendered from.
+    pub(crate) input: PathBuf,
+    /// The project file (`.blurrd.json`) the output was rendered with.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) plan: PathBuf,
+    /// The rendered output.
+    #[arg(short, long, value_name = "FILE")]
+    pub(crate) output: PathBuf,
+    /// Read every frame (default: one frame in six, as the verification's
+    /// dictionary pass).
+    #[arg(long)]
+    pub(crate) every_frame: bool,
 }
 
 /// How to export.

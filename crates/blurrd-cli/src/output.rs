@@ -2,10 +2,15 @@
 //! with `--json`, or a progress line on stderr and a short summary on
 //! stdout for people.
 
+use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
+use std::path::Path;
 use std::sync::Mutex;
 
-use blurrd_core::{AppError, JobEvent, JobId, JobKind, VerifyState, VerifySummary};
+use blurrd_core::{
+    AppError, JobEvent, JobId, JobKind, LeakKind, LeakStatus, VerifyReport, VerifyState,
+    VerifySummary, schema,
+};
 use blurrd_engine::ProgressSink;
 use serde::Serialize;
 
@@ -85,6 +90,8 @@ impl ProgressSink for Events {
                     JobKind::Analyze => "analyze",
                     JobKind::Render => "render",
                     JobKind::Run => "run",
+                    JobKind::Audit => "audit",
+                    JobKind::ReverifyRanges => "verify",
                     _ => "job",
                 };
             }
@@ -180,6 +187,50 @@ pub(crate) fn verify_line(verify: &VerifySummary) -> String {
         "verify: {state} ({} fixed, {} open, {} unverifiable, {} out of scope)",
         verify.fixed, verify.open, verify.unverifiable_items, verify.out_of_scope
     )
+}
+
+/// The leak report of a verification or an audit: the summary line, then
+/// one line per leak (frames, region, how it was found, its state and
+/// box) and the number of out-of-scope names. No text: reports hold none.
+pub(crate) fn leak_report(report: &VerifyReport) -> String {
+    let mut text = verify_line(&report.summary);
+    for leak in report
+        .leaks
+        .iter()
+        .filter(|l| l.kind != LeakKind::OutOfScope)
+    {
+        let kind = match leak.kind {
+            LeakKind::Dictionary => "dictionary",
+            _ => "dictionary-free",
+        };
+        let status = match leak.status {
+            LeakStatus::Fixed => "fixed",
+            LeakStatus::Accepted => "accepted",
+            _ => "OPEN",
+        };
+        let region = leak.region.map_or("-", |r| r.key());
+        let r = leak.rect;
+        let _ = write!(
+            text,
+            "\n  frames {}-{}  {region}  {kind}  {status}  box {},{} {}x{}",
+            leak.frame_range.f0,
+            leak.frame_range.f1,
+            r.x0,
+            r.y0,
+            r.width(),
+            r.height()
+        );
+    }
+    text
+}
+
+/// The leak report of the verification report at `path`, or the summary
+/// line alone when the report cannot be read.
+pub(crate) fn leak_report_file(path: &Path, summary: &VerifySummary) -> String {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| schema::from_json::<VerifyReport>(&text).ok())
+        .map_or_else(|| verify_line(summary), |report| leak_report(&report))
 }
 
 /// `error: <message> (<detail>)`.

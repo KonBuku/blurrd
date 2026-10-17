@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::Outcome;
 use crate::args::AnalyzeArgs;
-use crate::output::{Events, verify_line};
+use crate::output::{Events, leak_report_file, verify_line};
 
 /// The final report line of an analysis.
 #[derive(Debug, Serialize)]
@@ -56,12 +56,16 @@ pub(crate) fn analyze(
             .unwrap_or(&report.project_file)
             .display(),
     );
-    match &report.verify {
-        Some(verify) => {
+    match (&report.verify, &report.verify_report) {
+        (Some(verify), Some(path)) => {
+            summary.push('\n');
+            summary.push_str(&leak_report_file(path, verify));
+        }
+        (Some(verify), None) => {
             summary.push('\n');
             summary.push_str(&verify_line(verify));
         }
-        None => summary.push_str("\nnot verified (no OCR)"),
+        (None, _) => summary.push_str("\nnot verified (no OCR)"),
     }
     events.report(
         &Report {

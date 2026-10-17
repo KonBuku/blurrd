@@ -8,6 +8,7 @@ blurrd probe   <input> [--json]
 blurrd analyze <input> [--regions LIST] [--no-verify] [-o project.blurrd.json]
 blurrd render  <input> --plan <project.blurrd.json> -o <output> [export options]
 blurrd run     <input>... -o <output|folder> [--regions LIST] [--no-verify] [export options]
+blurrd audit   <input> --plan <project.blurrd.json> -o <output> [--every-frame]
 ```
 
 Global options (before or after the command):
@@ -130,6 +131,31 @@ never changes the output silently. H.264 on NVENC runs as two parallel
 sessions on keyframe-aligned segments (the two encoder engines of current
 NVIDIA GPUs); HEVC and AV1 split each frame across them instead.
 
+## `blurrd audit`
+
+Reads a rendered output with OCR, as an end-to-end check of what the
+encoder wrote. It reads the recording's protected zones as the analysis
+does (one frame in six, or every frame with `--every-frame`), then the
+output's pixels of every name part found there, not only the parts the
+boxes leave open, and lists every name that is still readable. An output
+with a readable name is renamed `<name>_UNVERIFIED.<ext>` and the exit code
+is 3. The report, `audit-<revision>.json` in the cache, carries the
+output's SHA-256.
+
+| Option              | Meaning                                   |
+| ------------------- | ----------------------------------------- |
+| `--plan FILE`       | The project the output was rendered with. |
+| `-o, --output FILE` | The rendered output.                      |
+| `--every-frame`     | Read every frame instead of one in six.   |
+
+### Leak report
+
+`analyze`, `run` and `audit` end with a leak report: the result and its
+counts, then one line per leak with its frames, region, how it was found
+(`dictionary`: it matches a name read elsewhere in the recording;
+`dictionary-free`: confident text of name length in a name slot), its
+state (`fixed`, `OPEN`) and its box in source pixels. It never shows text.
+
 ## JSON output
 
 With `--json`, `analyze`, `render` and `run` print the job's events, one per
@@ -172,16 +198,19 @@ or `null`). A run reports `runs`: per written recording its `analysis` and
 `render` reports, whether it `streamed`, whether it was `rerendered` with
 fix boxes, and its `elapsed_ms`.
 
+An audit reports `report_file`, `output` (the final name), `renamed`,
+`frames`, `elapsed_ms` and `report` (the whole `blurrd-verify/1` report).
+
 `probe --json` prints the `MediaInfo` object. Errors outside a job are
 printed as `{"type": "Error", "error": {"kind": "NotFound", "message": "…",
 "detail": "…"}}`.
 
 ## Exit codes
 
-| Code | Meaning                                                      |
-| ---- | ------------------------------------------------------------ |
-| 0    | Success.                                                     |
-| 1    | Error (the message says which).                              |
-| 2    | Invalid arguments.                                           |
-| 3    | The output was written but is not verified (`*_UNVERIFIED`). |
-| 130  | Canceled with Ctrl+C; no output is left behind.              |
+| Code | Meaning                                                                                          |
+| ---- | ------------------------------------------------------------------------------------------------ |
+| 0    | Success.                                                                                         |
+| 1    | Error (the message says which).                                                                  |
+| 2    | Invalid arguments.                                                                               |
+| 3    | The output was written but is not verified (`*_UNVERIFIED`), or the audit found a readable name. |
+| 130  | Canceled with Ctrl+C; no output is left behind.                                                  |

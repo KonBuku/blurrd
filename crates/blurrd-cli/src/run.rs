@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::Outcome;
 use crate::args::RunArgs;
-use crate::output::{Events, verify_line};
+use crate::output::{Events, leak_report_file, verify_line};
 use crate::render::{export_settings, summary};
 
 /// Containers an output keeps from its input; other inputs become MP4.
@@ -74,9 +74,12 @@ pub(crate) fn run(
     }
     let summaries: Vec<String> = reports
         .iter()
-        .map(|r| match &r.analysis.verify {
-            Some(verify) => format!("{}\n{}", summary(&r.render), verify_line(verify)),
-            None => summary(&r.render),
+        .map(|r| match (&r.analysis.verify, &r.analysis.verify_report) {
+            (Some(verify), Some(path)) => {
+                format!("{}\n{}", summary(&r.render), leak_report_file(path, verify))
+            }
+            (Some(verify), None) => format!("{}\n{}", summary(&r.render), verify_line(verify)),
+            (None, _) => summary(&r.render),
         })
         .collect();
     events.report(&Report { runs: &reports }, &summaries.join("\n"));

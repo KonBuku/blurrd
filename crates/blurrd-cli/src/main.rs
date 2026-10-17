@@ -1,19 +1,23 @@
 //! `blurrd`, the command-line tool.
 //!
 //! Commands: `probe` shows what blurrd knows about a recording, `analyze`
-//! finds the names and saves the project, `render` blurs a recording with
-//! an analysed project, `run` does both in one streaming pass. With
-//! `--json`, every job event is one JSON line on stdout (the same form the
-//! desktop app receives), followed by a final `{"type":"Report", …}` line.
+//! finds the names, verifies the blurred result with OCR and saves the
+//! project, `render` blurs a recording with an analysed project, `run`
+//! does both in one streaming pass, `audit` reads a rendered output with
+//! OCR. With `--json`, every job event is one JSON line on stdout (the
+//! same form the desktop app receives), followed by a final
+//! `{"type":"Report", …}` line. The leak report lists frames, regions,
+//! boxes and states, never text.
 //!
 //! Exit codes: 0 success, 1 error, 2 invalid arguments, 3 the output was
-//! written but is not verified (named `*_UNVERIFIED`), 130 canceled with
-//! Ctrl+C.
+//! written but is not verified (named `*_UNVERIFIED`) or the audit found a
+//! readable name, 130 canceled with Ctrl+C.
 
 #![forbid(unsafe_code)]
 
 mod analyze;
 mod args;
+mod audit;
 mod output;
 mod probe;
 mod render;
@@ -113,6 +117,7 @@ fn job(command: &Command, global: &Global) -> Outcome {
         Command::Analyze(args) => analyze::analyze(args, &engine, &events, &cancel),
         Command::Render(args) => render::render(args, &engine, &events, &cancel),
         Command::Run(args) => run::run(args, &engine, &events, &cancel),
+        Command::Audit(args) => audit::audit(args, &engine, &events, &cancel),
         // Probing needs no job; `main` handles it.
         Command::Probe(_) => Outcome::Done { unverified: false },
     }
