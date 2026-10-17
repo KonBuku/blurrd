@@ -297,6 +297,18 @@ fn resample(
     let round = 1i64 << (2 * WEIGHT_BITS - 1);
     for (j, line) in out.chunks_exact_mut(line_len).enumerate() {
         let (start, weights) = f.y.of(j);
+        if let Some(k) = unit_tap(weights) {
+            // One source row with the whole weight (the frame height is
+            // the reference's): (v * ONE + round) >> 2 BITS is
+            // (v + ONE / 2) >> BITS, without the wide products.
+            let row = (start + k).clamp(r0, r1 - 1) - r0;
+            let filtered = &rows[row * line_len..(row + 1) * line_len];
+            let half = WEIGHT_ONE >> 1;
+            for (value, &v) in line.iter_mut().zip(filtered) {
+                *value = ((v + half) >> WEIGHT_BITS).clamp(0, 255) as u8;
+            }
+            continue;
+        }
         sums.clear();
         sums.resize(line_len, 0);
         for (k, &w) in weights.iter().enumerate() {
@@ -315,11 +327,18 @@ fn resample(
     }
 }
 
+/// The index of the only tap of `weights` that carries weight, when it
+/// carries all of it.
+fn unit_tap(weights: &[i32]) -> Option<usize> {
+    let k = weights.iter().position(|&w| w != 0)?;
+    (weights[k] == WEIGHT_ONE && weights[k + 1..].iter().all(|&w| w == 0)).then_some(k)
+}
+
 #[cfg(test)]
 mod tests {
     use blurrd_core::{HudAnchor, HudGeometry, HudLayout, RectI};
 
-    use super::{CropFilters, HudCrop, HudSampler, WEIGHT_BITS, cubic};
+    use super::{CropFilters, HudCrop, HudSampler, WEIGHT_BITS, cubic, unit_tap};
     use crate::image::RgbView;
 
     /// A smooth test image: every channel a different slow wave of the
@@ -448,16 +467,32 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_tap_is_found_only_when_it_carries_all_the_weight() {
+        let one = 1 << WEIGHT_BITS;
+        assert_eq!(unit_tap(&[0, 0, one, 0, 0]), Some(2));
+        assert_eq!(unit_tap(&[one, 0]), Some(0));
+        assert_eq!(unit_tap(&[0, one - 1, 1, 0]), None);
+        assert_eq!(unit_tap(&[0, 0]), None);
+        let g = HudGeometry::for_layout(1920, 1080, HudLayout::Stretched4x3);
+        let roi = RectI::new(660, 80, 1920, 412).unwrap();
+        let filters = HudSampler::new(g).filters(roi, HudAnchor::Right, (1920, 1080));
+        assert!((0..filters.y.starts.len()).all(|j| unit_tap(filters.y.of(j).1).is_some()));
+    }
+
+    #[test]
     fn resampling_equals_its_per_pixel_definition() {
         // Small frames keep the definition fast; the crops reach past every
-        // frame edge, and the layouts cover upscaling, downscaling and a
-        // stretched width.
+        // frame edge, and the layouts cover upscaling, downscaling, a
+        // stretched width and the reference height (one source row per
+        // output row).
         let layouts = [
             (320, 180, HudLayout::Auto),
             (640, 360, HudLayout::Auto),
             (2400, 1350, HudLayout::Auto),
             (320, 180, HudLayout::Stretched4x3),
             (320, 240, HudLayout::Auto),
+            (1920, 1080, HudLayout::Stretched4x3),
+            (1920, 1200, HudLayout::Letterbox { bar_px: 60 }),
         ];
         let crops = [
             (RectI::new(1700, 0, 1920, 60).unwrap(), HudAnchor::Right),
