@@ -17,8 +17,11 @@
 //! ([`Reader`]s: the kill feed and banner, the left panel, the screen
 //! surfaces, the full frame), each on its own thread, and every reader
 //! recognises the lines of the frames waiting for it in one go. The
-//! dictionary and the lines stay in memory for the verification; the
-//! counters go into the analysis report.
+//! analysis does not wait for the engines: they are built while the video
+//! is probed and calibrated and while the detectors already run
+//! ([`Opening`]), and the zones due in the meantime wait in the readers'
+//! queues. The dictionary and the lines stay in memory for the
+//! verification; the counters go into the analysis report.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -40,8 +43,11 @@ use crate::verify::{HudRead, LineLog};
 /// fill the recognition batches.
 const BATCH_FRAMES: usize = 8;
 
-/// Frames waiting for each reader of an analysis at most.
-const READER_QUEUE: usize = 16;
+/// Frames waiting for each reader of an analysis at most: enough for the
+/// zones the analysis queues while the engines are still being built
+/// (about a second at several hundred frames per second, a few dozen
+/// reads per reader), so the detectors do not wait for them.
+const READER_QUEUE: usize = 64;
 
 /// The OCR side of pass 0, ready to read.
 pub(crate) struct Pass0 {
@@ -259,10 +265,251 @@ impl Warmed {
         })
     }
 
+    /// The engines of `warmed` with the ones missing for the zone sizes
+    /// in `specs` built from `setup` (at the same time); all of them
+    /// when nothing was warmed.
+    fn complete(
+        warmed: Option<Self>,
+        setup: &OcrSetup,
+        adapter: Option<Luid>,
+        specs: &[Vec<ZoneSpec>],
+    ) -> Result<Self, String> {
+        let Some(mut warmed) = warmed else {
+            return Self::build(setup, adapter, specs.to_vec());
+        };
+        let missing: Vec<Vec<ZoneSpec>> = specs
+            .iter()
+            .filter(|zones| !warmed.engines.iter().any(|(z, _)| z == *zones))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            tracing::debug!(
+                engines = missing.len(),
+                "building OCR engines for the calibrated zone sizes"
+            );
+            warmed
+                .engines
+                .extend(Self::build(setup, adapter, missing)?.engines);
+        }
+        Ok(warmed)
+    }
+
     /// Takes the engine built for exactly the zone sizes `zones`.
-    fn take(&mut self, zones: &[ZoneSpec]) -> Option<Result<OcrEngine, String>> {
-        let i = self.engines.iter().position(|(z, _)| z == zones)?;
-        Some(self.engines.swap_remove(i).1)
+    fn take(&mut self, zones: &[ZoneSpec]) -> Result<OcrEngine, String> {
+        let i = self
+            .engines
+            .iter()
+            .position(|(z, _)| z == zones)
+            .ok_or_else(|| String::from("an OCR engine is missing"))?;
+        let ocr = self.engines.swap_remove(i).1?;
+        if let Some(reason) = ocr.fallback() {
+            tracing::info!(%reason, "OCR runs on the CPU");
+        }
+        Ok(ocr)
+    }
+}
+
+/// The engines a finished warm-up built: `None` when it did not finish
+/// (they are built again), the reason when OCR cannot run.
+fn warmed(warming: Option<Warming>) -> Result<Option<Warmed>, String> {
+    match warming.map(std::thread::JoinHandle::join) {
+        Some(Ok(Ok(warmed))) => Ok(Some(warmed)),
+        Some(Ok(Err(reason))) => Err(reason),
+        Some(Err(_)) | None => Ok(None),
+    }
+}
+
+/// An empty line log of the video `info`.
+fn line_log(info: &MediaInfo) -> LineLog {
+    let fps = f64::from(info.fps.num) / f64::from(info.fps.den.max(1));
+    LineLog::new((fps * 0.5).round().clamp(1.0, 1e6) as u32)
+}
+
+/// What the crop workers cut for the zones of `builders`, with full-frame
+/// samples as `log` takes them.
+fn ocr_reads<'a>(builders: impl Iterator<Item = &'a DictionaryBuilder>, log: &LineLog) -> OcrReads {
+    let mut screens = [None; 4];
+    for zone in builders.flat_map(DictionaryBuilder::zones) {
+        if let ZoneKind::Screen(region) = zone.kind
+            && let Some(i) = Region::SCREENS.iter().position(|&r| r == region)
+        {
+            screens[i] = Some(zone.rect);
+        }
+    }
+    OcrReads {
+        full_every: log.full_every(),
+        screens,
+    }
+}
+
+/// Pass 0 of an analysis whose OCR engines may still be building: the
+/// analysis starts right away, and [`Opening::run`] hands each reader its
+/// engine as soon as it is built (the zones due before wait in the
+/// reader's queue).
+pub(crate) struct Opening {
+    setup: OcrSetup,
+    adapter: Option<Luid>,
+    warming: Option<Warming>,
+    /// One per reader, with the zone sizes its engine is built for.
+    builders: Vec<DictionaryBuilder>,
+    specs: Vec<Vec<ZoneSpec>>,
+    coverage: Coverage,
+    log: LineLog,
+}
+
+impl Opening {
+    /// Pass 0 for the video `info` with the HUD at `geometry`, reading the
+    /// screen surfaces of `regions` and the frames of `coverage` with up
+    /// to `readers` OCR engines (as [`Pass0::open`]); the engines of
+    /// `warming` built for the right zone sizes are used, the others are
+    /// built from `setup` once the warm-up finished.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "what pass 0 reads and with which engines; a struct would only name them again"
+    )]
+    pub(crate) fn new(
+        setup: &OcrSetup,
+        adapter: Option<Luid>,
+        geometry: &HudGeometry,
+        info: &MediaInfo,
+        regions: RegionSet,
+        coverage: Coverage,
+        readers: usize,
+        warming: Option<Warming>,
+    ) -> Self {
+        let builders = builders(geometry, (info.width, info.height), regions, readers);
+        let specs = builders.iter().map(DictionaryBuilder::zone_specs).collect();
+        Self {
+            setup: setup.clone(),
+            adapter,
+            warming,
+            builders,
+            specs,
+            coverage,
+            log: line_log(info),
+        }
+    }
+
+    /// What the crop workers cut for this pass 0.
+    pub(crate) fn reads(&self) -> OcrReads {
+        ocr_reads(self.builders.iter(), &self.log)
+    }
+
+    /// Reads the frames from `frames` until it closes or `stopped` says
+    /// the analysis stops (an error or a cancellation: the frames still
+    /// queued are dropped unread), each reader on a thread of its own
+    /// once its engine is built. `structure` delivers `(frame, structure)`
+    /// from each of the `hud_stages` HUD stages. Returns pass 0 with what
+    /// it read; fails with the reason when OCR cannot run or fails.
+    pub(crate) fn run(
+        self,
+        frames: &Receiver<Arc<FrameCrops>>,
+        structure: &Receiver<(u32, Structure)>,
+        hud_stages: usize,
+        stopped: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Pass0, String> {
+        let Self {
+            setup,
+            adapter,
+            warming,
+            builders,
+            specs,
+            coverage,
+            mut log,
+        } = self;
+        let mut schedule = ReadSchedule::new(coverage, log.half_second());
+        log.set_hud_spacing(schedule.spacing());
+        let half_second = log.half_second();
+        let plans: Vec<Vec<ZoneKind>> = builders
+            .iter()
+            .map(|b| b.zones().iter().map(|z| z.kind).collect())
+            .collect();
+        let mut counted = 0u64;
+        // The runtime is bound before the readers, so their sessions are
+        // closed first on every path (the runtime must outlive them).
+        let (runtime, served) = std::thread::scope(|scope| {
+            let mut queues: Vec<Sender<Task>> = Vec::with_capacity(builders.len());
+            let mut handoffs = Vec::with_capacity(builders.len());
+            let mut workers = Vec::with_capacity(builders.len());
+            for builder in builders {
+                let (tx, rx) = bounded::<Task>(READER_QUEUE);
+                let (give, take) = bounded::<Result<OcrEngine, String>>(1);
+                queues.push(tx);
+                handoffs.push(give);
+                workers.push(scope.spawn(move || {
+                    let ocr = take
+                        .recv()
+                        .unwrap_or_else(|_| Err(String::from("the OCR engines were not built")))?;
+                    let mut reader = Reader { ocr, builder };
+                    let part = reader.serve(&rx, half_second, stopped)?;
+                    Ok((reader, part))
+                }));
+            }
+            // The engines are finished on a thread of their own while the
+            // readers' queues fill.
+            let specs = &specs;
+            let engines = scope.spawn(move || {
+                match warmed(warming).and_then(|w| Warmed::complete(w, &setup, adapter, specs)) {
+                    Ok(mut warmed) => {
+                        for (give, zones) in handoffs.iter().zip(specs) {
+                            let _ = give.send(warmed.take(zones));
+                        }
+                        Some(warmed.runtime)
+                    }
+                    Err(reason) => {
+                        for give in &handoffs {
+                            let _ = give.send(Err(reason.clone()));
+                        }
+                        None
+                    }
+                }
+            });
+            let kinds: Vec<ZoneKind> = plans.iter().flatten().copied().collect();
+            let mut signals = Signals::new(hud_stages);
+            for crops in frames {
+                let index = crops.index;
+                let Some(seen) = signals.wait(index, structure, stopped) else {
+                    break;
+                };
+                let screens = Region::SCREENS.map(|region| {
+                    let kind = ZoneKind::Screen(region);
+                    kinds.contains(&kind) && crops.has_zone(kind)
+                });
+                let due = schedule.due(index, &seen, screens);
+                let Some(read) = dispatch(&plans, &queues, &crops, due) else {
+                    break;
+                };
+                counted += u64::from(read);
+                if !seen.regions.is_empty() {
+                    log.record(index, HudRead::NONE, seen.regions, Vec::new());
+                }
+            }
+            drop(queues);
+            let runtime = engines.join().ok().flatten();
+            let served: Vec<Result<(Reader, LineLog), String>> = workers
+                .into_iter()
+                .map(|worker| {
+                    worker
+                        .join()
+                        .unwrap_or_else(|_| Err(String::from("an OCR worker panicked")))
+                })
+                .collect();
+            (runtime, served)
+        });
+        let served = served.into_iter().collect::<Result<Vec<_>, String>>()?;
+        let runtime = runtime.ok_or_else(|| String::from("the OCR runtime is missing"))?;
+        let mut readers = Vec::with_capacity(served.len());
+        for (reader, part) in served {
+            log.absorb(part);
+            readers.push(reader);
+        }
+        Ok(Pass0 {
+            _runtime: runtime,
+            readers,
+            coverage,
+            log,
+            frames: counted,
+        })
     }
 }
 
@@ -332,61 +579,26 @@ impl Pass0 {
         let builders = builders(geometry, (info.width, info.height), regions, readers);
         let specs: Vec<Vec<ZoneSpec>> =
             builders.iter().map(DictionaryBuilder::zone_specs).collect();
-        let mut warmed = match warmed {
-            Some(mut warmed) => {
-                let missing: Vec<Vec<ZoneSpec>> = specs
-                    .iter()
-                    .filter(|zones| !warmed.engines.iter().any(|(z, _)| z == *zones))
-                    .cloned()
-                    .collect();
-                if !missing.is_empty() {
-                    tracing::debug!(
-                        engines = missing.len(),
-                        "building OCR engines for the calibrated zone sizes"
-                    );
-                    warmed
-                        .engines
-                        .extend(Warmed::build(setup, adapter, missing)?.engines);
-                }
-                warmed
-            }
-            None => Warmed::build(setup, adapter, specs.clone())?,
-        };
+        let mut warmed = Warmed::complete(warmed, setup, adapter, &specs)?;
         let mut readers = Vec::with_capacity(builders.len());
         for (builder, zones) in builders.into_iter().zip(&specs) {
-            let ocr = warmed
-                .take(zones)
-                .unwrap_or_else(|| Err(String::from("an OCR engine is missing")))?;
-            if let Some(reason) = ocr.fallback() {
-                tracing::info!(%reason, "OCR runs on the CPU");
-            }
-            readers.push(Reader { ocr, builder });
+            readers.push(Reader {
+                ocr: warmed.take(zones)?,
+                builder,
+            });
         }
-        let fps = f64::from(info.fps.num) / f64::from(info.fps.den.max(1));
-        let half_second = (fps * 0.5).round().clamp(1.0, 1e6) as u32;
         Ok(Self {
             _runtime: warmed.runtime,
             readers,
             coverage,
-            log: LineLog::new(half_second),
+            log: line_log(info),
             frames: 0,
         })
     }
 
     /// What the crop workers cut for this pass 0.
     pub(crate) fn reads(&self) -> OcrReads {
-        let mut screens = [None; 4];
-        for zone in self.readers.iter().flat_map(|r| r.builder.zones()) {
-            if let ZoneKind::Screen(region) = zone.kind
-                && let Some(i) = Region::SCREENS.iter().position(|&r| r == region)
-            {
-                screens[i] = Some(zone.rect);
-            }
-        }
-        OcrReads {
-            full_every: self.log.full_every(),
-            screens,
-        }
+        ocr_reads(self.readers.iter().map(|r| &r.builder), &self.log)
     }
 
     /// The counters so far.
@@ -419,73 +631,6 @@ impl Pass0 {
             whitelist: reader.builder.whitelist(),
             log: &self.log,
         }
-    }
-
-    /// Reads the frames from `frames` until it closes or `stopped` says
-    /// the analysis stops (an error or a cancellation: the frames still
-    /// queued are dropped unread), each reader on a thread of its own.
-    /// `structure` delivers `(frame, structure)` from each of the
-    /// `hud_stages` HUD stages. Returns itself with what it read; fails
-    /// with the reason when OCR fails.
-    pub(crate) fn run(
-        mut self,
-        frames: &Receiver<Arc<FrameCrops>>,
-        structure: &Receiver<(u32, Structure)>,
-        hud_stages: usize,
-        stopped: &(dyn Fn() -> bool + Sync),
-    ) -> Result<Self, String> {
-        let mut schedule = ReadSchedule::new(self.coverage, self.log.half_second());
-        self.log.set_hud_spacing(schedule.spacing());
-        let half_second = self.log.half_second();
-        let Self {
-            readers,
-            log,
-            frames: counted,
-            ..
-        } = &mut self;
-        let plans: Vec<Vec<ZoneKind>> = readers.iter().map(Reader::kinds).collect();
-        let logs = std::thread::scope(|scope| {
-            let mut queues: Vec<Sender<Task>> = Vec::with_capacity(readers.len());
-            let mut workers = Vec::with_capacity(readers.len());
-            for reader in readers.iter_mut() {
-                let (tx, rx) = bounded::<Task>(READER_QUEUE);
-                queues.push(tx);
-                workers.push(scope.spawn(move || reader.serve(&rx, half_second, stopped)));
-            }
-            let kinds: Vec<ZoneKind> = plans.iter().flatten().copied().collect();
-            let mut signals = Signals::new(hud_stages);
-            for crops in frames {
-                let index = crops.index;
-                let Some(seen) = signals.wait(index, structure, stopped) else {
-                    break;
-                };
-                let screens = Region::SCREENS.map(|region| {
-                    let kind = ZoneKind::Screen(region);
-                    kinds.contains(&kind) && crops.has_zone(kind)
-                });
-                let due = schedule.due(index, &seen, screens);
-                let Some(read) = dispatch(&plans, &queues, &crops, due) else {
-                    break;
-                };
-                *counted += u64::from(read);
-                if !seen.regions.is_empty() {
-                    log.record(index, HudRead::NONE, seen.regions, Vec::new());
-                }
-            }
-            drop(queues);
-            workers
-                .into_iter()
-                .map(|worker| {
-                    worker
-                        .join()
-                        .unwrap_or_else(|_| Err(String::from("an OCR worker panicked")))
-                })
-                .collect::<Vec<_>>()
-        });
-        for part in logs {
-            self.log.absorb(part?);
-        }
-        Ok(self)
     }
 
     /// Reads the zones of one frame's `crops`: the HUD zones when `hud`

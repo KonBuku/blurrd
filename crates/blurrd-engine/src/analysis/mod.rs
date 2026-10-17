@@ -25,7 +25,7 @@ use blurrd_video::{
 use serde::Serialize;
 
 use self::frame::Cropper;
-use self::pass0::{Pass0, Warming};
+use self::pass0::{Opening, Pass0, Warming};
 use self::pipeline::{Pipeline, PipelineOutput};
 use self::previews::Previews;
 use self::tracks::TrackBuilder;
@@ -148,7 +148,8 @@ pub(crate) struct Prepared {
     pub(crate) colour: VideoColour,
     pub(crate) converter: RgbConverter,
     pub(crate) decode: DecodeOptions,
-    pub(crate) pass0: Option<Pass0>,
+    /// Pass 0, its engines possibly still building.
+    pub(crate) pass0: Option<Opening>,
 }
 
 /// What a verification after the detectors produced.
@@ -187,7 +188,8 @@ impl Engine {
             .with_detail(format!("{}x{}: {error}", header.width, header.height)));
         }
         // The OCR engines are built while the video is probed and
-        // calibrated.
+        // calibrated, and while the detectors start (pass 0 waits for
+        // them, the analysis does not).
         let warming = self.warm_up_ocr(req, (header.width, header.height));
         // The calibration reads its samples while the probe scans the
         // packets; both come before the analysis can start.
@@ -287,8 +289,10 @@ impl Engine {
         }
     }
 
-    /// Opens pass 0 with the engines `warming` built, or warns that the
-    /// result stays unverified.
+    /// Pass 0 with the engines `warming` builds (the others are built
+    /// when it runs), or warns that the result stays unverified when OCR
+    /// is not installed. Engines that cannot be built stop pass 0 when it
+    /// runs, with the same warning.
     fn open_pass0(
         &self,
         geometry: &HudGeometry,
@@ -296,42 +300,29 @@ impl Engine {
         req: &AnalyzeRequest,
         warming: Option<Warming>,
         job: &Job<'_>,
-    ) -> Option<Pass0> {
+    ) -> Option<Opening> {
         let config = self.config();
-        let warmed = match warming.map(std::thread::JoinHandle::join) {
-            Some(Ok(Ok(warmed))) => Some(warmed),
-            Some(Ok(Err(reason))) => {
-                job.warning(
-                    WarningCode::OcrUnavailable,
-                    format!("OCR cannot run ({reason}); the result is not verified."),
-                    None,
-                );
-                return None;
-            }
-            Some(Err(_)) | None => None,
+        let Some(setup) = &config.ocr else {
+            job.warning(
+                WarningCode::OcrUnavailable,
+                String::from(
+                    "OCR cannot run (ONNX Runtime and the OCR models are not installed); the \
+                     result is not verified.",
+                ),
+                None,
+            );
+            return None;
         };
-        let reason = match &config.ocr {
-            Some(setup) => match Pass0::open(
-                setup,
-                config.adapter,
-                geometry,
-                info,
-                req.regions,
-                req.coverage,
-                config.pools.ocr_readers,
-                warmed,
-            ) {
-                Ok(pass0) => return Some(pass0),
-                Err(reason) => reason,
-            },
-            None => String::from("ONNX Runtime and the OCR models are not installed"),
-        };
-        job.warning(
-            WarningCode::OcrUnavailable,
-            format!("OCR cannot run ({reason}); the result is not verified."),
-            None,
-        );
-        None
+        Some(Opening::new(
+            setup,
+            config.adapter,
+            geometry,
+            info,
+            req.regions,
+            req.coverage,
+            config.pools.ocr_readers,
+            warming,
+        ))
     }
 
     /// Analyses a video: detects and tracks the names of `req.regions`,
@@ -412,7 +403,7 @@ impl Engine {
             req.regions,
             (info.width, info.height),
         )?;
-        let reads = pass0.as_ref().map(Pass0::reads);
+        let reads = pass0.as_ref().map(Opening::reads);
         let pipeline = Pipeline {
             input: &req.input,
             decode,

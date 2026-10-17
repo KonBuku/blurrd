@@ -32,7 +32,7 @@ use blurrd_video::{DecodeOptions, Decoder, VideoFrame};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
 use super::frame::{Cropper, FrameCrops};
-use super::pass0::Pass0;
+use super::pass0::{Opening, Pass0};
 use super::previews::{PreviewOutput, Previews};
 use super::stages::{Emitted, SOURCES, Stage, Structure};
 use super::tracks::{RegionBox, TrackBuilder};
@@ -76,8 +76,8 @@ pub(crate) struct Pipeline<'a> {
     pub(crate) stages: Vec<Box<dyn Stage>>,
     /// Which sources the stages feed.
     pub(crate) sources: [bool; SOURCES],
-    /// Pass 0, when OCR runs.
-    pub(crate) pass0: Option<Pass0>,
+    /// Pass 0, when OCR runs (its engines may still be building).
+    pub(crate) pass0: Option<Opening>,
     /// Thumbnails and the proxy, when wanted.
     pub(crate) previews: Option<Previews>,
     /// Pool and queue sizes.
@@ -379,10 +379,10 @@ fn decode_frames(
 type Pass0Worker = Result<std::thread::JoinHandle<Result<Pass0, String>>, String>;
 
 /// Starts pass 0 on its own thread, outside the pipeline's scope: an OCR
-/// call cannot be interrupted, and closing the OCR sessions takes a few
-/// hundred milliseconds, so a stopping pipeline does not wait for them.
+/// call cannot be interrupted, and building or closing the OCR sessions
+/// takes up to a second, so a stopping pipeline does not wait for them.
 fn spawn_pass0(
-    pass0: Pass0,
+    pass0: Opening,
     frames: Receiver<Arc<FrameCrops>>,
     structure: Receiver<(u32, Structure)>,
     hud_stages: usize,
