@@ -84,9 +84,17 @@ fn push_latin_base(c: char, out: &mut String) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Whitelist {
     words: BTreeSet<String>,
+    /// Callout words that form a listed compound when OCR drops or
+    /// replaces the space between them ([`Self::COMPOUND_PART_MIN`]).
+    compound_parts: BTreeSet<String>,
 }
 
 impl Whitelist {
+    /// Shortest callout word that is part of a compound callout: the
+    /// one-letter site names stay out, so a compound needs real words
+    /// (`midtop`, not `ab`).
+    pub const COMPOUND_PART_MIN: usize = 3;
+
     /// HUD words, banner titles, system words and the location words of
     /// the voice-chat lines of the supported client languages.
     const HUD: &'static [&'static str] = &[
@@ -289,14 +297,21 @@ impl Whitelist {
     /// words of the supported client languages, agent names, map callouts
     /// and the buy menu's words.
     pub fn hud_default() -> Self {
-        Self::from_words(
+        let mut list = Self::from_words(
             Self::HUD
                 .iter()
                 .chain(Self::AGENTS)
                 .chain(Self::CALLOUTS)
                 .chain(Self::BUY_MENU)
                 .copied(),
-        )
+        );
+        list.compound_parts = Self::CALLOUTS
+            .iter()
+            .copied()
+            .map(fold)
+            .filter(|w| w.chars().count() >= Self::COMPOUND_PART_MIN)
+            .collect();
+        list
     }
 
     /// A list of the given words (folded).
@@ -307,13 +322,43 @@ impl Whitelist {
                 .map(fold)
                 .filter(|w| !w.is_empty())
                 .collect(),
+            compound_parts: BTreeSet::new(),
         }
     }
 
-    /// Whether the folded text is a listed word or a distance marker of
-    /// a ping or callout (`28m`).
+    /// Whether the folded text is a listed word, a distance marker of a
+    /// ping or callout (`28m`) or a compound callout: two or more callout
+    /// words that OCR read without the space between them (`Mid Top` as
+    /// `Mid-Top` or `MidTop.`, both folded to `midtop`).
     pub fn contains(&self, folded: &str) -> bool {
-        self.words.contains(folded) || is_distance(folded)
+        self.words.contains(folded) || is_distance(folded) || self.is_compound(folded)
+    }
+
+    /// Whether the folded text splits into two or more compound parts.
+    fn is_compound(&self, folded: &str) -> bool {
+        let chars: Vec<usize> = folded
+            .char_indices()
+            .map(|(b, _)| b)
+            .chain(std::iter::once(folded.len()))
+            .collect();
+        let n = chars.len() - 1;
+        if self.compound_parts.is_empty() || n < 2 * Self::COMPOUND_PART_MIN {
+            return false;
+        }
+        // parts[i]: the most parts the first i characters split into.
+        let mut parts: Vec<Option<usize>> = vec![None; n + 1];
+        parts[0] = Some(0);
+        for end in 1..=n {
+            parts[end] = (0..end)
+                .filter_map(|start| {
+                    let before = parts[start]?;
+                    self.compound_parts
+                        .contains(&folded[chars[start]..chars[end]])
+                        .then_some(before + 1)
+                })
+                .max();
+        }
+        parts[n].is_some_and(|count| count >= 2)
     }
 
     /// Whether the folded text is a run of listed words without separators
@@ -506,6 +551,13 @@ mod tests {
         assert!(list.covers("ULTIMATE KDA LOADOUT CREDS PING"));
         assert!(list.covers("ODIN I MACHINE GUN"));
         assert!(list.covers("Mid Top 28m"));
+        assert!(list.covers("Mid-Top 28m"));
+        assert!(list.contains("midtop"));
+        assert!(list.contains("toplobby"));
+        assert!(!list.contains("midtopnova"));
+        assert!(!list.contains("bmid"));
+        assert!(!list.contains("abc"));
+        assert!(!Whitelist::from_words(["mid", "top"]).contains("midtop"));
         assert!(list.contains("28m"));
         assert!(!list.contains("m"));
         assert!(!list.contains("nova28m"));
