@@ -124,7 +124,7 @@ impl AppState {
 /// `BLURRD_MODEL_DIR` when set (development), otherwise `onnxruntime.dll`
 /// and `models` next to the executable (installed); `None` when either is
 /// missing.
-fn ocr_setup() -> Option<OcrSetup> {
+pub(crate) fn ocr_setup() -> Option<OcrSetup> {
     let next_to_exe = |name: &str| {
         std::env::current_exe()
             .ok()

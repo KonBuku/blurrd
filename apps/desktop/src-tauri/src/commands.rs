@@ -401,11 +401,12 @@ pub(crate) fn start_reverify(
     project_id: String,
     on_event: Channel<JobEvent>,
 ) -> Result<JobId, AppError> {
+    let engine = state.engine()?;
     let project = project(&state, &project_id)?;
     let job = new_job();
     state
         .jobs
-        .enqueue(job, Arc::new(on_event), tasks::reverify(project));
+        .enqueue(job, Arc::new(on_event), tasks::reverify(engine, project));
     Ok(job)
 }
 

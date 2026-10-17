@@ -10,10 +10,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use blurrd_core::{
-    AppError, BlurParams, ExportSettings, JobEvent, JobKind, JobSummary, RegionSet, VerifyState,
-    WarningCode,
+    AppError, BlurParams, ExportSettings, FrameRange, JobEvent, JobKind, JobSummary, RegionSet,
+    VerifyState, WarningCode,
 };
-use blurrd_engine::{AnalyzeRequest, Engine, ProgressSink, RenderRequest, RunRequest, is_verified};
+use blurrd_engine::{
+    AnalyzeRequest, Engine, ProgressSink, RenderRequest, ReverifyRequest, RunRequest, is_verified,
+};
 
 use crate::jobs::{JobSink, Work};
 use crate::output::{OutputTarget, output_target};
@@ -108,47 +110,60 @@ pub(crate) fn run(
     })
 }
 
-/// Re-verifies the frame ranges edits changed. The engine cannot verify
-/// single ranges yet, so the ranges stay unverified: the job says so
-/// with a warning and finishes `Unverified`, and the export that follows
-/// is named `_UNVERIFIED`.
-pub(crate) fn reverify(project: Arc<OpenProject>) -> Work {
+/// Verifies again the frame ranges edits changed since the last
+/// verification (the engine adds fix boxes where a name stays readable
+/// and saves the project), so the render that follows ships no unchecked
+/// edit. Without OCR the ranges cannot be checked: the job says so with a
+/// warning and finishes `Unverified`, and the export is named
+/// `_UNVERIFIED`.
+pub(crate) fn reverify(engine: Arc<Engine>, project: Arc<OpenProject>) -> Work {
     Box::new(move |sink| {
-        let started = Instant::now();
-        let ranges = match project.analysed() {
-            Ok(existing) => existing.verify.unverified_ranges,
+        let analysed = match project.analysed() {
+            Ok(analysed) => analysed,
             Err(error) => return sink.failed(error),
         };
-        let frames = ranges
-            .iter()
-            .map(|range| range.f1 - range.f0 + 1)
-            .sum::<u32>();
-        let job = sink.job();
-        sink.emit(JobEvent::Started {
-            job,
-            kind: JobKind::ReverifyRanges,
-            total_frames: frames,
-            passes: 1,
-        });
-        sink.emit(JobEvent::Warning {
-            job,
-            code: WarningCode::UnverifiableItems,
-            message: "The edited frames could not be verified again; the export will be marked \
-                      unverified."
-                .to_owned(),
-            frames: ranges.first().zip(ranges.last()).map(|(a, b)| (a.f0, b.f1)),
-        });
-        sink.emit(JobEvent::Finished {
-            job,
-            summary: JobSummary {
-                frames,
-                elapsed_ms: started.elapsed().as_millis() as u64,
-                output: None,
-                verify: Some(VerifyState::Unverified),
-                warnings: 1,
-            },
-        });
+        if engine.config().ocr.is_none() {
+            return unverifiable(sink, &analysed.verify.unverified_ranges);
+        }
+        let req = ReverifyRequest::new(sink.job(), project.source().to_path_buf(), analysed);
+        let result = engine.reverify_ranges(&req, sink, sink.cancel());
+        log_failure("verification", result.err());
     })
+}
+
+/// Ends a verification of `ranges` that cannot run because OCR is not
+/// installed.
+fn unverifiable(sink: &JobSink, ranges: &[FrameRange]) {
+    let started = Instant::now();
+    let frames = ranges
+        .iter()
+        .map(|range| range.f1 - range.f0 + 1)
+        .sum::<u32>();
+    let job = sink.job();
+    sink.emit(JobEvent::Started {
+        job,
+        kind: JobKind::ReverifyRanges,
+        total_frames: frames,
+        passes: 1,
+    });
+    sink.emit(JobEvent::Warning {
+        job,
+        code: WarningCode::OcrUnavailable,
+        message: "OCR is not installed, so the edited frames cannot be verified; \
+                  the export will be marked unverified."
+            .to_owned(),
+        frames: ranges.first().zip(ranges.last()).map(|(a, b)| (a.f0, b.f1)),
+    });
+    sink.emit(JobEvent::Finished {
+        job,
+        summary: JobSummary {
+            frames,
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            output: None,
+            verify: Some(VerifyState::Unverified),
+            warnings: 1,
+        },
+    });
 }
 
 /// The engine request of a render, or `None` when the output exists and
@@ -473,6 +488,183 @@ pub(crate) mod tests {
         assert!(ratio >= 0.95, "{ratio}");
         jobs.shutdown();
         let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// The luma plane of every frame of `path`.
+    fn lumas(path: &std::path::Path) -> Vec<Vec<u8>> {
+        use blurrd_video::{DecodeOptions, Decoder, YuvRoi};
+        let mut decoder = Decoder::open(path, &DecodeOptions::default()).unwrap();
+        let mut roi = YuvRoi::new();
+        let mut out = Vec::new();
+        while let Some(frame) = decoder.next_frame().unwrap() {
+            let size = (frame.width().cast_signed(), frame.height().cast_signed());
+            let rect = RectI::new(0, 0, size.0, size.1).unwrap();
+            frame.roi_yuv(rect, &mut roi).unwrap();
+            out.push(roi.luma().to_vec());
+        }
+        out
+    }
+
+    /// The share of the pixels of `rect` that differ between two luma
+    /// planes of `width` px rows.
+    fn changed_share(before: &[u8], after: &[u8], width: u32, rect: RectI) -> f64 {
+        let mut changed = 0u32;
+        for y in rect.y0..rect.y1 {
+            for x in rect.x0..rect.x1 {
+                let i = y.unsigned_abs() as usize * width as usize + x.unsigned_abs() as usize;
+                changed += u32::from(before[i] != after[i]);
+            }
+        }
+        f64::from(changed) / f64::from(rect.width() * rect.height())
+    }
+
+    /// Renders `project` losslessly (FFV1) into `folder` with its own
+    /// blur; answers the output.
+    fn render_lossless(
+        jobs: &Jobs,
+        engine: &Arc<Engine>,
+        project: &Arc<OpenProject>,
+        folder: PathBuf,
+    ) -> PathBuf {
+        let mut export = ExportSettings {
+            encoder: EncoderSetting::Named("ffv1".to_owned()),
+            container: Container::Mkv,
+            ..ExportSettings::default()
+        };
+        export.output.folder = blurrd_core::OutputFolder::Folder(folder);
+        let request = ExportRequest {
+            export,
+            blur: project.analysed().unwrap().blur,
+            enabled: RegionSet::all(),
+        };
+        let recorder = Arc::new(Recorder::default());
+        let job = JobId(Uuid::now_v7());
+        jobs.enqueue(
+            job,
+            recorder.clone(),
+            render(Arc::clone(engine), Arc::clone(project), request),
+        );
+        recorder.wait_end(job);
+        match recorder.events.lock().unwrap().last() {
+            Some((_, JobEvent::Finished { summary, .. })) => summary.output.clone().unwrap(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The edit flow of the desktop app on a real recording, with the
+    /// real engine (GPU decoding, OCR on the GPU): an analysis with
+    /// verification, a manual box saved as an edit, the verification of
+    /// the edited frames the export runs first, then the render, whose
+    /// frames carry the manual box.
+    #[test]
+    #[ignore = "needs BLURRD_TEST_MEDIA, ONNX Runtime and the models; run under the GPU lock"]
+    fn edits_are_verified_before_the_export_and_rendered() {
+        let Some(clip) = test_clip() else {
+            eprintln!("skipped: BLURRD_TEST_MEDIA is not set");
+            return;
+        };
+        let work = std::env::temp_dir().join(format!("blurrd-app-edit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+        let mut config = EngineConfig::new(work.join("cache"));
+        config.ocr = crate::state::ocr_setup();
+        assert!(
+            config.ocr.is_some(),
+            "ONNX Runtime and the models are needed"
+        );
+        let engine = Arc::new(Engine::new(config).unwrap());
+        let paths = paths_below(clip.parent().unwrap());
+        let source = paths.existing(&clip).unwrap();
+        let project = Projects::new(work.join("cache")).open(&source).unwrap();
+        let jobs = Jobs::start().unwrap();
+        let recorder = Arc::new(Recorder::default());
+        let run = |work: super::Work| {
+            let job = JobId(Uuid::now_v7());
+            let started = Instant::now();
+            jobs.enqueue(job, recorder.clone(), work);
+            recorder.wait_end(job);
+            let events = recorder.events.lock().unwrap();
+            let last = events.iter().rev().find(|(_, e)| e.job() == job).cloned();
+            (last.map(|(_, e)| e), started.elapsed())
+        };
+
+        let (end, took) = run(analysis(
+            Arc::clone(&engine),
+            Arc::clone(&project),
+            RegionSet::all(),
+            true,
+        ));
+        assert!(matches!(end, Some(JobEvent::Finished { .. })), "{end:?}");
+        let analysed = project.analysed().unwrap();
+        eprintln!(
+            "analysis with verification: {:.1} s, {} frames, {:?}",
+            took.as_secs_f64(),
+            analysed.media.frame_count,
+            analysed.verify.state
+        );
+
+        // A manual box over the middle of the picture for one second.
+        let frames = analysed.media.frame_count;
+        let (f0, f1) = (frames / 3, frames / 3 + 59);
+        let (w, h) = (
+            analysed.media.width.cast_signed(),
+            analysed.media.height.cast_signed(),
+        );
+        let rect = RectI::new(w / 2 - 80, h / 2 - 30, w / 2 + 80, h / 2 + 30).unwrap();
+        let edit = Override::Add {
+            uid: Uuid::now_v7(),
+            region: Region::Manual,
+            f0,
+            f1,
+            rect,
+        };
+        let saved = project
+            .set_overrides(analysed.revision, vec![edit])
+            .unwrap();
+        assert_eq!(
+            saved.unverified_ranges,
+            vec![blurrd_core::FrameRange::new(f0, f1).unwrap()]
+        );
+        assert!(!blurrd_engine::is_verified(&project.analysed().unwrap()));
+
+        // The export's first step verifies exactly the edited frames.
+        let (end, took) = run(super::reverify(Arc::clone(&engine), Arc::clone(&project)));
+        let Some(JobEvent::Finished { summary, .. }) = end else {
+            panic!("{end:?}");
+        };
+        let checked = project.analysed().unwrap();
+        eprintln!(
+            "verification of the edit: {:.1} s, {} frames, {:?}",
+            took.as_secs_f64(),
+            summary.frames,
+            summary.verify
+        );
+        assert_eq!(summary.frames, f1 - f0 + 1);
+        assert_eq!(checked.verify.unverified_ranges, vec![]);
+        assert_eq!(checked.overrides, vec![edit]);
+        assert_eq!(Some(checked.verify.state), summary.verify);
+
+        // The render (lossless, so pixels compare exactly) blurs the box
+        // on its frames.
+        let output = render_lossless(&jobs, &engine, &project, work.clone());
+        let (before, after) = (lumas(&clip), lumas(&output));
+        assert_eq!(before.len(), after.len());
+        let width = checked.media.width;
+        let changed = |frame: u32| {
+            let frame = frame as usize;
+            changed_share(&before[frame], &after[frame], width, rect)
+        };
+        for frame in f0..=f1 {
+            assert!(changed(frame) > 0.5, "frame {frame}: {}", changed(frame));
+        }
+        eprintln!(
+            "manual box: {:.3} of its pixels changed on frame {f0}, {:.3} on frame {}",
+            changed(f0),
+            changed(f1 + 30),
+            f1 + 30
+        );
+        jobs.shutdown();
+        std::fs::remove_dir_all(&work).unwrap();
     }
 
     fn tracks_frames(project: &OpenProject) -> usize {
