@@ -137,6 +137,12 @@ impl Whitelist {
         "report",
         "outgoing",
         "incoming",
+        // Scoreboard column headers.
+        "ultimate",
+        "kda",
+        "loadout",
+        "creds",
+        "ping",
         "in",
         "en",
         "im",
@@ -271,6 +277,8 @@ impl Whitelist {
         "movespeed",
         "aimdownsights",
         "1stshotspread",
+        // An empty buy-menu slot (German client).
+        "leer",
     ];
 
     /// The default list: HUD words and banner titles, system and location
@@ -469,6 +477,7 @@ mod tests {
         assert!(list.contains(&fold("RUN SPEED")));
         assert!(!list.contains("run"));
         assert!(list.covers("in B Main"));
+        assert!(list.covers("ULTIMATE KDA LOADOUT CREDS PING"));
         assert!(!list.covers("in B Main with Nova"));
         assert!(!list.covers("   "));
         assert!(list.segments("inasiteteam"));
