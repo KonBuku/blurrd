@@ -85,6 +85,28 @@ fn reads_lines(ep: Ep) {
         let drawn = RectI::new(x0 * 4 / 3, *y0, x1 * 4 / 3, *y1).unwrap();
         assert!(read.rect.iou(&drawn) > 0.4, "{} vs {drawn}", read.rect);
     }
+    // Reading several crops at once gives each crop its own reads, the
+    // same as reading them one by one.
+    let blank_view = RgbView::new(640, 200, &blank.data).unwrap();
+    let many = engine
+        .read_many(
+            &[(ZONE, image), (ZONE, blank_view), (ZONE, stretched)],
+            &|_, _| true,
+        )
+        .unwrap();
+    assert_eq!(many.len(), 3);
+    assert_eq!(many[0], engine.read(ZONE, image).unwrap());
+    assert_eq!(many[1], []);
+    assert_eq!(many[2], reads);
+    // Only the lines the filter keeps are recognised: here those of the
+    // first crop below its first line.
+    let lower = engine
+        .read_many(&[(ZONE, image), (ZONE, stretched)], &|crop, rect| {
+            crop == 0 && rect.y0 > 60
+        })
+        .unwrap();
+    assert_eq!(lower[0], many[0][1..]);
+    assert_eq!(lower[1], []);
     assert_stalls_tolerable(&engine);
 }
 

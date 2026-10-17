@@ -112,73 +112,139 @@ pub(crate) struct Normalise {
     pub(crate) offset: [f32; 3],
 }
 
-/// Resizes `image` to `out_w` × `out_h` and writes it normalised into the
-/// top-left of three planes of `stride` × rows floats (`planes` holds the
-/// blue plane, then green, then red, each `plane_len` floats long). Other
-/// values of the planes are left untouched.
-pub(crate) fn resize_into_planes(
-    image: RgbView<'_>,
-    out_w: u32,
-    out_h: u32,
-    planes: &mut [f32],
-    stride: usize,
-    plane_len: usize,
-    norm: Normalise,
-) {
-    let (src_w, src_h) = (image.width(), image.height());
-    let horizontal = Taps::new(src_w, out_w);
-    let vertical = Taps::new(src_h, out_h);
-    let row_len = 3 * out_w as usize;
-    // Horizontal pass over every source row: RGB floats, out_w wide.
-    let mut rows = vec![0.0f32; row_len * src_h as usize];
-    for (y, out) in rows.chunks_exact_mut(row_len).enumerate() {
-        let src = image.row(y as u32);
-        for (x, px) in out.as_chunks_mut::<3>().0.iter_mut().enumerate() {
-            let (first, weights) = horizontal.get(x);
-            let mut acc = [0.0f32; 3];
-            for (k, &w) in weights.iter().enumerate() {
-                let s = &src[3 * (first + k)..3 * (first + k) + 3];
-                acc[0] += w * f32::from(s[0]);
-                acc[1] += w * f32::from(s[1]);
-                acc[2] += w * f32::from(s[2]);
-            }
-            *px = acc;
+/// Resizes crops into planar model input, keeping its buffers and filter
+/// taps between calls: the zones of a video have fixed sizes, so after the
+/// first frames nothing is allocated or recomputed.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Resampler {
+    /// Horizontally filtered source rows, RGB floats.
+    rows: Vec<f32>,
+    /// One source row as floats.
+    line: Vec<f32>,
+    /// One output row before it is split into the planes, RGB floats.
+    blended: Vec<f32>,
+    /// Taps of recent axes, by source and output size.
+    taps: Vec<((u32, u32), Taps)>,
+}
+
+impl Resampler {
+    /// Taps kept at most (the zones' two axes and the recognition axes).
+    const TAPS_KEPT: usize = 16;
+
+    /// The taps from `src` to `dst` samples, from the cache or new.
+    fn taps(&mut self, src: u32, dst: u32) -> Taps {
+        if let Some((_, taps)) = self.taps.iter().find(|(key, _)| *key == (src, dst)) {
+            return taps.clone();
         }
+        let taps = Taps::new(src, dst);
+        if self.taps.len() == Self::TAPS_KEPT {
+            self.taps.remove(0);
+        }
+        self.taps.push(((src, dst), taps.clone()));
+        taps
     }
-    // Vertical pass, written straight into the three planes.
-    let mut blended = vec![0.0f32; row_len];
-    for y in 0..out_h as usize {
-        let (first, weights) = vertical.get(y);
-        blended.fill(0.0);
-        for (k, &w) in weights.iter().enumerate() {
-            if w == 0.0 {
-                continue;
+
+    /// Resizes `image` to `out_w` × `out_h` and writes it normalised into
+    /// the top-left of three planes of `stride` × rows floats (`planes`
+    /// holds the blue plane, then green, then red, each `plane_len` floats
+    /// long). Other values of the planes are left untouched.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the planes' layout is three numbers that belong together with the slice"
+    )]
+    pub(crate) fn resize_into_planes(
+        &mut self,
+        image: RgbView<'_>,
+        out_w: u32,
+        out_h: u32,
+        planes: &mut [f32],
+        stride: usize,
+        plane_len: usize,
+        norm: Normalise,
+    ) {
+        let (src_w, src_h) = (image.width(), image.height());
+        let horizontal = self.taps(src_w, out_w);
+        let vertical = self.taps(src_h, out_h);
+        let row_len = 3 * out_w as usize;
+        // Horizontal pass over every source row: RGB floats, out_w wide.
+        // Every value is overwritten, so the buffers are only grown.
+        grow(&mut self.rows, row_len * src_h as usize);
+        grow(&mut self.line, 3 * src_w as usize);
+        grow(&mut self.blended, row_len);
+        let line = &mut self.line[..3 * src_w as usize];
+        for (y, out) in self.rows[..row_len * src_h as usize]
+            .chunks_exact_mut(row_len)
+            .enumerate()
+        {
+            for (l, &v) in line.iter_mut().zip(image.row(y as u32)) {
+                *l = f32::from(v);
             }
-            let src = &rows[(first + k) * row_len..][..row_len];
-            for (b, &s) in blended.iter_mut().zip(src) {
-                *b += w * s;
+            for (x, px) in out.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                let (first, weights) = horizontal.get(x);
+                let mut acc = [0.0f32; 3];
+                for (s, &w) in line[3 * first..].as_chunks::<3>().0.iter().zip(weights) {
+                    acc[0] += w * s[0];
+                    acc[1] += w * s[1];
+                    acc[2] += w * s[2];
+                }
+                *px = acc;
             }
         }
-        let base = y * stride;
+        // Vertical pass, written straight into the three planes.
+        let blended = &mut self.blended[..row_len];
         let (blue, rest) = planes.split_at_mut(plane_len);
         let (green, red) = rest.split_at_mut(plane_len);
-        let dst = [
-            &mut blue[base..base + out_w as usize],
-            &mut green[base..base + out_w as usize],
-            &mut red[base..base + out_w as usize],
-        ];
-        // Input channel order is R, G, B; the planes are B, G, R.
-        for (x, px) in blended.as_chunks::<3>().0.iter().enumerate() {
-            dst[0][x] = px[2] * norm.scale[0] + norm.offset[0];
-            dst[1][x] = px[1] * norm.scale[1] + norm.offset[1];
-            dst[2][x] = px[0] * norm.scale[2] + norm.offset[2];
+        for y in 0..out_h as usize {
+            let (first, weights) = vertical.get(y);
+            blended.fill(0.0);
+            for (k, &w) in weights.iter().enumerate() {
+                if w == 0.0 {
+                    continue;
+                }
+                let src = &self.rows[(first + k) * row_len..][..row_len];
+                for (b, &s) in blended.iter_mut().zip(src) {
+                    *b += w * s;
+                }
+            }
+            let base = y * stride;
+            let dst = [
+                &mut blue[base..base + out_w as usize],
+                &mut green[base..base + out_w as usize],
+                &mut red[base..base + out_w as usize],
+            ];
+            // Input channel order is R, G, B; the planes are B, G, R.
+            for (x, px) in blended.as_chunks::<3>().0.iter().enumerate() {
+                dst[0][x] = px[2] * norm.scale[0] + norm.offset[0];
+                dst[1][x] = px[1] * norm.scale[1] + norm.offset[1];
+                dst[2][x] = px[0] * norm.scale[2] + norm.offset[2];
+            }
         }
+    }
+}
+
+/// Grows `buffer` to at least `len` values (never shrinks it).
+fn grow(buffer: &mut Vec<f32>, len: usize) {
+    if buffer.len() < len {
+        buffer.resize(len, 0.0);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Normalise, Taps, resize_into_planes};
+    use super::{Normalise, Resampler, Taps};
+
+    fn resize_into_planes(
+        image: RgbView<'_>,
+        out_w: u32,
+        out_h: u32,
+        planes: &mut [f32],
+        stride: usize,
+        plane_len: usize,
+        norm: Normalise,
+    ) {
+        Resampler::default()
+            .resize_into_planes(image, out_w, out_h, planes, stride, plane_len, norm);
+    }
     use crate::image::RgbView;
 
     const IDENTITY: Normalise = Normalise {
@@ -244,6 +310,30 @@ mod tests {
         let ramp = planes[17] - planes[14];
         assert!(ramp > 191.25, "{ramp}");
         assert!(planes[12] < 0.0 && planes[19] > 255.0);
+    }
+
+    #[test]
+    fn a_reused_resampler_gives_the_same_planes() {
+        // Different sizes in turn through one resampler (its buffers grow
+        // and shrink in use, its taps are cached) match fresh resamplers.
+        let data: Vec<u8> = (0..40 * 12 * 3).map(|i| (i * 37 % 251) as u8).collect();
+        let image = RgbView::new(40, 12, &data).unwrap();
+        let small = image
+            .crop(blurrd_core::RectI::new(3, 2, 20, 9).unwrap())
+            .unwrap();
+        let mut reused = Resampler::default();
+        for (view, w, h) in [
+            (image, 90, 30),
+            (small, 30, 14),
+            (image, 90, 30),
+            (image, 25, 6),
+        ] {
+            let mut fresh = vec![0.0f32; 3 * w * h];
+            let mut again = vec![0.0f32; 3 * w * h];
+            resize_into_planes(view, w as u32, h as u32, &mut fresh, w, w * h, IDENTITY);
+            reused.resize_into_planes(view, w as u32, h as u32, &mut again, w, w * h, IDENTITY);
+            assert_eq!(fresh, again);
+        }
     }
 
     #[test]

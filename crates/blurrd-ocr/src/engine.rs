@@ -18,15 +18,17 @@ use std::time::Instant;
 
 use blurrd_core::{Luid, OcrProvider, RectI};
 use ort::ep::{self, ExecutionProviderDispatch};
-use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
+use ort::session::{Session, SessionOutputs};
 use ort::value::{TensorRef, ValueType};
 
 use crate::det::{self, TextMap};
 use crate::error::OcrError;
+use crate::graph;
 use crate::image::RgbView;
 use crate::models::ModelSet;
 use crate::rec::{self, REC_HEIGHT, Recognition, WIDTH_BUCKETS};
+use crate::resample::Resampler;
 use crate::runtime::OrtRuntime;
 
 /// Recognition batch per width bucket on a GPU. Wider inputs produce larger
@@ -247,12 +249,12 @@ impl fmt::Debug for FixedSession {
 
 impl FixedSession {
     /// Runs the session on `input` (exactly the session's shape) and hands
-    /// the first output to `read`.
+    /// the outputs to `read`.
     fn run<T>(
         &mut self,
         input: &[f32],
         action: &'static str,
-        read: impl FnOnce(&[i64], &[f32]) -> Result<T, OcrError>,
+        read: impl FnOnce(&SessionOutputs<'_>) -> Result<T, OcrError>,
     ) -> Result<T, OcrError> {
         let started = Instant::now();
         let tensor =
@@ -261,10 +263,9 @@ impl FixedSession {
             .session
             .run(ort::inputs![tensor])
             .map_err(OcrError::session(action))?;
-        let (shape, data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(OcrError::session(action))?;
+        // The run alone counts: reading its output is host work.
         let ms = started.elapsed().as_secs_f32() * 1000.0;
+        let result = read(&outputs);
         if self.stats.record(ms) {
             tracing::warn!(
                 shape = ?self.shape,
@@ -274,7 +275,7 @@ impl FixedSession {
                  (recompilation or a stalled GPU)"
             );
         }
-        read(shape, data)
+        result
     }
 }
 
@@ -286,11 +287,21 @@ impl FixedSession {
 pub struct OcrEngine {
     provider: OcrProvider,
     fallback: Option<String>,
-    det: BTreeMap<ZoneId, (ZoneSpec, FixedSession)>,
+    det: BTreeMap<ZoneId, DetSession>,
     rec: Vec<FixedSession>,
     rec_batch: [u32; 3],
-    classes: usize,
     charset: Arc<[String]>,
+    resampler: Resampler,
+    /// The input of each recognition batch, reused.
+    rec_input: Vec<f32>,
+}
+
+/// The detection session of a zone and its input, reused between runs.
+#[derive(Debug)]
+struct DetSession {
+    spec: ZoneSpec,
+    session: FixedSession,
+    input: Vec<f32>,
 }
 
 impl OcrEngine {
@@ -369,46 +380,77 @@ impl OcrEngine {
         let session = |model: &[u8], free: &[Option<String>], shape: [usize; 4]| {
             create_session(model, &overrides(free, shape)?, target, options.cpu_threads)
         };
-        let det_free = free_dims(models.det())?;
-        let mut det = BTreeMap::new();
-        for zone in &options.zones {
-            let shape = [1, 3, zone.height as usize, zone.width as usize];
-            let fixed = session(models.det(), &det_free, shape)?;
-            det.insert(
-                zone.id,
-                (
-                    *zone,
-                    warm_up(fixed, shape, target, "warming up detection")?,
-                ),
-            );
-        }
         let rec_batch = match target {
             Target::Cpu => CPU_REC_BATCH,
             Target::DirectMl(_) => GPU_REC_BATCH,
         };
-        let rec_free = free_dims(models.rec())?;
-        let mut rec_sessions = Vec::with_capacity(WIDTH_BUCKETS.len());
-        let mut classes = 0;
-        for (bucket, &width) in WIDTH_BUCKETS.iter().enumerate() {
-            let shape = [
-                rec_batch[bucket] as usize,
-                3,
-                REC_HEIGHT as usize,
-                width as usize,
-            ];
-            let fixed = session(models.rec(), &rec_free, shape)?;
-            let fixed = warm_up(fixed, shape, target, "warming up recognition")?;
-            classes = output_classes(&fixed)?;
-            rec_sessions.push(fixed);
-        }
+        let rec_model = inspect(models.rec())?;
         let charset = models.charset().clone();
-        if classes != charset.len() + 1 {
-            return Err(OcrError::Signature(format!(
-                "the recognition model has {classes} classes but the character list has {} \
-                 entries (plus the blank)",
-                charset.len()
-            )));
+        match rec_model.output.as_slice() {
+            [_, _, classes] if *classes == charset.len() as i64 + 1 => {}
+            shape => {
+                return Err(OcrError::Signature(format!(
+                    "the recognition output {shape:?} does not have one class per character                      ({} plus the blank) on its last axis",
+                    charset.len()
+                )));
+            }
         }
+        // The best class per step is taken on the device (see `graph`).
+        let rec_bytes = graph::with_best_class(models.rec())?;
+        let det_free = inspect(models.det())?.free;
+        let det_shapes: Vec<(ZoneSpec, [usize; 4])> = options
+            .zones
+            .iter()
+            .map(|zone| (*zone, [1, 3, zone.height as usize, zone.width as usize]))
+            .collect();
+        let rec_shapes: Vec<[usize; 4]> = WIDTH_BUCKETS
+            .iter()
+            .zip(rec_batch)
+            .map(|(&width, batch)| [batch as usize, 3, REC_HEIGHT as usize, width as usize])
+            .collect();
+        // DirectML compiles each session's graph when it is created and
+        // warmed up, which takes a few hundred milliseconds per shape; the
+        // sessions are independent, so they are built at the same time.
+        let (det_built, rec_built) = std::thread::scope(|scope| {
+            let det: Vec<_> = det_shapes
+                .iter()
+                .map(|&(zone, shape)| {
+                    let (session, free) = (&session, &det_free);
+                    scope.spawn(move || {
+                        let fixed = session(models.det(), free, shape)?;
+                        Ok::<_, OcrError>((
+                            zone,
+                            warm_up(fixed, shape, target, "warming up detection")?,
+                        ))
+                    })
+                })
+                .collect();
+            let rec: Vec<_> = rec_shapes
+                .iter()
+                .map(|&shape| {
+                    let (session, bytes, free) = (&session, &rec_bytes, &rec_model.free);
+                    scope.spawn(move || {
+                        let fixed = session(bytes, free, shape)?;
+                        warm_up(fixed, shape, target, "warming up recognition")
+                    })
+                })
+                .collect();
+            (join_all(det), join_all(rec))
+        });
+        let mut det = BTreeMap::new();
+        for built in det_built {
+            let (spec, session) = built?;
+            let input = vec![0.0; 3 * spec.width as usize * spec.height as usize];
+            det.insert(
+                spec.id,
+                DetSession {
+                    spec,
+                    session,
+                    input,
+                },
+            );
+        }
+        let rec_sessions = rec_built.into_iter().collect::<Result<Vec<_>, _>>()?;
         tracing::info!(
             ?provider,
             zones = det.len(),
@@ -421,8 +463,9 @@ impl OcrEngine {
             det,
             rec: rec_sessions,
             rec_batch,
-            classes,
             charset,
+            resampler: Resampler::default(),
+            rec_input: Vec::new(),
         })
     }
 
@@ -445,19 +488,26 @@ impl OcrEngine {
     /// [`OcrError::InvalidInput`] for an unknown zone, [`OcrError::Session`]
     /// when the model fails.
     pub fn detect(&mut self, zone: ZoneId, image: RgbView<'_>) -> Result<TextMap, OcrError> {
-        let (spec, session) = self
+        let DetSession {
+            spec,
+            session,
+            input,
+        } = self
             .det
             .get_mut(&zone)
             .ok_or_else(|| OcrError::InvalidInput(format!("{zone} has no detection session")))?;
-        let mut input = vec![0.0f32; 3 * spec.width as usize * spec.height as usize];
         let placement = det::preprocess(
+            &mut self.resampler,
             image,
             (spec.content_width, spec.content_height),
             (spec.width, spec.height),
-            &mut input,
+            input,
         );
         let input_w = spec.width;
-        session.run(&input, "running text detection", |shape, data| {
+        session.run(input, "running text detection", |outputs| {
+            let (shape, data) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(OcrError::session("reading text detection"))?;
             if shape.len() != 4
                 || shape[1] != 1
                 || data.len() != (spec.width * spec.height) as usize
@@ -489,11 +539,13 @@ impl OcrEngine {
             let width = WIDTH_BUCKETS[bucket];
             let batch = self.rec_batch[bucket] as usize;
             let item = (3 * REC_HEIGHT * width) as usize;
-            let mut input = vec![0.0f32; batch * item];
+            let input = &mut self.rec_input;
+            input.resize(batch * item, 0.0);
             for chunk in indices.chunks(batch) {
                 let mut columns = Vec::with_capacity(chunk.len());
                 for (slot, &i) in chunk.iter().enumerate() {
                     columns.push(rec::preprocess(
+                        &mut self.resampler,
                         crops[i],
                         width,
                         &mut input[slot * item..][..item],
@@ -503,11 +555,24 @@ impl OcrEngine {
                 for slot in chunk.len()..batch {
                     input[slot * item..][..item].fill(0.0);
                 }
-                let (classes, charset) = (self.classes, &self.charset);
-                let decoded =
-                    self.rec[bucket].run(&input, "running text recognition", |shape, data| {
-                        rec::decode_batch(shape, data, &columns, width, batch, classes, charset)
-                    })?;
+                let charset = &self.charset;
+                let decoded = self.rec[bucket].run(input, "running text recognition", |out| {
+                    const ACTION: &str = "reading text recognition";
+                    let best = out[graph::BEST_CLASS]
+                        .try_extract_tensor::<i64>()
+                        .map_err(OcrError::session(ACTION))?;
+                    let probs = out[graph::BEST_PROB]
+                        .try_extract_tensor::<f32>()
+                        .map_err(OcrError::session(ACTION))?;
+                    rec::decode_batch(
+                        (best.0, best.1),
+                        (probs.0, probs.1),
+                        &columns,
+                        width,
+                        batch,
+                        charset,
+                    )
+                })?;
                 for (&i, read) in chunk.iter().zip(decoded) {
                     results[i] = Some(read);
                 }
@@ -522,25 +587,56 @@ impl OcrEngine {
     ///
     /// As [`OcrEngine::detect`] and [`OcrEngine::recognize`].
     pub fn read(&mut self, zone: ZoneId, image: RgbView<'_>) -> Result<Vec<OcrRead>, OcrError> {
-        let map = self.detect(zone, image)?;
+        Ok(self
+            .read_many(&[(zone, image)], &|_, _| true)?
+            .pop()
+            .unwrap_or_default())
+    }
+
+    /// Reads several zone crops: detects the text lines of each crop and
+    /// recognises the lines of all of them together, which fills the
+    /// fixed recognition batches far better than reading the crops one by
+    /// one (a run costs about the same whether its batch is full or not).
+    /// Only the lines `keep` accepts (given the index of the crop and the
+    /// line's box in its pixels) are recognised and returned: recognition
+    /// costs per line, and lines whose shape cannot hold a name need none.
+    /// Returns the reads of each crop, in order.
+    ///
+    /// # Errors
+    ///
+    /// As [`OcrEngine::detect`] and [`OcrEngine::recognize`].
+    pub fn read_many(
+        &mut self,
+        images: &[(ZoneId, RgbView<'_>)],
+        keep: &dyn Fn(usize, RectI) -> bool,
+    ) -> Result<Vec<Vec<OcrRead>>, OcrError> {
+        let maps = images
+            .iter()
+            .map(|&(zone, image)| self.detect(zone, image))
+            .collect::<Result<Vec<_>, _>>()?;
         // Detection clips every box to the image, so each box has a crop;
         // a box without one is skipped together with its crop, which keeps
         // boxes and reads aligned.
-        let (boxes, crops): (Vec<&det::TextBox>, Vec<RgbView<'_>>) = map
-            .boxes
-            .iter()
-            .filter_map(|b| image.crop(b.rect).map(|crop| (b, crop)))
-            .unzip();
+        let mut boxes = Vec::new();
+        let mut crops = Vec::new();
+        for (owner, (map, &(_, image))) in maps.iter().zip(images).enumerate() {
+            for b in map.boxes.iter().filter(|b| keep(owner, b.rect)) {
+                if let Some(crop) = image.crop(b.rect) {
+                    boxes.push((owner, b));
+                    crops.push(crop);
+                }
+            }
+        }
         let reads = self.recognize(&crops)?;
-        Ok(boxes
-            .into_iter()
-            .zip(reads)
-            .map(|(b, rec)| OcrRead {
+        let mut out = vec![Vec::new(); images.len()];
+        for ((owner, b), rec) in boxes.into_iter().zip(reads) {
+            out[owner].push(OcrRead {
                 rect: b.rect,
                 det_score: b.score,
                 rec,
-            })
-            .collect())
+            });
+        }
+        Ok(out)
     }
 
     /// Statistics of every session: detection per zone, then recognition
@@ -548,21 +644,43 @@ impl OcrEngine {
     pub fn stats(&self) -> Vec<([usize; 4], ShapeStats)> {
         self.det
             .values()
-            .map(|(_, s)| (s.shape, s.stats))
+            .map(|d| (d.session.shape, d.session.stats))
             .chain(self.rec.iter().map(|s| (s.shape, s.stats)))
             .collect()
     }
 }
 
-/// The free dimensions of a model's input: for each position, the name of
-/// the dimension if it is dynamic (`Some("")` for a dynamic dimension
-/// without a name), `None` if it is fixed.
+/// The results of the scoped threads `handles`, in order; a panic in one
+/// of them is resumed on the calling thread.
+fn join_all<T>(handles: Vec<std::thread::ScopedJoinHandle<'_, T>>) -> Vec<T> {
+    handles
+        .into_iter()
+        .map(|handle| {
+            handle
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+        .collect()
+}
+
+/// What [`inspect`] reads from a model.
+struct Inspected {
+    /// For each position of the input, the name of the dimension if it is
+    /// dynamic (`Some("")` for a dynamic dimension without a name), `None`
+    /// if it is fixed.
+    free: Vec<Option<String>>,
+    /// The shape of the first output (`-1` for dynamic dimensions).
+    output: Vec<i64>,
+}
+
+/// The free dimensions of a model's input and the shape of its first
+/// output.
 ///
 /// Read from a CPU session that only loads the graph (no optimisation),
 /// because exporters name the dimensions differently (paddle2onnx numbers
 /// them in the order it meets them, so the same position has different
 /// names in different models).
-fn free_dims(model: &[u8]) -> Result<Vec<Option<String>>, OcrError> {
+fn inspect(model: &[u8]) -> Result<Inspected, OcrError> {
     const ACTION: &str = "reading the model input";
     let session = Session::builder()
         .map_err(OcrError::session(ACTION))?
@@ -576,21 +694,33 @@ fn free_dims(model: &[u8]) -> Result<Vec<Option<String>>, OcrError> {
         .inputs()
         .first()
         .ok_or_else(|| OcrError::Signature("the model has no input".to_owned()))?;
-    match input.dtype() {
+    let free = match input.dtype() {
         ValueType::Tensor {
             shape,
             dimension_symbols,
             ..
-        } if shape.len() == 4 => Ok(shape
+        } if shape.len() == 4 => shape
             .iter()
             .zip(dimension_symbols.iter())
             .map(|(&size, name)| (size < 0).then(|| name.clone()))
-            .collect()),
-        other => Err(OcrError::Signature(format!(
-            "input `{}` is not a 4-dimensional tensor: {other:?}",
-            input.name()
-        ))),
-    }
+            .collect(),
+        other => {
+            return Err(OcrError::Signature(format!(
+                "input `{}` is not a 4-dimensional tensor: {other:?}",
+                input.name()
+            )));
+        }
+    };
+    let output = session
+        .outputs()
+        .first()
+        .and_then(|o| {
+            o.dtype()
+                .tensor_shape()
+                .map(|s| s.iter().copied().collect())
+        })
+        .unwrap_or_default();
+    Ok(Inspected { free, output })
 }
 
 /// The dimension overrides that pin every free dimension of an input to
@@ -727,7 +857,7 @@ fn warm_up(
     }
     let input = vec![0.0f32; shape.iter().product()];
     let started = Instant::now();
-    fixed.run(&input, action, |_, _| Ok(()))?;
+    fixed.run(&input, action, |_| Ok(()))?;
     let warmup_ms = started.elapsed().as_secs_f32() * 1000.0;
     fixed.stats = ShapeStats {
         create_ms: fixed.stats.create_ms,
@@ -740,26 +870,6 @@ fn warm_up(
     };
     tracing::debug!(?shape, warmup_ms, "warmed up OCR session");
     Ok(fixed)
-}
-
-/// Number of classes in the recognition output (its last dimension).
-fn output_classes(fixed: &FixedSession) -> Result<usize, OcrError> {
-    let shape: Vec<i64> = fixed
-        .session
-        .outputs()
-        .first()
-        .and_then(|o| {
-            o.dtype()
-                .tensor_shape()
-                .map(|s| s.iter().copied().collect())
-        })
-        .unwrap_or_default();
-    match shape.last() {
-        Some(&classes) if shape.len() == 3 && classes > 1 => Ok(classes as usize),
-        _ => Err(OcrError::Signature(format!(
-            "recognition output shape {shape:?} has no class dimension"
-        ))),
-    }
 }
 
 #[cfg(test)]

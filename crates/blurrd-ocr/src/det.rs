@@ -12,7 +12,7 @@
 use blurrd_core::RectI;
 
 use crate::image::RgbView;
-use crate::resample::{Normalise, resize_into_planes};
+use crate::resample::{Normalise, Resampler};
 
 /// Per-channel mean of the detection input, in the model's channel order
 /// (blue, green, red, as PaddleOCR feeds OpenCV images).
@@ -54,9 +54,11 @@ pub(crate) struct Placement {
 /// Scales `image` to fit `content_w` × `content_h` with its natural aspect
 /// ratio (the pixel aspect undone, [`RgbView::pixel_aspect`]), writes it
 /// normalised into the top-left of a `width` × `height` NCHW input `out`
-/// and zeroes the rest (0 is the normalised mean colour). A square-pixel
-/// crop of the reference size has scale 1 and passes unchanged.
+/// with `resampler` and zeroes the rest (0 is the normalised mean colour).
+/// A square-pixel crop of the reference size has scale 1 and passes
+/// unchanged.
 pub(crate) fn preprocess(
+    resampler: &mut Resampler,
     image: RgbView<'_>,
     (content_w, content_h): (u32, u32),
     (width, height): (u32, u32),
@@ -66,13 +68,20 @@ pub(crate) fn preprocess(
     let scale = (content_w as f32 / natural_w).min(content_h as f32 / image.height() as f32);
     let placed_w = ((natural_w * scale).round() as u32).clamp(1, width);
     let placed_h = ((image.height() as f32 * scale).round() as u32).clamp(1, height);
-    out.fill(0.0);
     let norm = Normalise {
         scale: [0, 1, 2].map(|c| 1.0 / (255.0 * STD[c])),
         offset: [0, 1, 2].map(|c| -MEAN[c] / STD[c]),
     };
-    let plane = width as usize * height as usize;
-    resize_into_planes(image, placed_w, placed_h, out, width as usize, plane, norm);
+    let (w, plane) = (width as usize, width as usize * height as usize);
+    // The image overwrites its part of the input; only the rest is zeroed,
+    // so a reused input costs no full clear.
+    for channel in out.chunks_exact_mut(plane) {
+        for row in channel.chunks_exact_mut(w).take(placed_h as usize) {
+            row[placed_w as usize..].fill(0.0);
+        }
+        channel[placed_h as usize * w..].fill(0.0);
+    }
+    resampler.resize_into_planes(image, placed_w, placed_h, out, w, plane, norm);
     Placement {
         scale_x: placed_w as f32 / image.width() as f32,
         scale_y: placed_h as f32 / image.height() as f32,
@@ -318,6 +327,7 @@ mod tests {
 
     use super::{Placement, components, postprocess, preprocess};
     use crate::image::RgbView;
+    use crate::resample::Resampler;
 
     #[test]
     fn preprocess_keeps_aspect_and_normalises() {
@@ -326,7 +336,10 @@ mod tests {
         let data = vec![255u8; 4 * 2 * 3];
         let image = RgbView::new(4, 2, &data).unwrap();
         let mut out = vec![9.0f32; 3 * 8 * 8];
-        let placement = preprocess(image, (8, 8), (8, 8), &mut out);
+        // One resampler and one input for every call, as the engine keeps
+        // them: what an earlier call wrote never shows through.
+        let mut resampler = Resampler::default();
+        let placement = preprocess(&mut resampler, image, (8, 8), (8, 8), &mut out);
         assert_eq!(
             placement,
             Placement {
@@ -343,7 +356,7 @@ mod tests {
         // Padding below the image.
         assert_eq!(out[5 * 8], 0.0);
         // Content smaller than the input: scale 1, no resampling.
-        let placement = preprocess(image, (4, 2), (8, 8), &mut out);
+        let placement = preprocess(&mut resampler, image, (4, 2), (8, 8), &mut out);
         assert_eq!(
             (placement.scale_x, placement.width, placement.height),
             (1.0, 4, 2)
@@ -351,7 +364,13 @@ mod tests {
         assert_eq!(out[4], 0.0);
         // Stretched pixels (aspect 0.5): the 4x2 image is 2x2 in natural
         // proportions and fills 8x8 at scale 4 vertically, 2 horizontally.
-        let placement = preprocess(image.with_pixel_aspect(0.5), (8, 8), (8, 8), &mut out);
+        let placement = preprocess(
+            &mut resampler,
+            image.with_pixel_aspect(0.5),
+            (8, 8),
+            (8, 8),
+            &mut out,
+        );
         assert_eq!(
             placement,
             Placement {

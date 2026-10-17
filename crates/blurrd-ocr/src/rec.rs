@@ -10,7 +10,7 @@
 
 use crate::error::OcrError;
 use crate::image::RgbView;
-use crate::resample::{Normalise, resize_into_planes};
+use crate::resample::{Normalise, Resampler};
 
 /// Input height of the recognition model.
 pub const REC_HEIGHT: u32 = 48;
@@ -89,11 +89,16 @@ pub(crate) fn bucket_for(scaled: u32) -> usize {
         .unwrap_or(WIDTH_BUCKETS.len() - 1)
 }
 
-/// Writes one crop as CHW into `out` (`3 × REC_HEIGHT × bucket` values):
-/// scaled to the model height, normalised to `-1..=1` in blue, green, red
-/// order, padded with 0 on the right. Returns the number of input columns
-/// the crop covers.
-pub(crate) fn preprocess(image: RgbView<'_>, bucket: u32, out: &mut [f32]) -> u32 {
+/// Writes one crop as CHW into `out` (`3 × REC_HEIGHT × bucket` values)
+/// with `resampler`: scaled to the model height, normalised to `-1..=1`
+/// in blue, green, red order, padded with 0 on the right. Returns the
+/// number of input columns the crop covers.
+pub(crate) fn preprocess(
+    resampler: &mut Resampler,
+    image: RgbView<'_>,
+    bucket: u32,
+    out: &mut [f32],
+) -> u32 {
     let width = scaled_width(image).min(bucket);
     out.fill(0.0);
     let norm = Normalise {
@@ -101,19 +106,20 @@ pub(crate) fn preprocess(image: RgbView<'_>, bucket: u32, out: &mut [f32]) -> u3
         offset: [-1.0; 3],
     };
     let plane = (REC_HEIGHT * bucket) as usize;
-    resize_into_planes(image, width, REC_HEIGHT, out, bucket as usize, plane, norm);
+    resampler.resize_into_planes(image, width, REC_HEIGHT, out, bucket as usize, plane, norm);
     width
 }
 
-/// Greedy CTC decoding of one item: `probs` holds `steps × classes`
-/// probabilities; only the first `used_steps` steps (those covering the
-/// crop rather than padding) are read. Class `i + 1` is `charset[i]`.
-/// `columns` is the number of input columns the crop covers; each
-/// character's position is the span of the steps that read it, relative to
-/// them.
+/// Greedy CTC decoding of one item: `best` and `probs` hold the best
+/// class of every output step and its probability (the model takes the
+/// best class on the device, see [`crate::graph`]); only the first
+/// `used_steps` steps (those covering the crop rather than padding) are
+/// read. Class `i + 1` is `charset[i]`, class 0 the blank. `columns` is the
+/// number of input columns the crop covers; each character's position is
+/// the span of the steps that read it, relative to them.
 pub(crate) fn decode(
+    best: &[i64],
     probs: &[f32],
-    classes: usize,
     used_steps: usize,
     columns: u32,
     charset: &[String],
@@ -123,15 +129,16 @@ pub(crate) fn decode(
     let mut previous = 0usize;
     let width = columns.max(1) as f32;
     let edge = |step: usize| ((step as u32 * COLUMNS_PER_STEP) as f32 / width).min(1.0);
-    for (index, step) in probs.chunks_exact(classes).take(used_steps).enumerate() {
-        let (best, p) = argmax(step);
-        if best != 0 && best == previous {
+    for (index, (&class, &p)) in best.iter().zip(probs).take(used_steps).enumerate() {
+        // A negative index cannot come from ArgMax; read it as the blank.
+        let class = usize::try_from(class).unwrap_or(0);
+        if class != 0 && class == previous {
             // The same character over one more step.
             if let Some(last) = read.chars.last_mut() {
                 last.x1 = edge(index + 1);
             }
-        } else if best != 0
-            && let Some(ch) = charset.get(best - 1)
+        } else if class != 0
+            && let Some(ch) = charset.get(class - 1)
         {
             let start = read.text.len();
             read.text.push_str(ch);
@@ -144,7 +151,7 @@ pub(crate) fn decode(
             });
             conf_sum += p;
         }
-        previous = best;
+        previous = class;
     }
     if !read.chars.is_empty() {
         read.conf = conf_sum / read.chars.len() as f32;
@@ -152,34 +159,39 @@ pub(crate) fn decode(
     read
 }
 
-/// Decodes the output of one recognition batch: `shape` and `data` are the
-/// model output for `batch` items of `width` input columns, `columns` the
-/// columns each real item covers (padding slots have no entry).
+/// Decodes the output of one recognition batch: `best` and `probs` (with
+/// the shapes `best_shape` and `probs_shape`) are the best class per step
+/// and its probability for `batch` items of `width` input columns,
+/// `columns` the columns each real item covers (padding slots have no
+/// entry).
 ///
 /// # Errors
 ///
-/// [`OcrError::Signature`] when the output does not have one step per
-/// [`COLUMNS_PER_STEP`] input columns and `classes` classes per step.
+/// [`OcrError::Signature`] when the outputs do not have one step per
+/// [`COLUMNS_PER_STEP`] input columns for every item.
 pub(crate) fn decode_batch(
-    shape: &[i64],
-    data: &[f32],
+    (best_shape, best): (&[i64], &[i64]),
+    (probs_shape, probs): (&[i64], &[f32]),
     columns: &[u32],
     width: u32,
     batch: usize,
-    classes: usize,
     charset: &[String],
 ) -> Result<Vec<Recognition>, OcrError> {
     let steps = (width / COLUMNS_PER_STEP) as usize;
-    let per_item = steps * classes;
-    if shape.len() != 3 || shape[2] as usize != classes || data.len() != batch * per_item {
+    let expected = [batch as i64, steps as i64];
+    if best_shape != expected
+        || probs_shape != expected
+        || best.len() != batch * steps
+        || probs.len() != batch * steps
+    {
         return Err(OcrError::Signature(format!(
-            "recognition output shape {shape:?} for batch {batch} x width {width}"
+            "recognition output shapes {best_shape:?} and {probs_shape:?} for batch {batch} x              width {width}"
         )));
     }
     Ok(columns
         .iter()
-        .zip(data.chunks_exact(per_item))
-        .map(|(&cols, probs)| decode(probs, classes, used_steps(cols, width), cols, charset))
+        .zip(best.chunks_exact(steps).zip(probs.chunks_exact(steps)))
+        .map(|(&cols, (best, probs))| decode(best, probs, used_steps(cols, width), cols, charset))
         .collect())
 }
 
@@ -189,21 +201,11 @@ pub(crate) fn used_steps(columns: u32, bucket: u32) -> usize {
     (columns.div_ceil(COLUMNS_PER_STEP) + 1).min(bucket / COLUMNS_PER_STEP) as usize
 }
 
-/// Index and value of the largest element (the first on ties).
-fn argmax(values: &[f32]) -> (usize, f32) {
-    let mut best = (0, f32::NEG_INFINITY);
-    for (i, &v) in values.iter().enumerate() {
-        if v > best.1 {
-            best = (i, v);
-        }
-    }
-    best
-}
-
 #[cfg(test)]
 mod tests {
     use super::{bucket_for, decode, decode_batch, preprocess, scaled_width, used_steps};
     use crate::image::RgbView;
+    use crate::resample::Resampler;
 
     #[test]
     fn picks_width_buckets() {
@@ -225,7 +227,7 @@ mod tests {
         let data = vec![255u8; 10 * 12 * 3];
         let image = RgbView::new(10, 12, &data).unwrap();
         let mut out = vec![5.0f32; 3 * 48 * 160];
-        let columns = preprocess(image, 160, &mut out);
+        let columns = preprocess(&mut Resampler::default(), image, 160, &mut out);
         assert_eq!(columns, 40);
         assert!((out[0] - 1.0).abs() < 1e-6);
         assert_eq!(out[40], 0.0);
@@ -236,13 +238,9 @@ mod tests {
     fn decodes_ctc_output() {
         let charset: Vec<String> = ["a", "b", " "].iter().map(|s| (*s).to_owned()).collect();
         // Steps: a a blank a b b (b) -> "aab"; the last step is not used.
-        let steps = [1, 1, 0, 1, 2, 2, 2];
-        let classes = 4;
-        let mut probs = vec![0.0f32; steps.len() * classes];
-        for (t, &c) in steps.iter().enumerate() {
-            probs[t * classes + c] = 0.8;
-        }
-        let read = decode(&probs, classes, 6, 48, &charset);
+        let best = [1, 1, 0, 1, 2, 2, 2];
+        let probs = [0.8f32; 7];
+        let read = decode(&best, &probs, 6, 48, &charset);
         assert_eq!(read.text, "aab");
         assert!((read.conf - 0.8).abs() < 1e-6);
         // Characters sit where their steps are: the first "a" spans steps 0
@@ -258,22 +256,37 @@ mod tests {
         assert!((x0 - 0.5).abs() < 1e-6 && (x1 - 1.0).abs() < 1e-6);
         assert!((read.conf_of(0, 1) - 0.8).abs() < 1e-6);
         assert_eq!(read.extent(3, 9), None);
-        let empty = decode(&vec![0.0; 3 * classes], classes, 3, 24, &charset);
+        let empty = decode(&[0, 0, 0], &[0.9; 3], 3, 24, &charset);
         assert_eq!((empty.text.as_str(), empty.conf), ("", 0.0));
+        // Classes beyond the character list (or negative) read as nothing.
+        let outside = decode(&[9, -1, 1], &[0.9; 3], 3, 24, &charset);
+        assert_eq!(outside.text, "a");
     }
 
     #[test]
     fn decodes_batches_and_checks_the_output_shape() {
         let charset: Vec<String> = ["a", "b"].iter().map(|s| (*s).to_owned()).collect();
-        let classes = 3;
         // Batch 2 of width 16 (2 steps each), one real item reading "ab".
-        let mut data = vec![0.0f32; 2 * 2 * classes];
-        data[1] = 0.9;
-        data[classes + 2] = 0.7;
-        let reads = decode_batch(&[2, 2, 3], &data, &[16], 16, 2, classes, &charset).unwrap();
+        let best = [1, 2, 0, 0];
+        let probs = [0.9, 0.7, 0.5, 0.5];
+        let shape = [2i64, 2];
+        let reads =
+            decode_batch((&shape, &best), (&shape, &probs), &[16], 16, 2, &charset).unwrap();
         assert_eq!(reads.len(), 1);
         assert_eq!(reads[0].text, "ab");
-        assert!(decode_batch(&[2, 2, 4], &data, &[16], 16, 2, classes, &charset).is_err());
-        assert!(decode_batch(&[2, 2, 3], &data[1..], &[16], 16, 2, classes, &charset).is_err());
+        assert!((reads[0].conf - 0.8).abs() < 1e-6);
+        let wrong = [2i64, 3];
+        assert!(decode_batch((&wrong, &best), (&shape, &probs), &[16], 16, 2, &charset).is_err());
+        assert!(
+            decode_batch(
+                (&shape, &best[1..]),
+                (&shape, &probs),
+                &[16],
+                16,
+                2,
+                &charset
+            )
+            .is_err()
+        );
     }
 }

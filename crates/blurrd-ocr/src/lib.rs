@@ -34,6 +34,7 @@ mod det;
 mod dictionary;
 mod engine;
 mod error;
+mod graph;
 mod image;
 mod leak;
 mod models;
