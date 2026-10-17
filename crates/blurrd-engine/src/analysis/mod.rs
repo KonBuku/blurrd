@@ -272,7 +272,13 @@ impl Engine {
     fn warm_up_ocr(&self, req: &AnalyzeRequest, size: (u32, u32)) -> Option<Warming> {
         let config = self.config();
         let setup = config.ocr.as_ref().filter(|_| req.verify)?;
-        match Pass0::warm_up(setup, config.adapter, size, req.regions, Pass0::MAX_READERS) {
+        match Pass0::warm_up(
+            setup,
+            config.adapter,
+            size,
+            req.regions,
+            config.pools.ocr_readers,
+        ) {
             Ok(warming) => Some(warming),
             Err(reason) => {
                 tracing::debug!(%reason, "the OCR engines are built after the calibration");
@@ -312,7 +318,7 @@ impl Engine {
                 info,
                 req.regions,
                 req.coverage,
-                Pass0::MAX_READERS,
+                config.pools.ocr_readers,
                 warmed,
             ) {
                 Ok(pass0) => return Some(pass0),

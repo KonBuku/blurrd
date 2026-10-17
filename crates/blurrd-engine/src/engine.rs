@@ -44,19 +44,36 @@ pub struct PoolSizes {
     pub stage_queue: usize,
     /// Frames of crops waiting for the OCR worker.
     pub ocr_queue: usize,
+    /// OCR engines that read pass 0's zones at the same time, each on a
+    /// thread of its own (at most four: the kill feed and banner, the left
+    /// panel, the screen surfaces, the full frame).
+    pub ocr_readers: usize,
+}
+
+impl PoolSizes {
+    /// The sizes for a machine with `threads` hardware threads: a crop
+    /// worker per four of them (two to six; the crops of a 1080p frame
+    /// take about a quarter of the detectors' time, and the detector
+    /// stages, the decoder and OCR need the rest), and four OCR readers
+    /// from eight threads on (two below: their host work would take the
+    /// detectors' cores).
+    pub fn for_threads(threads: usize) -> Self {
+        Self {
+            frame_queue: 8,
+            crop_workers: (threads / 4).clamp(2, 6),
+            stage_queue: 16,
+            ocr_queue: 16,
+            ocr_readers: if threads >= 8 { 4 } else { 2 },
+        }
+    }
 }
 
 impl Default for PoolSizes {
-    /// Eight queued frames (plan 7.1), four crop workers (the crops of a
-    /// 1080p frame take about a quarter of the detectors' time), sixteen
-    /// frames per stage and per OCR queue.
+    /// The sizes for this machine ([`PoolSizes::for_threads`] with its
+    /// hardware threads): eight queued frames (plan 7.1), sixteen frames
+    /// per stage and per OCR queue.
     fn default() -> Self {
-        Self {
-            frame_queue: 8,
-            crop_workers: 4,
-            stage_queue: 16,
-            ocr_queue: 16,
-        }
+        Self::for_threads(std::thread::available_parallelism().map_or(4, usize::from))
     }
 }
 
@@ -167,5 +184,20 @@ impl Drop for Engine {
             // A panic while dropping has nothing left to report.
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PoolSizes;
+
+    #[test]
+    fn pools_follow_the_hardware_threads() {
+        let small = PoolSizes::for_threads(4);
+        assert_eq!((small.crop_workers, small.ocr_readers), (2, 2));
+        let desktop = PoolSizes::for_threads(16);
+        assert_eq!((desktop.crop_workers, desktop.ocr_readers), (4, 4));
+        let workstation = PoolSizes::for_threads(64);
+        assert_eq!((workstation.crop_workers, workstation.ocr_readers), (6, 4));
     }
 }

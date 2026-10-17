@@ -43,6 +43,8 @@
 //! - [`ProxyWriter`]: the preview proxy, a small H.264 copy for players
 //!   that cannot play the source, written while the analysis decodes.
 //! - [`sys::gpu`]: the machine's GPUs from DXGI, identified by LUID.
+//! - [`sys::power`]: keeps Windows from throttling or sleeping during a
+//!   job.
 //! - [`PtsTable`]: the PTS of every presentation frame, persisted as
 //!   `pts.bin` in the project cache. Rendering and seeking compare decoded
 //!   frames against it, so a frame index always means the same picture.

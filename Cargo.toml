@@ -87,7 +87,12 @@ unicode-normalization = "=0.1.25"
 uuid = { version = "=1.27.0", features = ["serde"] }
 wide = "=1.7.1"
 # Windows system APIs, used only in blurrd-video's `sys` module.
-windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dxgi"] }
+windows = { version = "=0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dxgi",
+  "Win32_System_Power",
+  "Win32_System_Threading",
+] }
 # xtask only: unpacking the pinned FFmpeg archive and NuGet packages.
 zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Development only.

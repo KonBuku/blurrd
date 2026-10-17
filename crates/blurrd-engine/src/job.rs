@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use blurrd_core::{
     AppError, ErrorKind, JobEvent, JobId, JobKind, LeakStatus, Region, Stage, WarningCode,
 };
+use blurrd_video::sys::power::JobPower;
 pub use tokio_util::sync::CancellationToken;
 
 /// Receives the events of a job (the desktop app forwards them over IPC,
@@ -28,10 +29,14 @@ pub(crate) struct Job<'a> {
     started: Instant,
     last_progress: Mutex<Option<Instant>>,
     warnings: AtomicU32,
+    /// Keeps the machine awake and the process unthrottled while the job
+    /// runs (plan 7.4).
+    _power: JobPower,
 }
 
 impl<'a> Job<'a> {
-    /// A job `id` reporting to `sink`, canceled by `cancel`.
+    /// A job `id` reporting to `sink`, canceled by `cancel`, running on
+    /// the calling thread.
     pub(crate) fn new(
         id: JobId,
         sink: &'a dyn ProgressSink,
@@ -44,6 +49,7 @@ impl<'a> Job<'a> {
             started: Instant::now(),
             last_progress: Mutex::new(None),
             warnings: AtomicU32::new(0),
+            _power: JobPower::begin(),
         }
     }
 
