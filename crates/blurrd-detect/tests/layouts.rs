@@ -138,11 +138,15 @@ fn prepared(fx: &Fixture, scale: f32, detections: &[Detection]) -> Vec<PreparedB
     out
 }
 
-/// The fixture matrix, and 16:9 games saved at 4:3 frame sizes.
+/// The fixture matrix, 16:9 games saved at 4:3 and 16:10 frame sizes,
+/// and a 16:9 game letterboxed in a 16:10 frame.
 fn layouts() -> Vec<Layout> {
     let scaled = [
         Layout::scaled_16x9(1440, 1080),
         Layout::scaled_16x9(1024, 768),
+        Layout::scaled_16x9(1920, 1200),
+        Layout::scaled_16x9(1680, 1050),
+        Layout::letterbox(1920, 1200),
     ];
     Layout::matrix().into_iter().chain(scaled).collect()
 }

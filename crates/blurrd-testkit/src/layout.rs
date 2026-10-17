@@ -110,6 +110,29 @@ impl Layout {
         )
     }
 
+    /// A 16:9 game image between black bars at the top and the bottom of a
+    /// taller frame, such as a 1080p game in a 1920 × 1200 recording: the
+    /// HUD keeps its scale and moves down by the top bar.
+    pub fn letterbox(width: u32, height: u32) -> Self {
+        let image_h = (width as f32 * 9.0 / 16.0).round() as u32;
+        let bar = height.saturating_sub(image_h) / 2;
+        let s = image_h as f32 / REF_HEIGHT;
+        let kind = HudLayout::Letterbox {
+            bar_px: u16::try_from(bar).unwrap_or(u16::MAX),
+        };
+        let (w, h, bar_i) = (width as i32, height as i32, bar as i32);
+        Self {
+            top: bar as f32,
+            image: RectI {
+                x0: 0,
+                y0: bar_i,
+                x1: w,
+                y1: h - bar_i,
+            },
+            ..Self::anchored(width, height, kind, s, s, 0)
+        }
+    }
+
     fn anchored(width: u32, height: u32, kind: HudLayout, sx: f32, sy: f32, bar: u32) -> Self {
         let (w, h) = (width as i32, height as i32);
         let bar_i = bar as i32;
@@ -233,7 +256,11 @@ mod tests {
     }
 
     #[test]
-    fn pillarbox_and_stretch() {
+    fn letterbox_pillarbox_and_stretch() {
+        let l = Layout::letterbox(1920, 1200);
+        assert_eq!(l.kind, HudLayout::Letterbox { bar_px: 60 });
+        assert_eq!(l.image, RectI::new(0, 60, 1920, 1140).unwrap());
+        assert!((l.y(0.0) - 60.0).abs() < f32::EPSILON && (l.sy - 1.0).abs() < f32::EPSILON);
         let p = Layout::pillarbox(1920, 1080);
         assert_eq!(p.kind, HudLayout::Pillarbox { bar_px: 240 });
         assert_eq!(p.image, RectI::new(240, 0, 1680, 1080).unwrap());
