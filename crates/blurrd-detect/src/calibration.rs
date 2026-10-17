@@ -157,58 +157,73 @@ impl Calibration {
 #[derive(Debug)]
 struct Hypothesis {
     sampler: HudSampler,
-    feed: KillFeedDetector,
-    chat: ChatDetector,
-    hues: BarHueLearner,
-    crop: HudCrop,
-    dets: Vec<Detection>,
-    /// Kill-feed rows whose right end lies where the layout puts it.
-    feed_rows: u32,
-    /// Chat box bands with lines whose right edge lies where the layout
-    /// puts it.
-    chat_bands: u32,
+    feed: FeedReader,
+    chat: ChatReader,
 }
 
 impl Hypothesis {
     fn new(geometry: HudGeometry) -> Self {
         Self {
             sampler: HudSampler::new(geometry),
-            feed: KillFeedDetector::new(),
-            chat: ChatDetector::new(),
-            hues: BarHueLearner::new(),
-            crop: HudCrop::default(),
-            dets: Vec::new(),
-            feed_rows: 0,
-            chat_bands: 0,
+            feed: FeedReader::default(),
+            chat: ChatReader::default(),
         }
     }
 
     /// Aligned structure in all regions.
     const fn evidence(&self) -> u32 {
-        self.feed_rows + self.chat_bands
+        self.feed.rows + self.chat.bands
     }
+}
 
-    /// Reads one frame through the hypothesis.
-    fn read(&mut self, frame: &RgbView<'_>) {
-        let (crop, dets) = (&mut self.crop, &mut self.dets);
-        let feed = self.sampler.crop(frame, FEED_ROI, HudAnchor::Right, crop);
-        if self.feed.detect(&feed, dets).is_ok() {
+/// The kill-feed side of a [`Hypothesis`]. The regions keep their own
+/// detectors and crop buffers, so they read a frame independently.
+#[derive(Debug, Default)]
+struct FeedReader {
+    detector: KillFeedDetector,
+    hues: BarHueLearner,
+    crop: HudCrop,
+    dets: Vec<Detection>,
+    /// Kill-feed rows whose right end lies where the layout puts it.
+    rows: u32,
+}
+
+impl FeedReader {
+    /// Reads the kill feed of one frame through `sampler`.
+    fn read(&mut self, sampler: &HudSampler, frame: &RgbView<'_>) {
+        let feed = sampler.crop(frame, FEED_ROI, HudAnchor::Right, &mut self.crop);
+        if self.detector.detect(&feed, &mut self.dets).is_ok() {
             // The rows come top to bottom: the k-th fills the k-th slot.
-            let rows = self.feed.rows().iter().enumerate();
-            self.feed_rows += rows
+            let rows = self.detector.rows().iter().enumerate();
+            self.rows += rows
                 .filter(|&(k, r)| in_slot(r.top, k) && row_end_aligned(&feed, r.top))
                 .count() as u32;
-            self.hues.push(&self.feed);
+            self.hues.push(&self.detector);
         }
-        let left = self
-            .sampler
-            .crop(frame, LEFT_PANEL_ROI, HudAnchor::Left, crop);
-        if self.chat.detect(&left, dets).is_ok() {
+    }
+}
+
+/// The text-chat side of a [`Hypothesis`].
+#[derive(Debug, Default)]
+struct ChatReader {
+    detector: ChatDetector,
+    crop: HudCrop,
+    dets: Vec<Detection>,
+    /// Chat box bands with lines whose right edge lies where the layout
+    /// puts it.
+    bands: u32,
+}
+
+impl ChatReader {
+    /// Reads the left panel of one frame through `sampler`.
+    fn read(&mut self, sampler: &HudSampler, frame: &RgbView<'_>) {
+        let left = sampler.crop(frame, LEFT_PANEL_ROI, HudAnchor::Left, &mut self.crop);
+        if self.detector.detect(&left, &mut self.dets).is_ok() {
             // Bands with chat lines: the box alone could be a dark patch of
             // the background.
-            let lines = self.chat.lines();
-            let bands = self.chat.bands().iter();
-            self.chat_bands += bands
+            let lines = self.detector.lines();
+            let bands = self.detector.bands().iter();
+            self.bands += bands
                 .filter(|b| lines.iter().any(|l| l.band == **b) && box_edge_aligned(&left, b))
                 .count() as u32;
         }
@@ -302,16 +317,27 @@ impl Calibrator {
             }
         }
         if let Some(open) = self.open.as_mut() {
-            // The hypotheses read the frame independently, so in parallel:
-            // the calibration runs before the analysis can start.
+            // The hypotheses, and the regions of each, read the frame
+            // independently, so in parallel: the calibration runs before
+            // the analysis can start.
             std::thread::scope(|scope| {
-                let mut hypotheses = open.hypotheses.iter_mut();
-                let own = hypotheses.next();
-                for h in hypotheses {
-                    scope.spawn(move || h.read(frame));
+                let mut own = None;
+                for h in &mut open.hypotheses {
+                    let Hypothesis {
+                        sampler,
+                        feed,
+                        chat,
+                    } = h;
+                    let sampler = &*sampler;
+                    scope.spawn(move || chat.read(sampler, frame));
+                    if own.is_none() {
+                        own = Some((sampler, feed));
+                    } else {
+                        scope.spawn(move || feed.read(sampler, frame));
+                    }
                 }
-                if let Some(h) = own {
-                    h.read(frame);
+                if let Some((sampler, feed)) = own {
+                    feed.read(sampler, frame);
                 }
             });
         }
@@ -465,7 +491,7 @@ fn close(open: &Open) -> CalibratedSegment {
         MIN_EVIDENCE
     };
     let lead = |mask: Counts| -> f32 {
-        let counts = |h: &Hypothesis| [h.feed_rows * mask[0], h.chat_bands * mask[1]];
+        let counts = |h: &Hypothesis| [h.feed.rows * mask[0], h.chat.bands * mask[1]];
         others()
             .map(|other| lead_over(counts(best), counts(other), min_evidence))
             .fold(lead_over(counts(best), [0, 0], min_evidence), f32::min)
@@ -479,7 +505,7 @@ fn close(open: &Open) -> CalibratedSegment {
     CalibratedSegment {
         first_frame: open.first_frame,
         geometry,
-        hues: best.hues.hues(&ClassParams::default()),
+        hues: best.feed.hues.hues(&ClassParams::default()),
     }
 }
 
