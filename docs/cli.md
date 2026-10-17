@@ -20,6 +20,25 @@ Global options (before or after the command):
 | `--threads N`       | Decoder threads (default: chosen by the decoder).                                        |
 | `--no-gpu`          | Software decoding, Media Foundation instead of NVENC, AMF or Quick Sync, OCR on the CPU. |
 
+## Running the tool
+
+`blurrd.exe` needs the FFmpeg DLLs in its own folder. For the OCR
+verification it also needs ONNX Runtime and the OCR models: it uses
+`ORT_DYLIB_PATH` (the path of `onnxruntime.dll`) and `BLURRD_MODEL_DIR`
+(the models folder) when they are set, otherwise `onnxruntime.dll` and
+`models\` next to the executable. Without them every command still works,
+but analyses print "OCR cannot run" and their results are not verified.
+
+In a checkout, `cargo run` sets both variables (`.cargo/config.toml`) once
+`cargo xtask fetch-ffmpeg`, `cargo xtask fetch-ort` and
+`cargo xtask fetch-models` have installed the pinned files:
+
+```sh
+cargo run --release -p blurrd-cli -- run match.mp4 -o match_blurrd.mp4
+```
+
+`blurrd --help` and `blurrd <command> --help` list every option.
+
 ## `blurrd probe`
 
 Shows what blurrd knows about a recording: codec, picture size, frame rate
@@ -74,7 +93,7 @@ Blurs the boxes of a project and writes the output.
 | `--codec`             | `source` (default; H.264, HEVC and AV1 stay in their codec, anything else becomes H.264), `h264`, `hevc`, `av1`. |
 | `--encoder`           | `auto` (default: NVENC, AMF, Quick Sync, then Media Foundation) or an encoder name such as `h264_nvenc`.         |
 | `--quality`           | `source` (default: the source's bit rate, peaks up to 1.5×), `cq:N` (constant quality 0–51), `vbr:M` (M Mbit/s). |
-| `--preset`            | `p1` (fastest) to `p7` (best quality); default `p4`.                                                             |
+| `--preset`            | `p1` (fastest) to `p7` (best quality); default `p4` (the desktop app defaults to `p3`).                          |
 | `--sessions`          | Parallel NVENC sessions for H.264: `auto` (default, two), `1` or `2`.                                            |
 | `--audio`             | `copy` (default, packet for packet), `aac:KBPS` (re-encode, 32–512) or `none`.                                   |
 | `--strength`          | `low`, `medium` or `high`; overrides the project's blur strength.                                                |
@@ -135,10 +154,13 @@ NVIDIA GPUs); HEVC and AV1 split each frame across them instead.
 ## `blurrd audit`
 
 Reads a rendered output with OCR, as an end-to-end check of what the
-encoder wrote. It reads the recording's protected zones as the analysis
-does (one frame in six, or every frame with `--every-frame`), then the
-output's pixels of every name part found there, not only the parts the
-boxes leave open, and lists every name that is still readable. An output
+encoder wrote. It reads the recording's protected zones on the frames
+where the analysis read them (an analysis with OCR records them in the
+cache as `structure.bin`; without that record, one frame in six and every
+frame that shows HUD structure), or every zone of every frame with
+`--every-frame`. Then it reads the output's pixels of every name part
+found there, not only the parts the boxes leave open, and lists every
+name that is still readable. An output
 with a readable name is renamed `<name>_UNVERIFIED.<ext>` and the exit code
 is 3. Items that cannot be read with confidence make the result
 `Unverified` but keep the name and exit code 0. Name slots count only on
@@ -151,7 +173,7 @@ SHA-256.
 | ------------------- | ----------------------------------------- |
 | `--plan FILE`       | The project the output was rendered with. |
 | `-o, --output FILE` | The rendered output.                      |
-| `--every-frame`     | Read every frame instead of one in six.   |
+| `--every-frame`     | Read every zone of every frame.           |
 
 ### Leak report
 

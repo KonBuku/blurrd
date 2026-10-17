@@ -2,7 +2,9 @@
 
 This guide explains how to build, test and check blurrd locally. The
 [contributing guide](../CONTRIBUTING.md) covers the ground rules, the media
-policy and the commit conventions.
+policy and the commit conventions, [architecture.md](architecture.md) how
+the crates and the jobs fit together, and [privacy.md](privacy.md) what
+the verification promises and which cases are verified.
 
 ## Prerequisites
 
@@ -56,6 +58,14 @@ cargo clippy --workspace --all-targets -- -D warnings      # lints, as in CI
 cargo fmt --all                                            # format Rust code
 cargo deny check                                           # advisories, licenses, bans, sources
 typos                                                      # spelling in code and docs
+```
+
+Run the command-line tool from the checkout with `cargo run`, which also
+points it at the ONNX Runtime and the models that xtask installed (see
+[cli.md](cli.md#running-the-tool)):
+
+```sh
+cargo run --release -p blurrd-cli -- probe <recording>
 ```
 
 Property tests use [proptest](https://proptest-rs.github.io/proptest/).
