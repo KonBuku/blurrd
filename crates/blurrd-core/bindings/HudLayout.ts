@@ -15,4 +15,8 @@ scale_pct: number, } } | { "Scaled16x9": {
 /**
  * Width of each black bar in source pixels (0 for none).
  */
+bar_px: number, } } | { "Letterbox": { 
+/**
+ * Height of each black bar in source pixels.
+ */
 bar_px: number, } };

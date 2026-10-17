@@ -445,6 +445,31 @@
           "required": [
             "Scaled16x9"
           ]
+        },
+        {
+          "description": "The game image between black bars of `bar_px` source pixels at the\ntop and the bottom (for example a 1920 × 1080 game in a\n1920 × 1200 frame): the HUD scales with the image height, sits\nbelow the top bar and keeps its anchors at the frame's sides.",
+          "type": "object",
+          "properties": {
+            "Letterbox": {
+              "type": "object",
+              "properties": {
+                "bar_px": {
+                  "description": "Height of each black bar in source pixels.",
+                  "type": "integer",
+                  "format": "uint16",
+                  "maximum": 65535,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "bar_px"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Letterbox"
+          ]
         }
       ]
     },

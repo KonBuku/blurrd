@@ -76,6 +76,14 @@ pub enum HudLayout {
         /// Width of each black bar in source pixels (0 for none).
         bar_px: u16,
     },
+    /// The game image between black bars of `bar_px` source pixels at the
+    /// top and the bottom (for example a 1920 × 1080 game in a
+    /// 1920 × 1200 frame): the HUD scales with the image height, sits
+    /// below the top bar and keeps its anchors at the frame's sides.
+    Letterbox {
+        /// Height of each black bar in source pixels.
+        bar_px: u16,
+    },
 }
 
 /// Calibration confidence per region, from 0.0 to 1.0.
@@ -133,8 +141,10 @@ impl HudGeometry {
     /// The HUD scales with the image height (`sy = height / 1080`) and its
     /// elements keep their anchors at the image edges: a stretched 4:3 game
     /// also widens it by the frame's aspect over 4:3, a pillarbox moves the
-    /// edges in by the bar width, and a scaled 16:9 image scales it
-    /// horizontally by the image's width over the reference width.
+    /// edges in by the bar width, a scaled 16:9 image scales it
+    /// horizontally by the image's width over the reference width, and a
+    /// letterbox scales it with the image between its bars and moves it
+    /// down by the top bar.
     /// [`HudLayout::Auto`] takes the layout from the frame's aspect ratio.
     /// [`HudLayout::Custom`] scales the HUD by its percentage around the
     /// anchors and the vertical centre.
@@ -151,6 +161,11 @@ impl HudGeometry {
             HudLayout::Scaled16x9 { bar_px } => {
                 let bar = f32::from(bar_px);
                 ((w - 2.0 * bar) / REFERENCE_WIDTH as f32, sy, bar, 0.0)
+            }
+            HudLayout::Letterbox { bar_px } => {
+                let bar = f32::from(bar_px);
+                let s = (h - 2.0 * bar).max(1.0) / REFERENCE_HEIGHT as f32;
+                (s, s, 0.0, bar)
             }
             HudLayout::Custom { scale_pct } => {
                 let s = sy * f32::from(scale_pct) / 100.0;
@@ -351,6 +366,25 @@ mod tests {
     }
 
     #[test]
+    fn maps_a_letterboxed_image() {
+        // A 1080p game between bars of 60 px in a 1920 x 1200 frame: the
+        // reference HUD, moved down by the top bar.
+        let g = HudGeometry::for_layout(1920, 1200, HudLayout::Letterbox { bar_px: 60 });
+        assert!(close(g.sx, 1.0) && close(g.sy, 1.0));
+        assert!(close(g.source_y(0.0), 60.0) && close(g.source_y(1080.0), 1140.0));
+        assert!(close(g.source_x(1900.0, HudAnchor::Right), 1900.0));
+        assert!(close(g.source_x(40.0, HudAnchor::Left), 40.0));
+        // A 21:9 game letterboxed in a 16:9 frame scales with its height.
+        let wide = HudGeometry::for_layout(1920, 1080, HudLayout::Letterbox { bar_px: 129 });
+        let s = (1080.0 - 258.0) / 1080.0;
+        assert!(close(wide.sx, s) && close(wide.sy, s));
+        assert!(close(
+            wide.source_x(1900.0, HudAnchor::Right),
+            1920.0 - 20.0 * s
+        ));
+    }
+
+    #[test]
     fn source_and_reference_round_trip() {
         let layouts = [
             (1280, 720, HudLayout::Auto),
@@ -359,6 +393,7 @@ mod tests {
             (1920, 1080, HudLayout::Pillarbox { bar_px: 240 }),
             (1920, 1080, HudLayout::Stretched4x3),
             (1024, 768, HudLayout::Scaled16x9 { bar_px: 0 }),
+            (1920, 1200, HudLayout::Letterbox { bar_px: 60 }),
         ];
         let r = RectI::new(1250, 96, 1838, 129).unwrap();
         for (w, h, layout) in layouts {
