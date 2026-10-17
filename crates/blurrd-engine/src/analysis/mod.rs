@@ -430,10 +430,7 @@ impl Engine {
         };
         let mut project = Project::new(media, geometry, detector, req.blur);
         project.tracks = output.tracks;
-        if let Some(previous) = dir.read_project() {
-            project.overrides = previous.overrides;
-            project.revision = previous.revision + 1;
-        }
+        let base = take_previous_edits(&mut project, &dir);
         project.verify.state = VerifyState::Unverified;
         let pass0_stats = output.pass0.as_ref().map(Pass0::stats);
         let verified = match output.pass0 {
@@ -450,7 +447,10 @@ impl Engine {
             }
             None => None,
         };
-        cache::write_project(&project, &dir.project())?;
+        // Edits saved while the analysis ran stay (and are unverified).
+        let project = cache::update_project(&dir.project(), |current| {
+            Ok(crate::edits::keep_current_edits(project, base, current))
+        })?;
         let elapsed = job.elapsed();
         let frames = pts.len();
         Ok(Analysis {
@@ -472,6 +472,16 @@ impl Engine {
             project,
         })
     }
+}
+
+/// Takes over the edits of the project cached in `dir` (a previous
+/// analysis of the video) and the revision after its one; answers its
+/// revision, `None` without a cached project.
+fn take_previous_edits(project: &mut Project, dir: &ProjectDir) -> Option<u64> {
+    let previous = dir.read_project()?;
+    project.overrides = previous.overrides;
+    project.revision = previous.revision + 1;
+    Some(previous.revision)
 }
 
 /// Checks what the pipeline produced and warns about what stopped on the

@@ -225,6 +225,7 @@ impl Engine {
     ) -> Result<Reverify, AppError> {
         let dir = ProjectDir::new(&self.config().cache_dir, &project.media.fingerprint);
         dir.create()?;
+        let base = project.revision;
         let previous = project
             .verify
             .report
@@ -246,7 +247,14 @@ impl Engine {
             unverified_ranges: Vec::new(),
             report: Some(name),
         };
-        cache::write_project(&project, &dir.project())?;
+        // Edits saved while the job ran stay; their frames are unverified.
+        let project = cache::update_project(&dir.project(), |current| {
+            Ok(crate::edits::keep_current_edits(
+                project,
+                Some(base),
+                current,
+            ))
+        })?;
         Ok(Reverify {
             project,
             report,
@@ -337,7 +345,7 @@ fn ranges_to_check(project: &Project) -> Vec<FrameRange> {
     let verified = project.verify.report.is_some();
     let current = verified && project.verify.plan_revision == project.revision;
     let whole = !verified || (project.verify.unverified_ranges.is_empty() && !current);
-    let mut ranges = if whole {
+    if whole {
         project
             .media
             .frame_count
@@ -345,17 +353,8 @@ fn ranges_to_check(project: &Project) -> Vec<FrameRange> {
             .map(|f1| vec![FrameRange { f0: 0, f1 }])
             .unwrap_or_default()
     } else {
-        project.verify.unverified_ranges.clone()
-    };
-    ranges.sort_by_key(|r| r.f0);
-    let mut merged: Vec<FrameRange> = Vec::with_capacity(ranges.len());
-    for range in ranges {
-        match merged.last_mut() {
-            Some(last) if range.f0 <= last.f1.saturating_add(1) => last.f1 = last.f1.max(range.f1),
-            _ => merged.push(range),
-        }
+        FrameRange::merge_all(project.verify.unverified_ranges.clone())
     }
-    merged
 }
 
 /// The report of the whole video after a verification of `ranges`: the

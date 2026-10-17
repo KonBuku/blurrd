@@ -4,7 +4,9 @@
 //! The project file in the engine's cache is the single source of truth:
 //! every read goes to the file, so the results of an analysis that just
 //! finished are seen at once, and every edit is a read-modify-write of
-//! the file under the project's lock. A video that was not analysed yet
+//! the file through the engine's `update_project`, the same lock a job
+//! saves its result under (so neither loses the other's change). A
+//! video that was not analysed yet
 //! has no project file; it reads as an empty project at revision 0.
 
 use std::collections::HashMap;
@@ -14,7 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use blurrd_core::{
     AppError, BlurParams, DensityLanes, ErrorKind, Fingerprint, FramePts, FrameRange, MediaInfo,
     Override, OverridesSaved, Project, ProjectSummary, ProjectVerify, RegionSet, ThumbnailStrip,
-    TrackSet, VerifyReport, VerifySummary, schema,
+    TrackSet, VerifyReport, VerifySummary, schema, touched_ranges,
 };
 use blurrd_engine::UNVERIFIED_SUFFIX;
 use blurrd_engine::cache::{self, ProjectDir, THUMBNAIL_INTERVAL_S};
@@ -103,7 +105,7 @@ pub(crate) struct OpenProject {
     dir: ProjectDir,
     /// The PTS table, once read or measured.
     pts: Mutex<Option<Arc<PtsTable>>>,
-    /// Held while the project file is read and written by an edit.
+    /// Held while a report is accepted (its file and the output renamed).
     edit: Mutex<()>,
     /// The last output a render of this session wrote.
     last_output: Mutex<Option<PathBuf>>,
@@ -143,10 +145,13 @@ impl OpenProject {
     ///
     /// [`ErrorKind::InvalidProject`] when the file was not analysed yet.
     pub(crate) fn analysed(&self) -> Result<Project, AppError> {
-        self.project().ok_or_else(|| {
-            AppError::new(ErrorKind::InvalidProject, "Analyze this file first.")
-                .with_detail(self.source.display().to_string())
-        })
+        self.project().ok_or_else(|| self.not_analysed())
+    }
+
+    /// The error for a file that was not analysed yet.
+    fn not_analysed(&self) -> AppError {
+        AppError::new(ErrorKind::InvalidProject, "Analyze this file first.")
+            .with_detail(self.source.display().to_string())
     }
 
     /// The summary the preview needs; `media_url` and `proxy_url` are the
@@ -311,30 +316,33 @@ impl OpenProject {
         base_rev: u64,
         overrides: Vec<Override>,
     ) -> Result<OverridesSaved, AppError> {
-        let _edit = lock(&self.edit);
-        let mut project = self.analysed()?;
-        if project.revision != base_rev {
-            return Err(AppError::new(
-                ErrorKind::StaleRevision,
-                "The project changed in the meantime.",
-            )
-            .with_detail(format!(
-                "the project is at revision {}, not {base_rev}",
-                project.revision
-            )));
-        }
-        if let Some(problem) = invalid_edit(&overrides, &project) {
-            return Err(
-                AppError::new(ErrorKind::InvalidProject, "The edit is invalid.")
-                    .with_detail(problem),
-            );
-        }
-        let mut ranges = project.verify.unverified_ranges.clone();
-        ranges.extend(touched_ranges(&project.overrides, &overrides));
-        project.verify.unverified_ranges = merge_ranges(ranges);
-        project.overrides = overrides;
-        project.revision += 1;
-        cache::write_project(&project, &self.dir.project())?;
+        let project = cache::update_project(&self.dir.project(), |stored| {
+            let mut project = stored
+                .filter(|project| cache::same_file(&project.media.fingerprint, &self.fingerprint))
+                .ok_or_else(|| self.not_analysed())?;
+            if project.revision != base_rev {
+                return Err(AppError::new(
+                    ErrorKind::StaleRevision,
+                    "The project changed in the meantime.",
+                )
+                .with_detail(format!(
+                    "the project is at revision {}, not {base_rev}",
+                    project.revision
+                )));
+            }
+            if let Some(problem) = invalid_edit(&overrides, &project) {
+                return Err(
+                    AppError::new(ErrorKind::InvalidProject, "The edit is invalid.")
+                        .with_detail(problem),
+                );
+            }
+            let mut ranges = std::mem::take(&mut project.verify.unverified_ranges);
+            ranges.extend(touched_ranges(&project.overrides, &overrides));
+            project.verify.unverified_ranges = FrameRange::merge_all(ranges);
+            project.overrides = overrides;
+            project.revision += 1;
+            Ok(project)
+        })?;
         Ok(OverridesSaved {
             revision: project.revision,
             unverified_ranges: project.verify.unverified_ranges,
@@ -462,44 +470,6 @@ fn invalid_edit(overrides: &[Override], project: &Project) -> Option<String> {
     None
 }
 
-/// The frame ranges of every edit that was added, removed or changed
-/// between `before` and `after` (old and new range of a changed edit).
-fn touched_ranges(before: &[Override], after: &[Override]) -> Vec<FrameRange> {
-    let old: HashMap<_, _> = before.iter().map(|edit| (edit.uid(), edit)).collect();
-    let new: HashMap<_, _> = after.iter().map(|edit| (edit.uid(), edit)).collect();
-    let range = |edit: &Override| {
-        let (f0, f1) = edit.frames();
-        FrameRange { f0, f1 }
-    };
-    let mut ranges = Vec::new();
-    for edit in before {
-        if new.get(&edit.uid()) != Some(&edit) {
-            ranges.push(range(edit));
-        }
-    }
-    for edit in after {
-        if old.get(&edit.uid()) != Some(&edit) {
-            ranges.push(range(edit));
-        }
-    }
-    ranges
-}
-
-/// Sorts `ranges` and merges overlapping and adjacent ones.
-fn merge_ranges(mut ranges: Vec<FrameRange>) -> Vec<FrameRange> {
-    ranges.sort_unstable_by_key(|range| range.f0);
-    let mut merged: Vec<FrameRange> = Vec::with_capacity(ranges.len());
-    for range in ranges {
-        match merged.last_mut() {
-            Some(last) if range.f0 <= last.f1.saturating_add(1) => {
-                last.f1 = last.f1.max(range.f1);
-            }
-            _ => merged.push(range),
-        }
-    }
-    merged
-}
-
 /// Locks `mutex`, recovering the data of a poisoned lock (a panicking
 /// job thread never leaves this state half-written).
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -510,48 +480,7 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use blurrd_core::{FrameRange, Override, RectI, Region};
-    use uuid::Uuid;
-
-    use super::{merge_ranges, touched_ranges, verified_name};
-
-    fn add(uid: u128, f0: u32, f1: u32) -> Override {
-        Override::Add {
-            uid: Uuid::from_u128(uid),
-            region: Region::Manual,
-            f0,
-            f1,
-            rect: RectI::new(0, 0, 10, 10).unwrap(),
-        }
-    }
-
-    fn range(f0: u32, f1: u32) -> FrameRange {
-        FrameRange { f0, f1 }
-    }
-
-    #[test]
-    fn ranges_merge_when_they_overlap_or_touch() {
-        let merged = merge_ranges(vec![range(10, 20), range(0, 4), range(21, 25), range(5, 5)]);
-        assert_eq!(merged, vec![range(0, 5), range(10, 25)]);
-    }
-
-    #[test]
-    fn touched_ranges_cover_added_removed_and_changed_edits() {
-        let before = vec![add(1, 0, 9), add(2, 100, 110), add(3, 50, 60)];
-        let after = vec![add(1, 0, 9), add(2, 200, 210), add(4, 300, 300)];
-        let mut touched = touched_ranges(&before, &after);
-        touched.sort_unstable_by_key(|r| r.f0);
-        assert_eq!(
-            touched,
-            vec![
-                range(50, 60),
-                range(100, 110),
-                range(200, 210),
-                range(300, 300)
-            ]
-        );
-        assert_eq!(touched_ranges(&before, &before), vec![]);
-    }
+    use super::verified_name;
 
     #[test]
     fn unverified_outputs_lose_their_suffix() {

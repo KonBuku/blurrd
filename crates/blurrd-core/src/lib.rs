@@ -58,7 +58,9 @@ pub use ipc::{
 };
 pub use job::{JobEvent, JobId, JobKind, JobSummary, Stage, WarningCode};
 pub use media::{AudioStreamInfo, ColorInfo, ColorRange, Fingerprint, HdrKind, MediaInfo};
-pub use overrides::{ADJUST_MIN_IOU, BindStatus, Override, OverrideBinding, SUPPRESS_MIN_IOU};
+pub use overrides::{
+    ADJUST_MIN_IOU, BindStatus, Override, OverrideBinding, SUPPRESS_MIN_IOU, touched_ranges,
+};
 pub use plan::{
     BlurBox, BlurPlan, Confidence, DensityLane, DensityLanes, FrameBoxTable, PlanError, Segment,
     Track, TrackId, TrackSource,

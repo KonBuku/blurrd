@@ -10,6 +10,7 @@ mod support;
 mod synthetic;
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use blurrd_core::{
     FrameRange, JobEvent, JobId, LeakKind, LeakStatus, Project, Region, RegionSet, TrackSource,
@@ -17,7 +18,7 @@ use blurrd_core::{
 };
 use blurrd_engine::{
     AnalyzeRequest, CancellationToken, Engine, EngineConfig, OcrSetup, ProgressSink,
-    ReverifyRequest,
+    ReverifyRequest, cache,
 };
 use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
 use blurrd_testkit::{Background, FontSet, Layout, Palette, Scene};
@@ -211,4 +212,79 @@ fn a_name_the_detector_missed_is_found_without_the_dictionary() {
         synthetic::evaluate(&done.project, &scene, regions).leaked_item_frames,
         0
     );
+}
+
+/// Saves an edit on the first progress event, as the desktop app does
+/// when the user draws a box while the job runs.
+struct EditWhileRunning {
+    project_file: PathBuf,
+    edit: blurrd_core::Override,
+    done: Mutex<bool>,
+}
+
+impl ProgressSink for EditWhileRunning {
+    fn emit(&self, event: JobEvent) {
+        let mut done = self.done.lock().unwrap();
+        if matches!(event, JobEvent::Progress { .. }) && !*done {
+            *done = true;
+            cache::update_project(&self.project_file, |stored| {
+                let mut project = stored.unwrap();
+                project.overrides.push(self.edit);
+                project.revision += 1;
+                project.verify.unverified_ranges.push(self.edit.range());
+                Ok(project)
+            })
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+fn edits_saved_while_the_job_runs_are_kept_unverified() {
+    let work = Workdir::new("reverify-concurrent-edit");
+    let Some(engine) = engine(&work) else {
+        return;
+    };
+    let scene = synthetic::hud_scene(Layout::reference(), 90, 59);
+    let clip = work.path("clip.mkv");
+    synthetic::write_clip(&clip, &scene);
+    let mut project = analyse(&engine, clip.clone(), RegionSet::all());
+    let manual = |uid, f0, f1| blurrd_core::Override::Add {
+        uid: uuid::Uuid::from_u128(uid),
+        region: Region::Manual,
+        f0,
+        f1,
+        rect: blurrd_core::RectI::new(900, 500, 1000, 540).unwrap(),
+    };
+    // A saved edit waits for verification (as the app saves it).
+    let first = manual(1, 10, 20);
+    project.overrides.push(first);
+    project.revision += 1;
+    project.verify.unverified_ranges = vec![first.range()];
+    let project_file =
+        cache::ProjectDir::new(&work.path("cache"), &project.media.fingerprint).project();
+    cache::write_project(&project, &project_file).unwrap();
+
+    let second = manual(2, 60, 70);
+    let sink = EditWhileRunning {
+        project_file: project_file.clone(),
+        edit: second,
+        done: Mutex::new(false),
+    };
+    let done = engine
+        .reverify_ranges(
+            &ReverifyRequest::new(JobId(uuid::Uuid::now_v7()), clip, project.clone()),
+            &sink,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    assert!(*sink.done.lock().unwrap());
+    // The job checked the first edit; the second, saved while it ran,
+    // stays and waits for the next verification.
+    let saved = cache::read_project(&project_file).unwrap();
+    assert_eq!(saved, done.project);
+    assert_eq!(saved.overrides, vec![first, second]);
+    assert!(saved.revision > project.revision + 1);
+    assert_eq!(saved.verify.unverified_ranges, vec![second.range()]);
+    assert!(!blurrd_engine::is_verified(&saved));
 }

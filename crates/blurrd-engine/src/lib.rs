@@ -47,6 +47,7 @@ mod analysis;
 mod audit;
 pub mod cache;
 pub mod dictionary;
+mod edits;
 mod engine;
 mod hud;
 mod job;

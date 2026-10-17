@@ -8,6 +8,8 @@
 //! time a plan is resolved and are never stored. An override that finds no
 //! such track is *unbound*: it is inactive and never applied to another box.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
@@ -15,6 +17,7 @@ use uuid::Uuid;
 use crate::geometry::RectI;
 use crate::plan::Track;
 use crate::region::Region;
+use crate::time::FrameRange;
 
 /// Minimum IoU between a `Suppress` anchor and a detector box.
 ///
@@ -117,6 +120,12 @@ impl Override {
         f0 <= frame && frame <= f1
     }
 
+    /// The inclusive frame range as a [`FrameRange`].
+    pub const fn range(&self) -> FrameRange {
+        let (f0, f1) = self.frames();
+        FrameRange { f0, f1 }
+    }
+
     /// The anchor and the minimum IoU for edits that bind to a track.
     const fn anchor(&self) -> Option<(RectI, f32)> {
         match *self {
@@ -125,6 +134,21 @@ impl Override {
             Self::Adjust { anchor, .. } => Some((anchor, ADJUST_MIN_IOU)),
         }
     }
+}
+
+/// The frame ranges of every edit that was added, removed or changed
+/// between `before` and `after` (old and new range of a changed edit),
+/// unmerged: the frames whose output the change can alter.
+pub fn touched_ranges(before: &[Override], after: &[Override]) -> Vec<FrameRange> {
+    let old: HashMap<Uuid, &Override> = before.iter().map(|edit| (edit.uid(), edit)).collect();
+    let new: HashMap<Uuid, &Override> = after.iter().map(|edit| (edit.uid(), edit)).collect();
+    let removed = before
+        .iter()
+        .filter(|edit| new.get(&edit.uid()) != Some(edit));
+    let added = after
+        .iter()
+        .filter(|edit| old.get(&edit.uid()) != Some(edit));
+    removed.chain(added).map(Override::range).collect()
 }
 
 /// Whether an override is active.
@@ -235,5 +259,44 @@ impl Resolution {
             }
         }
         Some(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::{Override, touched_ranges};
+    use crate::geometry::RectI;
+    use crate::region::Region;
+    use crate::time::FrameRange;
+
+    fn add(uid: u128, f0: u32, f1: u32) -> Override {
+        Override::Add {
+            uid: Uuid::from_u128(uid),
+            region: Region::Manual,
+            f0,
+            f1,
+            rect: RectI::new(0, 0, 10, 10).unwrap(),
+        }
+    }
+
+    #[test]
+    fn touched_ranges_cover_added_removed_and_changed_edits() {
+        let range = |f0, f1| FrameRange { f0, f1 };
+        let before = vec![add(1, 0, 9), add(2, 100, 110), add(3, 50, 60)];
+        let after = vec![add(1, 0, 9), add(2, 200, 210), add(4, 300, 300)];
+        let mut touched = touched_ranges(&before, &after);
+        touched.sort_unstable_by_key(|r| r.f0);
+        assert_eq!(
+            touched,
+            vec![
+                range(50, 60),
+                range(100, 110),
+                range(200, 210),
+                range(300, 300)
+            ]
+        );
+        assert_eq!(touched_ranges(&before, &before), vec![]);
     }
 }

@@ -11,12 +11,15 @@
 //! ```
 //!
 //! [`ProjectDir`] names the files of one video's folder, so the desktop
-//! app serves the same files the jobs write.
+//! app serves the same files the jobs write. [`update_project`] is the
+//! one way to change a cached project that someone else may change at the
+//! same time (a job saving its result while the user edits).
 
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 use std::time::UNIX_EPOCH;
 
 use blurrd_core::{AppError, ErrorKind, Fingerprint, Project, schema};
@@ -169,16 +172,7 @@ impl ProjectDir {
 
     /// The cached project, if there is a valid one.
     pub fn read_project(&self) -> Option<Project> {
-        let path = self.project();
-        path.is_file()
-            .then(|| read_project(&path))
-            .and_then(|project| match project {
-                Ok(project) => Some(project),
-                Err(error) => {
-                    tracing::warn!(%error, "ignoring an unreadable cached project");
-                    None
-                }
-            })
+        read_cached(&self.project())
     }
 
     /// The cached PTS table, if there is a valid one.
@@ -212,6 +206,49 @@ pub fn write_project(project: &Project, path: &Path) -> Result<(), AppError> {
         let _ = std::fs::remove_file(&temp);
         io_error(&e, "The project could not be saved.", path)
     })
+}
+
+/// Serialises [`update_project`] calls in this process.
+static PROJECT_UPDATES: Mutex<()> = Mutex::new(());
+
+/// Changes the cached project at `path` in one step: `update` gets the
+/// project stored now (`None` without a valid one) and answers the one to
+/// store, which is written atomically and returned.
+///
+/// Every writer that may race another (a job saving its result, the
+/// desktop app saving the user's edits) goes through this function, so
+/// no write is based on a project that changed after it was read. The
+/// lock covers this process; the cache belongs to one app or CLI run at a
+/// time.
+///
+/// # Errors
+///
+/// The error `update` answers (nothing is written then), or the errors
+/// of [`write_project`].
+pub fn update_project(
+    path: &Path,
+    update: impl FnOnce(Option<Project>) -> Result<Project, AppError>,
+) -> Result<Project, AppError> {
+    let _updating = PROJECT_UPDATES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let project = update(read_cached(path))?;
+    write_project(&project, path)?;
+    Ok(project)
+}
+
+/// The project at `path`, if there is a valid one; an unreadable file is
+/// logged and ignored (a new analysis replaces it).
+fn read_cached(path: &Path) -> Option<Project> {
+    path.is_file()
+        .then(|| read_project(path))
+        .and_then(|project| match project {
+            Ok(project) => Some(project),
+            Err(error) => {
+                tracing::warn!(%error, "ignoring an unreadable cached project");
+                None
+            }
+        })
 }
 
 /// Reads and validates the project file at `path`.

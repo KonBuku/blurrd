@@ -98,6 +98,21 @@ impl FrameRange {
     pub const fn contains(&self, frame: u32) -> bool {
         self.f0 <= frame && frame <= self.f1
     }
+
+    /// Sorts `ranges` and merges the ones that overlap or touch.
+    pub fn merge_all(mut ranges: Vec<Self>) -> Vec<Self> {
+        ranges.sort_unstable_by_key(|range| range.f0);
+        let mut merged: Vec<Self> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            match merged.last_mut() {
+                Some(last) if range.f0 <= last.f1.saturating_add(1) => {
+                    last.f1 = last.f1.max(range.f1);
+                }
+                _ => merged.push(range),
+            }
+        }
+        merged
+    }
 }
 
 impl TryFrom<[u32; 2]> for FrameRange {
@@ -117,6 +132,15 @@ impl From<FrameRange> for [u32; 2] {
 #[cfg(test)]
 mod tests {
     use super::{FrameRange, Rational};
+
+    #[test]
+    fn ranges_merge_when_they_overlap_or_touch() {
+        let range = |f0, f1| FrameRange { f0, f1 };
+        let merged =
+            FrameRange::merge_all(vec![range(10, 20), range(0, 4), range(21, 25), range(5, 5)]);
+        assert_eq!(merged, vec![range(0, 5), range(10, 25)]);
+        assert_eq!(FrameRange::merge_all(Vec::new()), vec![]);
+    }
 
     #[test]
     fn rational_rejects_zero_denominator() {
