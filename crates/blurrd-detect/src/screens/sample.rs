@@ -8,7 +8,7 @@
 //! frame) onto a regular reference grid. The detectors then work in
 //! reference pixels only: there is no per-resolution code.
 
-use blurrd_core::{HudGeometry, RectI};
+use blurrd_core::{HudAnchor, HudGeometry, RectI};
 
 use crate::image::RgbView;
 
@@ -21,6 +21,16 @@ pub enum Anchor {
     Right,
     /// The horizontal centre of the HUD.
     Center,
+}
+
+impl From<HudAnchor> for Anchor {
+    fn from(anchor: HudAnchor) -> Self {
+        match anchor {
+            HudAnchor::Left => Self::Left,
+            HudAnchor::Right => Self::Right,
+            HudAnchor::Center => Self::Center,
+        }
+    }
 }
 
 impl Anchor {

@@ -3,7 +3,7 @@
 //! returns the boxes of every frame that became final.
 
 use blurrd_core::{AppError, Confidence, Mode, RectI, Region, RegionSet};
-use blurrd_detect::banner::BannerBox;
+use blurrd_detect::banner::{self, BannerBox};
 use blurrd_detect::killfeed::BarHues;
 use blurrd_detect::scene_cut::SceneCutDetector;
 use blurrd_detect::screens::{self, Anchor};
@@ -266,16 +266,17 @@ impl PanelStage {
                     out.frame(Source::Banner, f, newest, boxes);
                 }
                 let entry = current.get_or_insert_with(|| (b.frame, Vec::new()));
-                entry
-                    .1
-                    .extend(self.place(b.rect, Anchor::Center).map(|rect| RegionBox {
-                        region: Region::Banner,
-                        kind: blurrd_core::NameKind::Banner,
-                        rect,
-                        conf: b.conf,
-                        link: Link::Adjacent,
-                        grid: Grid::Corner,
-                    }));
+                entry.1.extend(
+                    self.place(b.rect, banner::ANCHOR.into())
+                        .map(|rect| RegionBox {
+                            region: Region::Banner,
+                            kind: blurrd_core::NameKind::Banner,
+                            rect,
+                            conf: b.conf,
+                            link: Link::Adjacent,
+                            grid: Grid::Corner,
+                        }),
+                );
             }
             if let Some((f, boxes)) = current {
                 out.frame(Source::Banner, f, newest, boxes);

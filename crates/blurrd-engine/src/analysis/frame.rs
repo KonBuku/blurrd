@@ -2,6 +2,7 @@
 //! surfaces read by the crop workers.
 
 use blurrd_core::{AppError, RectI, Region, RegionSet};
+use blurrd_detect::banner;
 use blurrd_detect::chat::LEFT_PANEL_ROI;
 use blurrd_detect::killfeed::FEED_ROI;
 use blurrd_detect::screens::{
@@ -105,7 +106,7 @@ impl Cropper {
             map,
             reference: ReferenceFrame::new(&map, colour, converter),
             image: RgbImage::default(),
-            banner: Some(map.reference_rect(FEED_ROI, Anchor::Center)).filter(|&rect| {
+            banner: Some(map.reference_rect(FEED_ROI, banner::ANCHOR.into())).filter(|&rect| {
                 regions.contains(Region::Banner)
                     && rect != map.reference_rect(FEED_ROI, Anchor::Right)
             }),
