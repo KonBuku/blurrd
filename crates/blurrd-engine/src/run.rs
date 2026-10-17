@@ -23,16 +23,19 @@
 //! written under its `*_UNVERIFIED` name; when the verification comes out
 //! clean it gets its own name, and when the verification added fix boxes
 //! the project is rendered again (rare: a fix means a detector missed a
-//! name).
+//! name). That render encodes only the GOPs whose boxes changed and takes
+//! every other frame from the streamed output, which the run remembers
+//! the boxes of.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use blurrd_core::{
-    AppError, BlurBox, BlurParams, EncoderInfo, ErrorKind, ExportSettings, JobEvent, JobId,
-    JobKind, JobSummary, MediaInfo, Project, RegionSet, TrackSource, VerifyState,
+    AppError, BlurBox, BlurParams, EncoderInfo, ErrorKind, ExportSettings, FrameBoxTable, JobEvent,
+    JobId, JobKind, JobSummary, MediaInfo, Project, RegionSet, TrackSource, VerifyState,
 };
 use blurrd_video::{BoxSource, DecodePurpose, HwDecode, PtsTable, VideoError};
 use serde::Serialize;
@@ -41,7 +44,7 @@ use crate::analysis::{AnalyzeReport, AnalyzeRequest, Prepared, expected_frames};
 use crate::cache::{self, ProjectDir};
 use crate::engine::Engine;
 use crate::job::{CancellationToken, Job, canceled};
-use crate::render::{RenderReport, RenderRequest, RenderTarget, is_verified, transcode};
+use crate::render::{RenderReport, RenderRequest, RenderTarget, Reuse, is_verified, transcode};
 
 /// How often a render waiting for boxes looks at the cancellation.
 const POLL: Duration = Duration::from_millis(20);
@@ -289,6 +292,9 @@ impl Engine {
             decode,
         };
         let store = BoxStore::new(inner);
+        // The boxes the streamed output got, frame by frame: a render
+        // after verification fixes encodes only where they changed.
+        let mut streamed = StreamedBoxes::default();
         let (analysis, rendered) = std::thread::scope(|scope| {
             // The render reads the PTS table and opens its decoders and
             // encoders while the analysis already runs.
@@ -304,6 +310,7 @@ impl Engine {
                 self.run_analysis(&analyze, prepared, job, None, &mut |frame, builder| {
                     builder.boxes_at(req.regions, &mut boxes);
                     store.push(frame, &boxes);
+                    streamed.push(&boxes);
                 });
             store.close();
             let rendered = match render_thread.join() {
@@ -336,7 +343,8 @@ impl Engine {
             )
             .with_detail("the decoded timestamps differ from the container's"));
         }
-        let (render, rerendered) = self.after_verify(req, &analysis.project, rendered, job)?;
+        let (render, rerendered) =
+            self.after_verify(req, &analysis.project, rendered, &streamed, job)?;
         Ok(RunReport {
             analysis: analysis.report,
             render,
@@ -367,7 +375,7 @@ impl Engine {
         );
         render.export = req.export.clone();
         render.accept_unverified = req.accept_unverified;
-        let rendered = self.render_project(&render, job, None)?;
+        let rendered = self.render_project(&render, job, None, None)?;
         Ok(RunReport {
             analysis: analysis.report,
             render: rendered,
@@ -378,15 +386,17 @@ impl Engine {
     }
 
     /// Settles a streamed output with the verified `project`: rendered
-    /// again when the verification added fix boxes, renamed to the
-    /// requested name when it came out clean, left `*_UNVERIFIED`
-    /// otherwise. Returns the final render and whether it was rendered
-    /// again.
+    /// again when the verification added fix boxes (only the GOPs whose
+    /// boxes differ from `streamed`, the boxes the streamed output got,
+    /// are encoded again), renamed to the requested name when it came out
+    /// clean, left `*_UNVERIFIED` otherwise. Returns the final render and
+    /// whether it was rendered again.
     fn after_verify(
         &self,
         req: &RunRequest,
         project: &Project,
         rendered: RenderReport,
+        streamed: &StreamedBoxes,
         job: &Job<'_>,
     ) -> Result<(RenderReport, bool), AppError> {
         let fixed = project
@@ -394,16 +404,17 @@ impl Engine {
             .iter()
             .any(|t| t.source == TrackSource::OcrFix);
         if fixed {
-            let _ = std::fs::remove_file(&rendered.output);
-            let mut render = RenderRequest::new(
-                req.job,
-                req.input.clone(),
-                project.clone(),
-                req.output.clone(),
-            );
-            render.export = req.export.clone();
-            render.accept_unverified = req.accept_unverified;
-            return Ok((self.render_project(&render, job, None)?, true));
+            let rerendered = self.render_fixed(req, project, &rendered.output, streamed, job);
+            // The streamed output goes unless the new render replaced it
+            // under the same name.
+            if rerendered
+                .as_ref()
+                .ok()
+                .is_none_or(|report| report.output != rendered.output)
+            {
+                let _ = std::fs::remove_file(&rendered.output);
+            }
+            return Ok((rerendered?, true));
         }
         let verified = is_verified(project);
         let mut output = rendered.output.clone();
@@ -422,6 +433,42 @@ impl Engine {
             },
             false,
         ))
+    }
+
+    /// Renders `project` again after the verification added fix boxes,
+    /// taking the frames whose boxes did not change from the streamed
+    /// output at `previous` (whose frames got `streamed`). Renders the
+    /// whole video when that fails for another reason than a
+    /// cancellation.
+    fn render_fixed(
+        &self,
+        req: &RunRequest,
+        project: &Project,
+        previous: &Path,
+        streamed: &StreamedBoxes,
+        job: &Job<'_>,
+    ) -> Result<RenderReport, AppError> {
+        let mut render = RenderRequest::new(
+            req.job,
+            req.input.clone(),
+            project.clone(),
+            req.output.clone(),
+        );
+        render.export = req.export.clone();
+        render.accept_unverified = req.accept_unverified;
+        let table = project.plan().frame_table(&project.detector.regions);
+        let changed = streamed.changed_frames(&table);
+        let reuse = Reuse {
+            previous,
+            changed: &changed,
+        };
+        match self.render_project(&render, job, None, Some(reuse)) {
+            Err(error) if error.kind != ErrorKind::Canceled => {
+                tracing::warn!(%error, "rendering the whole video again");
+                self.render_project(&render, job, None, None)
+            }
+            result => result,
+        }
     }
 
     /// The render side of a streaming run. It reads the PTS table from
@@ -462,6 +509,63 @@ fn first_error(analysis: Option<AppError>, render: Option<AppError>) -> AppError
     }
 }
 
+/// The boxes each frame of a streamed output got, in order. Consecutive
+/// frames with the same boxes share one entry, so a long run keeps about
+/// one span per frame and the boxes of the frames where they changed.
+#[derive(Debug, Default)]
+struct StreamedBoxes {
+    /// The boxes of every distinct entry, back to back.
+    boxes: Vec<BlurBox>,
+    /// Per frame: the range of `boxes` it got.
+    frames: Vec<Range<usize>>,
+}
+
+impl StreamedBoxes {
+    /// Adds the boxes of the next frame.
+    fn push(&mut self, boxes: &[BlurBox]) {
+        let same = self
+            .frames
+            .last()
+            .is_some_and(|last| self.slice(last) == boxes);
+        let span = match self.frames.last() {
+            Some(last) if same => last.clone(),
+            _ => {
+                let start = self.boxes.len();
+                self.boxes.extend_from_slice(boxes);
+                start..self.boxes.len()
+            }
+        };
+        self.frames.push(span);
+    }
+
+    /// The boxes of `frame`, `None` past the last frame.
+    fn at(&self, frame: u32) -> Option<&[BlurBox]> {
+        let span = self.frames.get(usize::try_from(frame).ok()?)?;
+        Some(self.slice(span))
+    }
+
+    /// The boxes of an entry.
+    fn slice(&self, span: &Range<usize>) -> &[BlurBox] {
+        self.boxes.get(span.clone()).unwrap_or_default()
+    }
+
+    /// The frame ranges whose boxes in `table` differ from the streamed
+    /// ones (frames past the streamed end count as changed).
+    fn changed_frames(&self, table: &FrameBoxTable) -> Vec<Range<u32>> {
+        let mut ranges: Vec<Range<u32>> = Vec::new();
+        for frame in 0..table.frame_count() {
+            if self.at(frame) == Some(table.boxes(frame)) {
+                continue;
+            }
+            match ranges.last_mut() {
+                Some(last) if last.end == frame => last.end = frame + 1,
+                _ => ranges.push(frame..frame + 1),
+            }
+        }
+        ranges
+    }
+}
+
 /// The job's wall-clock time in milliseconds.
 fn elapsed_ms(job: &Job<'_>) -> u64 {
     u64::try_from(job.elapsed().as_millis()).unwrap_or(u64::MAX)
@@ -472,7 +576,7 @@ mod tests {
     use blurrd_core::{AppError, BlurBox, ErrorKind, RectI, Region};
     use blurrd_video::{BoxSource, VideoError};
 
-    use super::{BoxStore, StoreSource, first_error};
+    use super::{BoxStore, StoreSource, StreamedBoxes, first_error};
     use crate::CancellationToken;
 
     fn boxed(x: i32) -> BlurBox {
@@ -527,6 +631,23 @@ mod tests {
             store.boxes_into(0, &mut out),
             Err(VideoError::Canceled)
         ));
+    }
+
+    #[test]
+    fn streamed_boxes_keep_each_frame_and_share_repeats() {
+        let mut streamed = StreamedBoxes::default();
+        streamed.push(&[boxed(1)]);
+        streamed.push(&[boxed(1)]);
+        streamed.push(&[]);
+        streamed.push(&[boxed(2), boxed(3)]);
+        streamed.push(&[boxed(2), boxed(3)]);
+        assert_eq!(streamed.at(0), Some([boxed(1)].as_slice()));
+        assert_eq!(streamed.at(1), Some([boxed(1)].as_slice()));
+        assert_eq!(streamed.at(2), Some([].as_slice()));
+        assert_eq!(streamed.at(4), Some([boxed(2), boxed(3)].as_slice()));
+        assert_eq!(streamed.at(5), None);
+        // Repeated frames store their boxes once.
+        assert_eq!(streamed.boxes.len(), 3);
     }
 
     #[test]

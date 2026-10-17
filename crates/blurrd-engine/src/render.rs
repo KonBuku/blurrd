@@ -1,6 +1,7 @@
 //! The render job: blurs a video with the boxes of its project and
 //! exports it.
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -128,6 +129,14 @@ pub(crate) struct RenderTarget<'a> {
     pub(crate) decode: DecodePurpose,
 }
 
+/// An earlier output of a render to take the unchanged frames from.
+pub(crate) struct Reuse<'a> {
+    /// The earlier output.
+    pub(crate) previous: &'a Path,
+    /// The frames whose boxes changed since it was rendered.
+    pub(crate) changed: &'a [Range<u32>],
+}
+
 /// A render, ready to run: the transcoder is open (encoder chosen), the
 /// blur parameters are known.
 pub(crate) struct PreparedRender {
@@ -168,16 +177,18 @@ impl Engine {
     }
 
     fn render_job(&self, req: &RenderRequest, job: &Job<'_>) -> Result<RenderReport, AppError> {
-        self.render_project(req, job, Some(JobKind::Render))
+        self.render_project(req, job, Some(JobKind::Render), None)
     }
 
     /// Checks and renders `req`, announcing the job as `started` (if
-    /// given) once the frame count is known.
+    /// given) once the frame count is known, with the unchanged frames
+    /// taken from the earlier output of `reuse` where it can be used.
     pub(crate) fn render_project(
         &self,
         req: &RenderRequest,
         job: &Job<'_>,
         started: Option<JobKind>,
+        reuse: Option<Reuse<'_>>,
     ) -> Result<RenderReport, AppError> {
         job.stage(Stage::Probe);
         let probe = self.start_encoder_probe(&req.export);
@@ -206,7 +217,12 @@ impl Engine {
             sy: req.project.geometry.sy,
             decode: DecodePurpose::Throughput,
         };
-        let prepared = self.prepare_render(&target, &info, Arc::new(pts), probe, job)?;
+        let mut prepared = self.prepare_render(&target, &info, Arc::new(pts), probe, job)?;
+        if let Some(reuse) = reuse {
+            prepared
+                .transcoder
+                .reuse_previous(reuse.previous, reuse.changed);
+        }
         transcode(prepared, &table, job)
     }
 
@@ -347,6 +363,13 @@ pub(crate) fn transcode(
     job.stage(Stage::BlurEncode);
     let stop = || job.is_canceled();
     let report = transcoder.run(boxes, &CpuBlur, &params, &stop, |n| job.progress(n, total))?;
+    if report.reused_frames > 0 {
+        tracing::info!(
+            reused = report.reused_frames,
+            encoded = report.frames - report.reused_frames,
+            "took the unchanged frames from the earlier output"
+        );
+    }
     for skipped in &report.skipped_streams {
         tracing::warn!(stream = skipped.index, codec = %skipped.codec,
             reason = %skipped.reason, "stream not in the output");
