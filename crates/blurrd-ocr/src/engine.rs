@@ -513,15 +513,7 @@ impl OcrEngine {
                 }
             }
         }
-        Ok(results
-            .into_iter()
-            .map(|r| {
-                r.unwrap_or(Recognition {
-                    text: String::new(),
-                    conf: 0.0,
-                })
-            })
-            .collect())
+        Ok(results.into_iter().map(Option::unwrap_or_default).collect())
     }
 
     /// Detects the text lines of a zone crop and recognises each of them.

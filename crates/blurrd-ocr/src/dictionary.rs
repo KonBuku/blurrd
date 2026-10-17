@@ -78,8 +78,9 @@ fn push_latin_base(c: char, out: &mut String) {
 }
 
 /// Words that appear in the protected zones but are not player names: HUD
-/// labels, banner titles, agent names, map callouts and location words.
-/// They never enter the dictionary and never count as leaks.
+/// labels, banner titles, agent names, map callouts, location words, and
+/// the weapons and labels of the buy menu that opens over the HUD. They
+/// never enter the dictionary and never count as leaks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Whitelist {
     words: BTreeSet<String>,
@@ -130,6 +131,12 @@ impl Whitelist {
         "first",
         "blood",
         "spectating",
+        "switch",
+        "player",
+        "combat",
+        "report",
+        "outgoing",
+        "incoming",
         "in",
         "en",
         "im",
@@ -217,15 +224,65 @@ impl Whitelist {
         "c",
     ];
 
+    /// Weapons and the labels of the buy menu and its weapon panel; labels
+    /// of two words as one folded word, so their single words (`run`,
+    /// `light`) stay possible names.
+    const BUY_MENU: &'static [&'static str] = &[
+        "classic",
+        "shorty",
+        "frenzy",
+        "ghost",
+        "sheriff",
+        "stinger",
+        "spectre",
+        "bucky",
+        "judge",
+        "bulldog",
+        "guardian",
+        "phantom",
+        "vandal",
+        "marshal",
+        "outlaw",
+        "operator",
+        "ares",
+        "odin",
+        "melee",
+        "sidearms",
+        "smgs",
+        "rifles",
+        "rifle",
+        "shotguns",
+        "snipers",
+        "armor",
+        "shields",
+        "owned",
+        "magazine",
+        "abilities",
+        "sniperrifles",
+        "machineguns",
+        "lightshields",
+        "heavyshields",
+        "primaryfire",
+        "altfire",
+        "runspeed",
+        "equipspeed",
+        "reloadspeed",
+        "firerate",
+        "movespeed",
+        "aimdownsights",
+        "1stshotspread",
+    ];
+
     /// The default list: HUD words and banner titles, system and location
-    /// words of the supported client languages, agent names and map
-    /// callouts.
+    /// words of the supported client languages, agent names, map callouts
+    /// and the buy menu's words.
     pub fn hud_default() -> Self {
         Self::from_words(
             Self::HUD
                 .iter()
                 .chain(Self::AGENTS)
                 .chain(Self::CALLOUTS)
+                .chain(Self::BUY_MENU)
                 .copied(),
         )
     }
@@ -264,6 +321,14 @@ impl Whitelist {
             });
         }
         reachable[chars.len()]
+    }
+
+    /// Whether the folded text holds a listed word of at least `min_len`
+    /// characters anywhere (a HUD label cut by a box, `oonreport`).
+    pub fn holds_word(&self, folded: &str, min_len: usize) -> bool {
+        self.words
+            .iter()
+            .any(|w| w.chars().count() >= min_len && folded.contains(w.as_str()))
     }
 
     /// Whether every space-separated word of `text` is listed (a location
@@ -347,6 +412,11 @@ impl NameDictionary {
         self.names.contains_key(&fold(raw))
     }
 
+    /// Keeps only the names read at least `min_count` times.
+    pub fn retain_read(&mut self, min_count: u32) {
+        self.names.retain(|_, stats| stats.count >= min_count);
+    }
+
     /// The folded names with their statistics, in no particular order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, NameStats)> + '_ {
         self.names
@@ -385,6 +455,8 @@ mod tests {
         assert!(dict.contains("NOVA-PRIME"));
         let (_, stats) = dict.iter().find(|(n, _)| *n == "novaprime").unwrap();
         assert_eq!(stats.count, 2);
+        dict.retain_read(2);
+        assert_eq!(dict.len(), 1);
         assert!((stats.best_conf - 0.95).abs() < 1e-6);
     }
 
@@ -393,6 +465,9 @@ mod tests {
         let list = Whitelist::hud_default();
         assert!(list.contains("ace"));
         assert!(list.covers("TEAM ACE"));
+        assert!(list.covers("PHANTOM | RIFLE"));
+        assert!(list.contains(&fold("RUN SPEED")));
+        assert!(!list.contains("run"));
         assert!(list.covers("in B Main"));
         assert!(!list.covers("in B Main with Nova"));
         assert!(!list.covers("   "));
@@ -400,6 +475,8 @@ mod tests {
         assert!(list.segments("inbmainteam"));
         assert!(!list.segments("inasiteteamnova"));
         assert!(!list.segments(""));
+        assert!(list.holds_word("oonreport", 5));
+        assert!(!list.holds_word("nova", 5));
         assert!(Whitelist::from_words(["Foo Bar"]).contains("foobar"));
     }
 }

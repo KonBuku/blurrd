@@ -18,6 +18,8 @@
 //!   only), [`Whitelist`] lists the HUD words that are never names and
 //!   [`CropDedup`] skips crops that did not change since their zone was
 //!   last OCR'd.
+//! - [`LeakMatcher`] decides whether a read of a blurred crop still shows
+//!   a name: from the dictionary, or as confident text outside it.
 //!
 //! Recognised text stays in memory. Logs, errors and reports never contain
 //! it (architecture plan 10).
@@ -33,6 +35,7 @@ mod dictionary;
 mod engine;
 mod error;
 mod image;
+mod leak;
 mod models;
 mod rec;
 mod resample;
@@ -44,6 +47,7 @@ pub use dictionary::{NameDictionary, NameStats, Whitelist, fold, name_len};
 pub use engine::{Ep, GpuAdapter, OcrEngine, OcrOptions, OcrRead, ShapeStats, ZoneId, ZoneSpec};
 pub use error::OcrError;
 pub use image::RgbView;
+pub use leak::{LeakMatcher, NameMatch};
 pub use models::{DET_MODEL, ModelSet, PinnedFile, REC_DICT, REC_MODEL};
-pub use rec::{REC_HEIGHT, Recognition, WIDTH_BUCKETS};
+pub use rec::{CharSpan, REC_HEIGHT, Recognition, WIDTH_BUCKETS};
 pub use runtime::OrtRuntime;

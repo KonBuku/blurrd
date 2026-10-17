@@ -21,13 +21,58 @@ pub const WIDTH_BUCKETS: [u32; 3] = [160, 320, 640];
 const COLUMNS_PER_STEP: u32 = 8;
 
 /// One recognised text line.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Recognition {
     /// The text. It stays in memory; blurrd never logs or stores it.
     pub text: String,
     /// Mean probability of the decoded characters, `0.0..=1.0` (0 when no
     /// character was read).
     pub conf: f32,
+    /// Where each decoded character is, in text order.
+    pub chars: Vec<CharSpan>,
+}
+
+/// One decoded character of a [`Recognition`]: where it is in the text and
+/// in the crop.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CharSpan {
+    /// Byte offset of the character in [`Recognition::text`].
+    pub start: usize,
+    /// Byte offset just after it.
+    pub end: usize,
+    /// Left edge of the output steps that read it, as a fraction of the
+    /// crop's width (`0.0..=1.0`).
+    pub x0: f32,
+    /// Right edge of those steps, as a fraction of the crop's width.
+    pub x1: f32,
+    /// Its probability.
+    pub prob: f32,
+}
+
+impl Recognition {
+    /// The horizontal extent of the characters in the byte range
+    /// `start..end` of the text, as fractions of the crop's width, or
+    /// `None` when no character starts inside the range.
+    pub fn extent(&self, start: usize, end: usize) -> Option<(f32, f32)> {
+        self.chars
+            .iter()
+            .filter(|c| c.start >= start && c.start < end)
+            .fold(None, |acc, c| match acc {
+                None => Some((c.x0, c.x1)),
+                Some((x0, x1)) => Some((f32::min(x0, c.x0), f32::max(x1, c.x1))),
+            })
+    }
+
+    /// The mean probability of the characters in the byte range
+    /// `start..end` of the text (0 when none starts inside it).
+    pub fn conf_of(&self, start: usize, end: usize) -> f32 {
+        let (sum, count) = self
+            .chars
+            .iter()
+            .filter(|c| c.start >= start && c.start < end)
+            .fold((0.0f32, 0u32), |(s, n), c| (s + c.prob, n + 1));
+        if count == 0 { 0.0 } else { sum / count as f32 }
+    }
 }
 
 /// The input width a crop scales to at [`REC_HEIGHT`] in its natural
@@ -63,36 +108,48 @@ pub(crate) fn preprocess(image: RgbView<'_>, bucket: u32, out: &mut [f32]) -> u3
 /// Greedy CTC decoding of one item: `probs` holds `steps × classes`
 /// probabilities; only the first `used_steps` steps (those covering the
 /// crop rather than padding) are read. Class `i + 1` is `charset[i]`.
+/// `columns` is the number of input columns the crop covers; each
+/// character's position is the span of the steps that read it, relative to
+/// them.
 pub(crate) fn decode(
     probs: &[f32],
     classes: usize,
     used_steps: usize,
+    columns: u32,
     charset: &[String],
 ) -> Recognition {
-    let mut text = String::new();
+    let mut read = Recognition::default();
     let mut conf_sum = 0.0f32;
-    let mut count = 0u32;
     let mut previous = 0usize;
-    for step in probs.chunks_exact(classes).take(used_steps) {
+    let width = columns.max(1) as f32;
+    let edge = |step: usize| ((step as u32 * COLUMNS_PER_STEP) as f32 / width).min(1.0);
+    for (index, step) in probs.chunks_exact(classes).take(used_steps).enumerate() {
         let (best, p) = argmax(step);
-        if best != 0
-            && best != previous
+        if best != 0 && best == previous {
+            // The same character over one more step.
+            if let Some(last) = read.chars.last_mut() {
+                last.x1 = edge(index + 1);
+            }
+        } else if best != 0
             && let Some(ch) = charset.get(best - 1)
         {
-            text.push_str(ch);
+            let start = read.text.len();
+            read.text.push_str(ch);
+            read.chars.push(CharSpan {
+                start,
+                end: read.text.len(),
+                x0: edge(index),
+                x1: edge(index + 1),
+                prob: p,
+            });
             conf_sum += p;
-            count += 1;
         }
         previous = best;
     }
-    Recognition {
-        text,
-        conf: if count == 0 {
-            0.0
-        } else {
-            conf_sum / count as f32
-        },
+    if !read.chars.is_empty() {
+        read.conf = conf_sum / read.chars.len() as f32;
     }
+    read
 }
 
 /// Decodes the output of one recognition batch: `shape` and `data` are the
@@ -122,7 +179,7 @@ pub(crate) fn decode_batch(
     Ok(columns
         .iter()
         .zip(data.chunks_exact(per_item))
-        .map(|(&cols, probs)| decode(probs, classes, used_steps(cols, width), charset))
+        .map(|(&cols, probs)| decode(probs, classes, used_steps(cols, width), cols, charset))
         .collect())
 }
 
@@ -185,10 +242,23 @@ mod tests {
         for (t, &c) in steps.iter().enumerate() {
             probs[t * classes + c] = 0.8;
         }
-        let read = decode(&probs, classes, 6, &charset);
+        let read = decode(&probs, classes, 6, 48, &charset);
         assert_eq!(read.text, "aab");
         assert!((read.conf - 0.8).abs() < 1e-6);
-        let empty = decode(&vec![0.0; 3 * classes], classes, 3, &charset);
+        // Characters sit where their steps are: the first "a" spans steps 0
+        // and 1 (columns 0..16 of 48), "b" steps 4 and 5.
+        let spans: Vec<(usize, f32, f32)> =
+            read.chars.iter().map(|c| (c.start, c.x0, c.x1)).collect();
+        let third = 16.0 / 48.0;
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].0, 0);
+        assert!(spans[0].1.abs() < 1e-6 && (spans[0].2 - third).abs() < 1e-6);
+        assert!((spans[2].1 - 2.0 * third).abs() < 1e-6 && (spans[2].2 - 1.0).abs() < 1e-6);
+        let (x0, x1) = read.extent(1, 3).unwrap();
+        assert!((x0 - 0.5).abs() < 1e-6 && (x1 - 1.0).abs() < 1e-6);
+        assert!((read.conf_of(0, 1) - 0.8).abs() < 1e-6);
+        assert_eq!(read.extent(3, 9), None);
+        let empty = decode(&vec![0.0; 3 * classes], classes, 3, 24, &charset);
         assert_eq!((empty.text.as_str(), empty.conf), ("", 0.0));
     }
 
