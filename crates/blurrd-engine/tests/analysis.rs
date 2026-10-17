@@ -329,6 +329,100 @@ fn analysis_runs_only_the_requested_regions_and_keeps_overrides() {
 }
 
 #[test]
+fn a_reanalysis_rebinds_edits_by_overlap_and_warns_about_the_rest() {
+    use blurrd_core::{BindStatus, Override, RectI};
+
+    let work = Workdir::new("analysis-rebind");
+    let scene = synthetic::hud_scene(Layout::reference(), 120, 11);
+    let clip = work.path("clip.mkv");
+    synthetic::write_clip(&clip, &scene);
+    let engine = engine(&work);
+    let kill_feed: RegionSet = [Region::KillFeed].into_iter().collect();
+    let first = engine
+        .analyze(
+            &request(clip.clone(), kill_feed),
+            &Events::default(),
+            &CancellationToken::new(),
+        )
+        .unwrap();
+
+    // Hide one kill feed name, nudged by 2 px as a drag would leave it;
+    // move a box that never existed; add a manual box.
+    let segment = first.project.tracks[0].segments[0];
+    let frame = segment.f0;
+    let r = segment.rect;
+    let hidden = RectI::new(r.x0 + 2, r.y0, r.x1 + 2, r.y1).unwrap();
+    let edits = vec![
+        Override::Suppress {
+            uid: uuid::Uuid::from_u128(1),
+            region: Region::KillFeed,
+            f0: frame,
+            f1: segment.f1,
+            anchor: hidden,
+        },
+        Override::Adjust {
+            uid: uuid::Uuid::from_u128(2),
+            region: Region::KillFeed,
+            f0: 10,
+            f1: 20,
+            anchor: RectI::new(100, 900, 200, 930).unwrap(),
+            rect: RectI::new(100, 900, 220, 940).unwrap(),
+        },
+        Override::Add {
+            uid: uuid::Uuid::from_u128(3),
+            region: Region::Manual,
+            f0: frame,
+            f1: frame + 10,
+            rect: RectI::new(800, 400, 900, 450).unwrap(),
+        },
+    ];
+    let mut edited = first.project.clone();
+    edited.overrides.clone_from(&edits);
+    cache::write_project(&edited, &first.report.project_file).unwrap();
+
+    // The re-analysis replaces every track (now of all regions).
+    let events = Events::default();
+    let second = engine
+        .analyze(
+            &request(clip, RegionSet::all()),
+            &events,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    let plan = second.project.plan();
+    assert_eq!(second.project.overrides, edits);
+    let status: Vec<BindStatus> = plan.bindings().iter().map(|b| b.status).collect();
+    assert_eq!(
+        status,
+        [BindStatus::Bound, BindStatus::Unbound, BindStatus::Bound]
+    );
+    let unbound: Vec<Option<(u32, u32)>> = events
+        .take()
+        .into_iter()
+        .filter_map(|e| match e {
+            JobEvent::Warning {
+                code: WarningCode::OverrideUnbound,
+                frames,
+                ..
+            } => Some(frames),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(unbound, [Some((10, 20))]);
+
+    // On the frame, the hidden name has no box and the manual box is
+    // there.
+    let mut boxes = Vec::new();
+    plan.boxes_at(frame, &RegionSet::all(), &mut boxes);
+    assert!(boxes.iter().all(|b| b.rect.iou(&r) < 0.5), "{boxes:?}");
+    assert!(
+        boxes
+            .iter()
+            .any(|b| b.rect == RectI::new(800, 400, 900, 450).unwrap())
+    );
+}
+
+#[test]
 fn a_canceled_analysis_stops_and_writes_nothing() {
     let work = Workdir::new("analysis-cancel");
     let scene = synthetic::hud_scene(Layout::reference(), 240, 9);

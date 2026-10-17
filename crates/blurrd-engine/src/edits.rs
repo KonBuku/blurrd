@@ -7,8 +7,16 @@
 //! with the project stored at that moment: the edits stored then win, and
 //! the frames of every edit the job did not see join the unverified
 //! ranges, because its verification did not check them.
+//!
+//! A re-analysis replaces every track. The edits carry no track ids:
+//! `Suppress` and `Adjust` bind again by overlap with the new tracks each
+//! time a plan is resolved (`blurrd_core::BlurPlan::bindings`). The ones
+//! that match no new box stay in the project, inactive, and the analysis
+//! warns about each ([`warn_unbound`]) so the user can delete or redo it.
 
-use blurrd_core::{FrameRange, Project, touched_ranges};
+use blurrd_core::{BindStatus, FrameRange, Project, WarningCode, touched_ranges};
+
+use crate::job::Job;
 
 /// Joins `project`, the result of a job that read the stored project at
 /// revision `base` (`None`: there was none), with `current`, the project
@@ -44,6 +52,26 @@ pub(crate) fn keep_current_edits(
     }
     project.overrides = current.overrides;
     project
+}
+
+/// Warns about every edit of `project` that binds to no box of its
+/// tracks: it is inactive until a box matches it again or the user
+/// deletes it.
+pub(crate) fn warn_unbound(project: &Project, job: &Job<'_>) {
+    let bindings = project.plan().bindings();
+    for (edit, binding) in project.overrides.iter().zip(bindings) {
+        if binding.status == BindStatus::Unbound {
+            let (f0, f1) = edit.frames();
+            job.warning(
+                WarningCode::OverrideUnbound,
+                format!(
+                    "A box you changed or hid on frames {f0}-{f1} no longer matches a \
+                     detected name; the edit is inactive."
+                ),
+                Some((f0, f1)),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

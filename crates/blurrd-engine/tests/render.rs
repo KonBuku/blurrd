@@ -1,11 +1,14 @@
 //! The render job end to end on synthetic recordings: the boxes of the
-//! analysed project are blurred and nothing else changes, outputs of
-//! unverified projects are marked, videos that are not the project's are
-//! refused, and canceling leaves nothing behind.
+//! analysed project are blurred and nothing else changes, manual boxes
+//! are blurred and hidden ones are not, outputs of unverified projects
+//! are marked, videos that are not the project's are refused, and
+//! canceling leaves nothing behind.
 
 #![allow(
     clippy::unwrap_used,
     clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
     reason = "test code: an error is a test failure, frame sizes never wrap"
 )]
 
@@ -15,7 +18,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use blurrd_blur::{PixelParams, PreparedBox, prepare_boxes};
-use blurrd_core::{EncoderSetting, ErrorKind, JobEvent, JobId, Project, RectI, RegionSet};
+use blurrd_core::{
+    EncoderSetting, ErrorKind, JobEvent, JobId, Override, Project, RectI, Region, RegionSet,
+};
 use blurrd_engine::{
     AnalyzeRequest, CancellationToken, Engine, EngineConfig, ProgressSink, RenderRequest,
 };
@@ -140,6 +145,68 @@ fn renders_the_analysed_boxes_and_nothing_else() {
         assert!(changed.iter().all(|&i| inside(i)), "frame {frame}");
         assert_eq!(changed.is_empty(), prepared.is_empty(), "frame {frame}");
     }
+}
+
+/// The share of the pixels of `rect` that differ between two luma planes
+/// of 1920 px rows.
+fn changed_share(before: &[u8], after: &[u8], rect: RectI) -> f64 {
+    let mut changed = 0usize;
+    for y in rect.y0..rect.y1 {
+        for x in rect.x0..rect.x1 {
+            let i = y as usize * 1920 + x as usize;
+            changed += usize::from(before[i] != after[i]);
+        }
+    }
+    changed as f64 / f64::from(rect.width() * rect.height())
+}
+
+#[test]
+fn renders_manual_boxes_and_drops_hidden_ones() {
+    let work = Workdir::new("render-edits");
+    let engine = engine(&work);
+    let (clip, mut project) = analysed(&work, &engine, 60, 19);
+    let manual = RectI::new(800, 400, 900, 450).unwrap();
+    // Hide one detector box for its whole track.
+    let track = &project.tracks[0];
+    let (region, hidden) = (track.region, track.segments[0]);
+    project.overrides = vec![
+        Override::Add {
+            uid: uuid::Uuid::from_u128(1),
+            region: Region::Manual,
+            f0: 20,
+            f1: 40,
+            rect: manual,
+        },
+        Override::Suppress {
+            uid: uuid::Uuid::from_u128(2),
+            region,
+            f0: hidden.f0,
+            f1: hidden.f1,
+            anchor: hidden.rect,
+        },
+    ];
+    let mut req = request(&clip, &project, work.path("edited.mkv"));
+    req.accept_unverified = true;
+    let report = engine
+        .render(&req, &sink(), &CancellationToken::new())
+        .unwrap();
+    let (source, output) = (lumas(&clip), lumas(&report.output));
+    for (frame, (before, after)) in source.iter().zip(&output).enumerate() {
+        let blurred = changed_share(before, after, manual);
+        if (20..=40).contains(&frame) {
+            assert!(blurred > 0.5, "frame {frame}: {blurred}");
+        } else {
+            assert!(blurred == 0.0, "frame {frame}: {blurred}");
+        }
+    }
+    // The render blurs the plan's table, in which the hidden box is gone.
+    let table = project.plan().frame_table(&RegionSet::all());
+    assert!((hidden.f0..=hidden.f1).all(|f| {
+        table
+            .boxes(f)
+            .iter()
+            .all(|b| b.rect.iou(&hidden.rect) < 0.7)
+    }));
 }
 
 #[test]

@@ -451,6 +451,7 @@ impl Engine {
         let project = cache::update_project(&dir.project(), |current| {
             Ok(crate::edits::keep_current_edits(project, base, current))
         })?;
+        crate::edits::warn_unbound(&project, job);
         let elapsed = job.elapsed();
         let frames = pts.len();
         Ok(Analysis {
