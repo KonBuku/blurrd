@@ -38,6 +38,9 @@ pub(crate) struct Scheduler {
     sessions: u32,
     /// Segments handed out so far.
     handed: u32,
+    /// The segments to hand out, when only parts of the video are
+    /// encoded ([`Scheduler::listed`]).
+    listed: Option<Vec<Segment>>,
 }
 
 impl Scheduler {
@@ -58,6 +61,20 @@ impl Scheduler {
             cursor: 0,
             sessions: sessions.max(1),
             handed: 0,
+            listed: None,
+        }
+    }
+
+    /// A scheduler that hands out exactly `segments` (in order, each
+    /// starting at a keyframe) to `sessions` sessions taking turns.
+    pub(crate) fn listed(segments: Vec<Segment>, sessions: u32) -> Self {
+        Self {
+            boundaries: Vec::new(),
+            count: 0,
+            cursor: 0,
+            sessions: sessions.max(1),
+            handed: 0,
+            listed: Some(segments),
         }
     }
 
@@ -73,14 +90,22 @@ impl Scheduler {
         self.handed % self.sessions
     }
 
-    /// Whether the whole video is handed out.
+    /// Whether the whole video (or every listed segment) is handed out.
     pub(crate) fn is_done(&self) -> bool {
-        self.cursor >= self.count
+        match &self.listed {
+            Some(listed) => self.handed as usize >= listed.len(),
+            None => self.cursor >= self.count,
+        }
     }
 
     /// The next segment, or `None` when the whole video is handed out. It
     /// belongs to the session [`Scheduler::turn`] named before the call.
     pub(crate) fn next_segment(&mut self) -> Option<Segment> {
+        if let Some(listed) = &self.listed {
+            let segment = listed.get(self.handed as usize).copied()?;
+            self.handed += 1;
+            return Some(segment);
+        }
         if self.cursor >= self.count {
             return None;
         }
@@ -177,6 +202,32 @@ mod tests {
             assert_eq!(turn as usize, i % 2);
         }
         assert_eq!(scheduler.next_segment(), None);
+    }
+
+    #[test]
+    fn listed_segments_are_handed_out_in_turns() {
+        let parts = vec![
+            Segment {
+                start: 60,
+                end: 120,
+            },
+            Segment {
+                start: 300,
+                end: 420,
+            },
+            Segment {
+                start: 600,
+                end: 610,
+            },
+        ];
+        let mut scheduler = Scheduler::listed(parts.clone(), 2);
+        let mut got = Vec::new();
+        while !scheduler.is_done() {
+            got.push((scheduler.turn(), scheduler.next_segment().unwrap()));
+        }
+        assert_eq!(got, [(0, parts[0]), (1, parts[1]), (0, parts[2])]);
+        assert_eq!(scheduler.next_segment(), None);
+        assert!(Scheduler::listed(Vec::new(), 1).is_done());
     }
 
     #[test]

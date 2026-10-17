@@ -70,6 +70,7 @@ mod mux;
 mod probe;
 mod proxy;
 mod pts;
+mod reuse;
 mod rgb;
 mod roi;
 mod seek;

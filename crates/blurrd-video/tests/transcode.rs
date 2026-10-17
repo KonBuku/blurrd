@@ -244,6 +244,110 @@ fn two_sessions_stitch_into_the_same_video() {
     assert_same_timeline(source.path(), inter.path());
 }
 
+/// Renders `source` into `output` like [`render_with`], taking the frames
+/// outside `changed` from the earlier output `previous`.
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: an error is a test failure"
+)]
+fn render_reusing(
+    source: &Path,
+    output: &Path,
+    options: &EncodeOptions,
+    boxes: (u32, u32),
+    previous: &Path,
+    changed: std::ops::Range<u32>,
+) -> TranscodeReport {
+    let info = probe(source).unwrap();
+    let (pts, _) = decode_table(source);
+    let table = box_table(
+        pts.len(),
+        boxes.0,
+        boxes.1,
+        RectI::new(64, 64, 160, 96).unwrap(),
+    );
+    let mut transcoder = Transcoder::open(
+        &info,
+        Arc::new(pts),
+        output,
+        &DecodeOptions::default(),
+        options,
+        MuxOptions::default(),
+    )
+    .unwrap();
+    transcoder.reuse_previous(previous, std::slice::from_ref(&changed));
+    transcoder
+        .run(&table, &CpuBlur, &pixel_params(&info), &|| false, |_| {})
+        .unwrap()
+}
+
+#[test]
+fn a_render_again_encodes_only_the_changed_gops() {
+    // 600 frames with a keyframe every 30.
+    let spec = ClipSpec {
+        gop: 30,
+        ..ClipSpec::cfr(600)
+    };
+    let source = TempClip::new("render-reuse", "mkv");
+    write_clip(source.path(), &spec);
+    let mut options = EncodeOptions::default();
+    // Lossless and intra-only, so whole renders and partial ones must
+    // show the same pictures.
+    options.encoder = EncoderSetting::Named(String::from("ffv1"));
+    for sessions in [NvencSessions::One, NvencSessions::Two] {
+        options.sessions = sessions;
+        let earlier = TempClip::new("render-reuse-1", "mkv");
+        render_with(source.path(), earlier.path(), &options, (100, 420), None).unwrap();
+        // The box now lasts 20 frames longer: only the GOP 420..450 is
+        // encoded again.
+        let again = TempClip::new("render-reuse-2", "mkv");
+        let report = render_reusing(
+            source.path(),
+            again.path(),
+            &options,
+            (100, 440),
+            earlier.path(),
+            421..441,
+        );
+        assert_eq!((report.frames, report.reused_frames), (600, 570));
+        let whole = TempClip::new("render-reuse-3", "mkv");
+        render_with(source.path(), whole.path(), &options, (100, 440), None).unwrap();
+        assert!(pictures(again.path()) == pictures(whole.path()), "pictures");
+        let (source_pts, _) = decode_table(source.path());
+        let (again_pts, _) = decode_table(again.path());
+        assert_eq!(rescaled(&again_pts, &source_pts), source_pts.as_slice());
+    }
+    // An inter-coded encoder: the copied parts start at the source's
+    // keyframes, which are keyframes of both renders.
+    options.encoder = EncoderSetting::Named(String::from("mpeg4"));
+    options.sessions = NvencSessions::One;
+    let earlier = TempClip::new("render-reuse-4", "mkv");
+    render_with(source.path(), earlier.path(), &options, (100, 420), None).unwrap();
+    let again = TempClip::new("render-reuse-5", "mkv");
+    let report = render_reusing(
+        source.path(),
+        again.path(),
+        &options,
+        (100, 440),
+        earlier.path(),
+        421..441,
+    );
+    assert_eq!(report.reused_frames, 570);
+    assert_same_timeline(source.path(), again.path());
+    // An earlier output of another encoder is not used.
+    options.encoder = EncoderSetting::Named(String::from("ffv1"));
+    let other = TempClip::new("render-reuse-6", "mkv");
+    let report = render_reusing(
+        source.path(),
+        other.path(),
+        &options,
+        (100, 440),
+        earlier.path(),
+        421..441,
+    );
+    assert_eq!(report.reused_frames, 0);
+}
+
 #[test]
 fn a_changed_video_is_rejected_without_output() {
     let source = TempClip::new("render-mismatch", "mp4");
@@ -362,6 +466,36 @@ fn gpu_nvenc_renders_with_the_source_timeline() {
     let report = render(source.path(), output.path(), "h264_nvenc", (30, 70), None).unwrap();
     assert_eq!(report.blurred_frames, 41);
     assert_same_timeline(source.path(), output.path());
+}
+
+#[test]
+#[ignore = "needs an NVIDIA GPU"]
+fn gpu_nvenc_render_again_copies_h264_into_mp4() {
+    let spec = ClipSpec {
+        width: 640,
+        height: 360,
+        gop: 30,
+        ..ClipSpec::cfr(300)
+    };
+    let source = TempClip::new("render-nvenc-reuse", "mp4");
+    write_clip(source.path(), &spec);
+    let mut options = EncodeOptions::default();
+    options.encoder = EncoderSetting::Named(String::from("h264_nvenc"));
+    let earlier = TempClip::new("render-nvenc-reuse-1", "mp4");
+    render_with(source.path(), earlier.path(), &options, (30, 70), None).unwrap();
+    let again = TempClip::new("render-nvenc-reuse-2", "mp4");
+    let report = render_reusing(
+        source.path(),
+        again.path(),
+        &options,
+        (30, 100),
+        earlier.path(),
+        71..101,
+    );
+    // The GOPs 60..90 and 90..120 are encoded again.
+    assert_eq!(report.reused_frames, 240);
+    assert_same_timeline(source.path(), again.path());
+    assert_eq!(pictures(again.path()).len(), 300);
 }
 
 #[test]

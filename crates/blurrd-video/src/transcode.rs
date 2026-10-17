@@ -23,13 +23,20 @@
 //! timestamps. The muxer writes into `<name>.tmp.<ext>` and renames the
 //! file when everything succeeded; the input is never written.
 //!
+//! A render can take the unchanged parts from an earlier output of the
+//! same video ([`Transcoder::reuse_previous`]): the sessions then encode
+//! only the GOPs that hold a changed frame, and a copy thread sends the
+//! earlier output's packets of every other frame to the muxer (see
+//! [`crate::reuse`]).
+//!
 //! Queues between the stages are bounded, so memory stays constant for any
 //! clip length, and every stage stops at the next frame when another one
 //! fails or the job is canceled.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -43,6 +50,7 @@ use ffmpeg_the_third::Dictionary;
 
 use crate::frames::FramePool;
 use crate::mux::Muxer;
+use crate::reuse::{self, Previous};
 use crate::segments::{Scheduler, Segment};
 use crate::streams::{SideOptions, SidePacket, SideStreams, SkippedStream};
 use crate::{
@@ -138,8 +146,11 @@ pub struct TranscodeReport {
     pub output: PathBuf,
     /// Frames written.
     pub frames: u32,
-    /// Frames that had at least one box.
+    /// Frames that had at least one box (among the frames encoded).
     pub blurred_frames: u32,
+    /// Frames copied from an earlier output instead of being encoded
+    /// ([`Transcoder::reuse_previous`]).
+    pub reused_frames: u32,
     /// Time spent making those frames writable and blurring them (summed
     /// over the sessions).
     pub blur_time: Duration,
@@ -210,6 +221,9 @@ pub struct Transcoder {
     source_keyframes: Vec<u32>,
     /// Whether every source keyframe becomes an IDR frame.
     match_keyframes: bool,
+    /// An earlier output to copy the unchanged frames from, and the
+    /// frames whose boxes changed.
+    reuse: Option<(PathBuf, Vec<Range<u32>>)>,
 }
 
 impl std::fmt::Debug for Transcoder {
@@ -293,7 +307,20 @@ impl Transcoder {
             fallbacks,
             source_keyframes,
             match_keyframes: encode.keyframes == KeyframePolicy::MatchSource,
+            reuse: None,
         })
+    }
+
+    /// Takes the frames outside `changed` (frame ranges whose boxes
+    /// differ) from `previous`, an earlier output of this render with the
+    /// same settings, and encodes only the GOPs that hold a changed frame.
+    /// The copied parts of the file are byte for byte the earlier ones.
+    /// When `previous` cannot be used (keyframes not matched to the
+    /// source, other codec headers or frames), the whole video is encoded
+    /// as without this call; a `previous` that turns out to have other
+    /// frames while rendering fails the render.
+    pub fn reuse_previous(&mut self, previous: &Path, changed: &[Range<u32>]) {
+        self.reuse = Some((previous.to_path_buf(), changed.to_vec()));
     }
 
     /// FFmpeg's name of the encoder that will be used.
@@ -369,6 +396,7 @@ impl Transcoder {
             output,
             frames: stats.frames,
             blurred_frames: stats.blurred.frames,
+            reused_frames: stats.reused,
             blur_time: stats.blurred.time,
             encoder,
             sessions,
@@ -397,28 +425,25 @@ impl Transcoder {
             sessions,
             source_keyframes,
             match_keyframes,
+            reuse,
             ..
         } = self;
         let Some(lead) = sessions.first() else {
             return Err(VideoError::Unsupported(String::from("no encoder session")));
         };
-        let prepared = prepare_output(muxer, &input, &mux, &lead.encoder, pts.len())?;
-        let (target, side) = (prepared.target, prepared.side);
-
-        let session_count = u32::try_from(sessions.len()).unwrap_or(1);
-        let scheduler = Turns {
-            scheduler: Mutex::new(Scheduler::new(pts.len(), &source_keyframes, session_count)),
-            changed: Condvar::new(),
-        };
         let keyframes = Keyframes {
             source: &source_keyframes,
             match_source: match_keyframes,
         };
+        let previous = reuse.and_then(|reuse| open_previous(reuse, keyframes, &lead.encoder, &pts));
+        let prepared = prepare_output(muxer, &input, &mux, &lead.encoder, pts.len())?;
+        let runs = previous.as_ref().map(|(_, runs)| runs.as_slice());
+        let (scheduler, reused) = Turns::new(runs, pts.len(), keyframes.source, sessions.len());
         let control = Control::default();
         let (packet_tx, packet_rx) = bounded(PACKET_QUEUE * sessions.len());
         let (side_tx, side_rx) = bounded(SIDE_QUEUE);
         let pts: &PtsTable = &pts;
-        let mut written = 0u32;
+        let written = AtomicU32::new(0);
         let blurred = std::thread::scope(|scope| {
             let (control, scheduler) = (&control, &scheduler);
             // Each stage owns its channel ends, so a stage that stops
@@ -456,31 +481,32 @@ impl Transcoder {
                     })
                 })
                 .collect();
+            if let Some((previous, runs)) = previous {
+                let (packet_tx, written) = (packet_tx.clone(), &written);
+                scope.spawn(move || {
+                    let aborted = || control.aborted();
+                    control.guard(previous.copy(&runs, pts, &packet_tx, written, &aborted))
+                });
+            }
             drop(packet_tx);
-            scope.spawn(move || control.guard(side.run(&side_tx, || control.aborted())));
+            scope.spawn(move || control.guard(prepared.side.run(&side_tx, || control.aborted())));
             let video = VideoPackets {
                 packets: &packet_rx,
                 pts,
-                target,
+                target: prepared.target,
             };
             let stop = || control.stopped(cancel);
             let mux_result = mux_packets(&video, &side_rx, muxer, &stop, |n| {
-                written = n;
+                written.store(n, Ordering::Relaxed);
                 progress(n);
             });
             control.guard(mux_result);
             drop(packet_rx);
             drop(side_rx);
-            let mut blurred = BlurStats::default();
-            for encoder in encoders {
-                match encoder.join() {
-                    Ok(stats) => blurred.add(stats.unwrap_or_default()),
-                    Err(panic) => std::panic::resume_unwind(panic),
-                }
-            }
-            blurred
+            BlurStats::joined(encoders)
         });
         control.into_result()?;
+        let written = written.into_inner();
         if written != pts.len() {
             return Err(VideoError::FrameCountMismatch {
                 expected: pts.len(),
@@ -490,6 +516,7 @@ impl Transcoder {
         Ok(Stats {
             frames: written,
             blurred,
+            reused,
             skipped: prepared.skipped,
             moov: prepared.moov,
         })
@@ -642,6 +669,8 @@ fn second_session(
 struct Stats {
     frames: u32,
     blurred: BlurStats,
+    /// Frames copied from an earlier output.
+    reused: u32,
     skipped: Vec<SkippedStream>,
     moov: MoovLayout,
 }
@@ -655,6 +684,18 @@ struct BlurStats {
 }
 
 impl BlurStats {
+    /// The stats of every session's blur+encode stage, once they ended.
+    fn joined(stages: Vec<std::thread::ScopedJoinHandle<'_, Option<Self>>>) -> Self {
+        let mut total = Self::default();
+        for stage in stages {
+            match stage.join() {
+                Ok(stats) => total.add(stats.unwrap_or_default()),
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        }
+        total
+    }
+
     fn add(&mut self, other: Self) {
         self.frames += other.frames;
         self.time += other.time;
@@ -773,6 +814,32 @@ struct Work {
 struct Turns {
     scheduler: Mutex<Scheduler>,
     changed: Condvar,
+}
+
+impl Turns {
+    /// The turns of `sessions` sessions over a video of `count` frames
+    /// with the source keyframes `keyframes`: the whole video, or only
+    /// `runs` when the other frames are copied. Returns them with the
+    /// number of frames copied.
+    fn new(
+        runs: Option<&[Segment]>,
+        count: u32,
+        keyframes: &[u32],
+        sessions: usize,
+    ) -> (Self, u32) {
+        let sessions = u32::try_from(sessions).unwrap_or(1);
+        let (scheduler, reused) = if let Some(runs) = runs {
+            let encoded: u32 = runs.iter().map(|r| r.end - r.start).sum();
+            (Scheduler::listed(runs.to_vec(), sessions), count - encoded)
+        } else {
+            (Scheduler::new(count, keyframes, sessions), 0)
+        };
+        let turns = Self {
+            scheduler: Mutex::new(scheduler),
+            changed: Condvar::new(),
+        };
+        (turns, reused)
+    }
 }
 
 /// How often a session waiting for its turn checks for an abort or a
@@ -971,6 +1038,29 @@ impl EncodeStage<'_> {
             }
         }
         Ok(true)
+    }
+}
+
+/// The earlier output of `reuse` and the runs of frames to encode again
+/// for its changed frames, when its packets can be copied into a render
+/// with `keyframes` and `encoder`; `None` (the whole video is encoded)
+/// when they cannot.
+fn open_previous(
+    (path, changed): (PathBuf, Vec<Range<u32>>),
+    keyframes: Keyframes<'_>,
+    encoder: &VideoEncoder,
+    pts: &PtsTable,
+) -> Option<(Previous, Vec<Segment>)> {
+    if !keyframes.match_source {
+        tracing::info!("encoding the whole video: its keyframes are not the source's");
+        return None;
+    }
+    match Previous::open(&path, encoder, pts.len()) {
+        Ok(previous) => Some((previous, reuse::runs(&changed, keyframes.source, pts.len()))),
+        Err(reason) => {
+            tracing::info!(%reason, "encoding the whole video");
+            None
+        }
     }
 }
 

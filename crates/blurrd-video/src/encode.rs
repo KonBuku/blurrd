@@ -348,6 +348,12 @@ impl EncodedPacket {
         self.packet.data().unwrap_or_default()
     }
 
+    /// A packet copied from an earlier render, with its timestamps in the
+    /// encoder's time base as the encoder's packets have them.
+    pub(crate) fn copied(packet: codec::packet::Packet) -> Self {
+        Self { packet }
+    }
+
     /// The FFmpeg packet, for the muxer.
     pub(crate) fn into_inner(self) -> codec::packet::Packet {
         self.packet
