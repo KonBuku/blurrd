@@ -225,7 +225,7 @@ impl Engine {
 
     /// The PTS table of the project's video: the cached `pts.bin` when it
     /// is the project's, otherwise one pass over the container's packets.
-    fn pts_table(&self, input: &Path, project: &Project) -> Result<PtsTable, AppError> {
+    pub(crate) fn pts_table(&self, input: &Path, project: &Project) -> Result<PtsTable, AppError> {
         let dir = ProjectDir::new(&self.config().cache_dir, &project.media.fingerprint);
         if let Some(cached) = dir.read_pts()
             && cache::pts_sha256(&cached).eq_ignore_ascii_case(&project.media.pts_sha256)
@@ -434,7 +434,11 @@ fn mismatch(detail: String) -> AppError {
 
 /// Checks that the video is the one the project describes: picture size,
 /// frame count, timestamps and keyframes.
-fn check_media(project: &Project, info: &MediaInfo, pts: &PtsTable) -> Result<(), AppError> {
+pub(crate) fn check_media(
+    project: &Project,
+    info: &MediaInfo,
+    pts: &PtsTable,
+) -> Result<(), AppError> {
     let media = &project.media;
     if (media.width, media.height) != (info.width, info.height) {
         return Err(mismatch(format!(

@@ -22,6 +22,8 @@
 //!   decoder trails the analysis decoder and blurs each frame once its
 //!   boxes are final, so the output equals an analysis followed by a
 //!   render.
+//! - [`Engine::reverify_ranges`]: the verification of the frame ranges
+//!   edits touched, after the analysis.
 //! - [`dictionary`]: pass 0 of the verification, the in-memory name
 //!   dictionary built by OCR over the protected zones of the source.
 //! - The verification itself: after the detectors, the analysis reads
@@ -46,6 +48,7 @@ mod hud;
 mod job;
 mod render;
 mod resample;
+mod reverify;
 mod run;
 mod scaler;
 mod slots;
@@ -59,4 +62,5 @@ pub use dictionary::{
 pub use engine::{Engine, EngineConfig, OcrSetup, PoolSizes, default_cache_dir};
 pub use job::{CancellationToken, ProgressSink};
 pub use render::{FallbackReport, RenderReport, RenderRequest, SkippedReport};
+pub use reverify::{Reverify, ReverifyRequest, ReverifySummary};
 pub use run::{RunReport, RunRequest};

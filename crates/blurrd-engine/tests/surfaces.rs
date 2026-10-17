@@ -1,8 +1,9 @@
 //! Verify and fix of the screen surfaces and the full-frame sample on a
 //! synthetic recording (plan 7.2 and the M17 acceptance): a scoreboard is
-//! blurred and reads clean, and a name tag above a head is listed as out
-//! of scope without changing the result. OCR runs on the CPU, so no GPU is
-//! needed.
+//! blurred and reads clean, a scoreboard whose gate missed it is found in
+//! the full-frame sample and covered with slot boxes, and a name tag above
+//! a head is listed as out of scope without changing the result. OCR runs
+//! on the CPU, so no GPU is needed.
 
 #![allow(clippy::unwrap_used, reason = "test code: an error is a test failure")]
 
@@ -16,6 +17,7 @@ use blurrd_core::{
 };
 use blurrd_engine::{
     AnalyzeRequest, CancellationToken, Engine, EngineConfig, OcrSetup, ProgressSink,
+    ReverifyRequest,
 };
 use blurrd_testkit::hud::killfeed::{Kill, KillFeedSpec, Team, Weapon};
 use blurrd_testkit::hud::scoreboard::{ScoreRow, ScoreboardMode, ScoreboardSpec};
@@ -170,4 +172,58 @@ fn screen_surfaces_and_the_full_frame_sample_are_verified() {
             .all(|l| l.status == LeakStatus::Info && l.region.is_none())
     );
     assert_eq!(report.summary.out_of_scope as usize, tags.len());
+
+    // The scoreboard's gate "missed" it: without its boxes, the full-frame
+    // sample finds its names and slot boxes cover them.
+    let mut missed = project.clone();
+    missed.tracks.retain(|t| t.region != Region::Scoreboard);
+    missed.revision += 1;
+    missed.verify.state = VerifyState::Unverified;
+    missed.verify.unverified_ranges = vec![FrameRange {
+        f0: BOARD.f0 - 20,
+        f1: BOARD.f1 + 20,
+    }];
+    let before = synthetic::evaluate(&missed, &scene, regions);
+    assert!(
+        before
+            .leaks_per_region
+            .get(&Region::Scoreboard)
+            .copied()
+            .unwrap_or(0)
+            > 100,
+        "{before:?}"
+    );
+    let done = engine
+        .reverify_ranges(
+            &ReverifyRequest::new(JobId(uuid::Uuid::now_v7()), clip, missed),
+            &Quiet,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    let found: Vec<_> = done
+        .report
+        .leaks
+        .iter()
+        .filter(|l| l.region == Some(Region::Scoreboard))
+        .collect();
+    assert!(found.len() >= 3, "{:?}", done.report.leaks);
+    assert!(found.iter().all(|l| l.status == LeakStatus::Fixed));
+    let slots = done
+        .project
+        .tracks
+        .iter()
+        .filter(|t| t.region == Region::Scoreboard && t.source == TrackSource::OcrFix)
+        .count();
+    assert!(slots >= 3, "{slots} fix boxes");
+    let after = synthetic::evaluate(&done.project, &scene, regions);
+    let left = after
+        .leaks_per_region
+        .get(&Region::Scoreboard)
+        .copied()
+        .unwrap_or(0);
+    let open = done.report.summary.open;
+    assert!(
+        left == 0 || open > 0,
+        "{left} scoreboard item-frames left, {open} open"
+    );
 }

@@ -1,8 +1,8 @@
 //! The analysis job: decode, detect, track; writes the project.
 
 mod calibrate;
-mod frame;
-mod pass0;
+pub(crate) mod frame;
+pub(crate) mod pass0;
 mod pipeline;
 mod previews;
 mod stages;
