@@ -32,6 +32,10 @@
 //! 4. **Positive control.** Per region, the detector's items (tracks) with
 //!    text under them on a read frame count as verified when OCR read that
 //!    text on the source; the others are unverifiable.
+//! 5. **Out of scope.** The full-frame samples (every half second) list
+//!    dictionary names outside every protected zone as information (D8);
+//!    names in a screen surface's name zone whose gate stayed off count as
+//!    exposed parts of that surface.
 //!
 //! Reports hold frames, regions, boxes, confidences and counts, never text
 //! or values derived from it.
@@ -53,7 +57,7 @@ use blurrd_ocr::{LeakMatcher, NameDictionary, NameMatch, Whitelist};
 pub(crate) use self::pixels::{PixelSetup, Pixels};
 use self::scan::Run;
 use crate::cache;
-use crate::dictionary::{SourceLine, ZoneKind};
+use crate::dictionary::{DictionaryBuilder, SourceLine, ZoneKind};
 use crate::job::{Job, internal};
 use crate::slots::NameSlots;
 
@@ -86,9 +90,20 @@ pub(crate) struct FrameLines {
 }
 
 impl FrameLines {
-    /// The lines of every zone read.
+    /// The lines of the zones other than the full frame.
     fn protected(&self) -> impl Iterator<Item = &SourceLine> {
-        self.zones.iter().flat_map(|z| z.iter())
+        self.zones
+            .iter()
+            .flat_map(|z| z.iter())
+            .filter(|l| l.zone != ZoneKind::FullFrame)
+    }
+
+    /// The lines of the full-frame sample.
+    fn full_frame(&self) -> impl Iterator<Item = &SourceLine> {
+        self.zones
+            .iter()
+            .flat_map(|z| z.iter())
+            .filter(|l| l.zone == ZoneKind::FullFrame)
     }
 }
 
@@ -199,12 +214,12 @@ pub(crate) fn verify(
     let checks = Checks::new(ctx, plan);
     let matcher = LeakMatcher::new(&checks.dictionary, ctx.whitelist);
     let inside = |f: u32| frames.is_none_or(|ranges| ranges.iter().any(|r| r.contains(f)));
-    let scan = checks.scan(ctx, &inside);
+    let scan = checks.scan(ctx, &matcher, &inside);
     let mut plan = plan.clone();
     let mut next_id = plan.tracks.iter().map(|t| t.id.0).max().unwrap_or(0) + 1;
     let mut fixes = Vec::new();
     let mut leaks = Vec::new();
-    for run in &scan {
+    for run in &scan.runs {
         if job.is_canceled() {
             return Err(crate::job::canceled());
         }
@@ -231,6 +246,7 @@ pub(crate) fn verify(
         job.leak(run.first(), run.region, status);
         leaks.push(leak(run, &found, status));
     }
+    leaks.extend(scan.out_of_scope);
     leaks.sort_by_key(|l| (l.frame_range.f0, l.frame_range.f1));
     Ok(Outcome {
         fixes,
@@ -376,11 +392,18 @@ impl Checks {
         }
     }
 
-    /// The exposed name parts on the frames `inside` holds for, in runs.
-    fn scan(&self, ctx: &Context<'_>, inside: &dyn Fn(u32) -> bool) -> Vec<Run> {
+    /// The exposed name parts on the frames `inside` holds for, in runs,
+    /// and the out-of-scope names.
+    fn scan(
+        &self,
+        ctx: &Context<'_>,
+        matcher: &LeakMatcher<'_>,
+        inside: &dyn Fn(u32) -> bool,
+    ) -> scan::Scan {
         scan::scan(
             ctx,
-            &scan::Places::new(self.slots.clone(), &self.table, &self.presence),
+            &scan::Places::new(ctx, self.slots.clone(), &self.table, &self.presence),
+            matcher,
             inside,
         )
     }
@@ -477,11 +500,22 @@ fn spread(len: usize, max: usize) -> Vec<usize> {
     out
 }
 
-/// The frames a fix of `run` covers: from the frame after the last frame
+/// The frames a fix of `run` covers. A run of the HUD zones (read on
+/// every frame with structure) reaches from the frame after the last frame
 /// read without the run's exposure to the frame before the next one, at
-/// most a reading interval beyond the run.
+/// most a reading interval beyond the run; a run of the full-frame samples
+/// (one frame in half a second) reaches half its sampling gap beyond the
+/// run on both sides, as nothing is known between two samples.
 fn fix_range(log: &LineLog, run: &Run, frame_count: u32) -> (u32, u32) {
     let (first, last) = (run.first(), run.last());
+    let last_frame = frame_count.saturating_sub(1);
+    if run.spacing > DictionaryBuilder::CADENCE {
+        let reach = (run.spacing / 2).saturating_sub(1);
+        return (
+            first.saturating_sub(reach),
+            last.saturating_add(reach).min(last_frame).max(last),
+        );
+    }
     let gap = run.spacing.saturating_sub(1);
     let f0 = log
         .checked_before(first)
@@ -491,7 +525,7 @@ fn fix_range(log: &LineLog, run: &Run, frame_count: u32) -> (u32, u32) {
         .checked_after(last)
         .map_or(last.saturating_add(gap), |f| f - 1)
         .min(last.saturating_add(gap))
-        .min(frame_count.saturating_sub(1));
+        .min(last_frame);
     (f0.min(first), f1.max(last))
 }
 
@@ -670,8 +704,24 @@ pub(crate) fn write_report(report: &VerifyReport, path: &Path) -> Result<(), App
         })
 }
 
-/// The warning a finished verification gives: unverifiable items.
+/// The warnings a finished verification gives: out-of-scope names and
+/// unverifiable items.
 pub(crate) fn warn(outcome: &Outcome, job: &Job<'_>) {
+    let out_of_scope = outcome
+        .leaks
+        .iter()
+        .filter(|l| l.kind == LeakKind::OutOfScope)
+        .count();
+    if out_of_scope > 0 {
+        job.warning(
+            blurrd_core::WarningCode::OutOfScopeNames,
+            format!(
+                "{out_of_scope} name(s) seen outside every supported region (for example name \
+                 tags above heads); they are out of scope and not blurred."
+            ),
+            None,
+        );
+    }
     let unverifiable: u32 = outcome
         .per_region
         .values()

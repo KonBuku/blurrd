@@ -44,6 +44,8 @@ pub(crate) struct FrameCrops {
     /// order) in source pixels, for pass 0, on frames where the surface's
     /// gate made a candidate.
     screens: [Option<Crop>; 4],
+    /// The whole frame in source pixels, for pass 0's full-frame sample.
+    full: Option<Crop>,
 }
 
 impl FrameCrops {
@@ -73,6 +75,7 @@ impl FrameCrops {
                 .position(|&r| r == region)
                 .and_then(|i| self.screens[i].as_ref())
                 .and_then(|crop| crop.ocr_view(rect)),
+            ZoneKind::FullFrame => self.full.as_ref().and_then(|crop| crop.ocr_view(rect)),
         }
     }
 }
@@ -80,6 +83,9 @@ impl FrameCrops {
 /// What pass 0 reads beyond the HUD zones, so the crop workers cut it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OcrReads {
+    /// The full frame is read on every frame whose index is a multiple of
+    /// this.
+    pub(crate) full_every: u32,
     /// The name zones of the screen surfaces in source pixels (in
     /// [`Region::SCREENS`] order), for the analysed surfaces.
     pub(crate) screens: [Option<RectI>; 4],
@@ -218,7 +224,7 @@ impl Cropper {
         } else {
             None
         };
-        let screens = self.ocr_crops(&frame, surfaces.as_ref())?;
+        let (screens, full) = self.ocr_crops(&frame, surfaces.as_ref())?;
         Ok(FrameCrops {
             index: frame.index(),
             frame,
@@ -229,19 +235,21 @@ impl Cropper {
             surfaces,
             native,
             screens,
+            full,
         })
     }
 
     /// What pass 0 reads of `frame` beyond the HUD zones: the name zones
-    /// of the screen surfaces whose gate made a candidate (`surfaces`).
+    /// of the screen surfaces whose gate made a candidate (`surfaces`),
+    /// and the whole frame on full-frame sample frames.
     fn ocr_crops(
         &mut self,
         frame: &VideoFrame,
         surfaces: Option<&[SurfaceFrame; 4]>,
-    ) -> Result<[Option<Crop>; 4], AppError> {
+    ) -> Result<([Option<Crop>; 4], Option<Crop>), AppError> {
         let mut screens: [Option<Crop>; 4] = Default::default();
         let Some(reads) = self.ocr else {
-            return Ok(screens);
+            return Ok((screens, None));
         };
         if let Some(surfaces) = surfaces {
             for ((slot, zone), surface) in screens.iter_mut().zip(reads.screens).zip(surfaces) {
@@ -250,7 +258,18 @@ impl Cropper {
                 }
             }
         }
-        Ok(screens)
+        let full = if frame.index().is_multiple_of(reads.full_every.max(1)) {
+            let whole = RectI {
+                x0: 0,
+                y0: 0,
+                x1: frame.width() as i32,
+                y1: frame.height() as i32,
+            };
+            Some(self.source_crop(frame, whole)?)
+        } else {
+            None
+        };
+        Ok((screens, full))
     }
 
     /// The source pixels of reference rectangle `rect` kept at `anchor`.

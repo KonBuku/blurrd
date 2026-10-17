@@ -48,11 +48,14 @@ outputs made from it are named `*_UNVERIFIED`.
 With OCR the analysis verifies its result. While the detectors run, OCR
 reads the protected zones of the recording (the kill feed and banner area
 and the left panel on every frame with HUD structure and one frame in six
-elsewhere, a screen surface's names while it is open). Afterwards blurrd makes the blurred pixels of every
+elsewhere, a screen surface's names while it is open, the whole frame
+every half second). Afterwards blurrd makes the blurred pixels of every
 name part the boxes do not cover completely, exactly as the render will,
 and reads them again. A name that stays readable gets an extra box (a fix
 box over the name's slot, grown up to three times) and is listed as a
-fixed leak; one that stays readable after that is open. The report, `verify-<revision>.json` next to
+fixed leak; one that stays readable after that is open. Names outside
+every supported region (name tags above heads) are listed as out of scope
+and never change the result. The report, `verify-<revision>.json` next to
 the project in the cache, holds frames, regions, boxes, confidences and
 counts, never text. The result is `Clean` when no leak is open and OCR
 read every name the detectors boxed; it is `Unverified` when OCR could not

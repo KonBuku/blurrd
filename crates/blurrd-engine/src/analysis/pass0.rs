@@ -6,10 +6,10 @@
 //! the analysis down instead of dropping crops) and the structure signals
 //! the HUD stages found on it. It reads the HUD zones of every
 //! [`DictionaryBuilder::CADENCE`]th frame and of every frame with HUD
-//! structure (every frame with [`Coverage::EveryFrame`]) and the name zone
-//! of a screen surface on every frame its gate makes a candidate. The
-//! dictionary and the lines stay in memory for the verification; the
-//! counters go into the analysis report.
+//! structure (every frame with [`Coverage::EveryFrame`]), the name zone of
+//! a screen surface on every frame its gate makes a candidate, and the
+//! whole frame every half second. The dictionary and the lines stay in
+//! memory for the verification; the counters go into the analysis report.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -103,7 +103,10 @@ impl Pass0 {
                 screens[i] = Some(zone.rect);
             }
         }
-        OcrReads { screens }
+        OcrReads {
+            full_every: self.log.half_second(),
+            screens,
+        }
     }
 
     /// The counters so far.
@@ -168,8 +171,8 @@ impl Pass0 {
     }
 
     /// Reads the zones of one frame's `crops`: the HUD zones when `hud`
-    /// is set, the screen zones when the crops hold them; the frame showed
-    /// the HUD structure of `structure`. Returns
+    /// is set, the screen zones and the full frame when the crops hold
+    /// them; the frame showed the HUD structure of `structure`. Returns
     /// `false` when `stopped` said to stop first; fails with the reason
     /// when OCR fails.
     pub(crate) fn read(
@@ -189,7 +192,8 @@ impl Pass0 {
             if hud_zone && !hud {
                 continue;
             }
-            // Screen zones have crops only on the frames they are read on.
+            // Screen zones and the full frame have crops only on the frames
+            // they are read on.
             if let Some(crop) = crops.ocr_view(zone.kind, zone.rect) {
                 read.push(
                     self.builder

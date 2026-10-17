@@ -1,11 +1,43 @@
-//! Finding the exposed name parts in the lines pass 0 read, and grouping
-//! them into runs.
+//! Finding the exposed name parts and the out-of-scope names in the
+//! lines pass 0 read, and grouping them into runs.
 
-use blurrd_core::{BlurBox, FrameBoxTable, RectI, Region};
+use blurrd_core::{
+    BlurBox, FrameBoxTable, FrameRange, Leak, LeakKind, LeakStatus, LeakZone, RectI, Region,
+};
+use blurrd_detect::screens::{Anchor, ScreenMap};
+use blurrd_ocr::{LeakMatcher, NameMatch};
 
-use super::{Context, Presence, union};
-use crate::dictionary::{DictionaryBuilder, ZoneKind};
+use super::{Context, FrameLines, Presence, union};
+use crate::dictionary::{DictionaryBuilder, ZoneKind, screen_zones};
 use crate::slots::NameSlots;
+
+/// The scoreboard's name column in reference pixels (centre-anchored):
+/// the name cells of the ten player rows, with the board's vertical slide
+/// (the geometry of `blurrd_detect::screens::scoreboard`: name cells at
+/// columns 636 to 838, rows from 338 and from 569 every 34 rows, 16 rows
+/// of slide).
+const BOARD_NAMES: RectI = RectI {
+    x0: 636,
+    y0: 322,
+    x1: 838,
+    y1: 753,
+};
+
+/// Rows of dictionary names on the scoreboard's row grid that make a
+/// scoreboard whose gate missed it (a name tag and a buy-phase card above
+/// heads can share the name column, but not three rows of its grid).
+const BOARD_MIN_ROWS: usize = 3;
+
+/// Centre rows of the scoreboard's two blocks of five player rows
+/// (reference rows 338 and 569, 34 apart, name text 17 below a row's
+/// top).
+const BOARD_ROW_CENTRES: [f32; 2] = [355.0, 586.0];
+/// The scoreboard's row pitch, in reference rows.
+const BOARD_PITCH: f32 = 34.0;
+/// Rows the board slides while it opens, in reference rows.
+const BOARD_SLIDE: i32 = 16;
+/// Reference rows a name's centre may lie off its row's centre.
+const BOARD_ROW_TOLERANCE: f32 = 5.0;
 
 /// An exposed name part on one frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -123,6 +155,15 @@ impl Runs {
     }
 }
 
+/// What the scan found.
+#[derive(Debug, Default)]
+pub(crate) struct Scan {
+    /// Runs of exposed name parts, in order of their first frame.
+    pub(crate) runs: Vec<Run>,
+    /// Out-of-scope names (status `Info`), one entry per run of a name.
+    pub(crate) out_of_scope: Vec<Leak>,
+}
+
 /// Where the names of one video can be, with the plan's boxes.
 pub(crate) struct Places<'a> {
     /// The plan's boxes per frame.
@@ -131,18 +172,55 @@ pub(crate) struct Places<'a> {
     presence: &'a Presence,
     /// The HUD regions' name slots.
     slots: NameSlots,
+    /// The screen surfaces' name zones, source pixels.
+    screens: Vec<(Region, RectI)>,
+    /// The scoreboard's name column, source pixels, when the scoreboard
+    /// is analysed.
+    board: Option<RectI>,
+    /// Source row of reference row 0, and source rows per reference row.
+    rows: (f32, f32),
 }
 
 impl<'a> Places<'a> {
-    /// The places with the HUD slots `slots`, the boxes of `table` and
-    /// what `presence` confirms.
-    pub(crate) fn new(slots: NameSlots, table: &'a FrameBoxTable, presence: &'a Presence) -> Self {
+    /// The places of `ctx`'s video with the HUD slots `slots`, the boxes
+    /// of `table` and what `presence` confirms.
+    pub(crate) fn new(
+        ctx: &Context<'_>,
+        slots: NameSlots,
+        table: &'a FrameBoxTable,
+        presence: &'a Presence,
+    ) -> Self {
+        let (w, h) = ctx.size;
         Self {
             table,
             presence,
             slots,
+            screens: screen_zones(ctx.geometry, w, h, ctx.regions)
+                .into_iter()
+                .filter_map(|z| match z.kind {
+                    ZoneKind::Screen(region) => Some((region, z.rect)),
+                    _ => None,
+                })
+                .collect(),
+            board: ctx
+                .regions
+                .contains(Region::Scoreboard)
+                .then(|| ScreenMap::from(ctx.geometry).to_source(BOARD_NAMES, Anchor::Center)),
+            rows: (ctx.geometry.oy, ctx.geometry.sy),
         }
     }
+}
+
+/// Whether the centre of `r` lies in `zone`.
+fn centre_in(r: RectI, zone: RectI) -> bool {
+    let (cx, cy) = (r.x0 + r.x1, r.y0 + r.y1);
+    2 * zone.x0 <= cx && cx < 2 * zone.x1 && 2 * zone.y0 <= cy && cy < 2 * zone.y1
+}
+
+/// The fraction of `r` inside `zone`.
+fn share_inside(r: RectI, zone: RectI) -> f32 {
+    r.intersection(&zone)
+        .map_or(0.0, |i| i.area() as f32 / r.area().max(1) as f32)
 }
 
 /// Whether name part `part` lies on the row of a box of screen surface
@@ -193,10 +271,13 @@ pub(crate) fn exposed(part: RectI, boxes: &[BlurBox], aspect: f32) -> bool {
 pub(crate) fn scan(
     ctx: &Context<'_>,
     places: &Places<'_>,
+    matcher: &LeakMatcher<'_>,
     inside: &dyn Fn(u32) -> bool,
-) -> Vec<Run> {
+) -> Scan {
     let aspect = ctx.geometry.sx / ctx.geometry.sy;
     let mut runs = Runs::default();
+    let mut names = Runs::default();
+    let full_spacing = ctx.log.half_second() * 2;
     for (frame, lines) in ctx.log.iter() {
         if !inside(frame) {
             continue;
@@ -206,7 +287,8 @@ pub(crate) fn scan(
             for part in &line.parts {
                 let region = match line.zone {
                     // A screen surface's zone is protected while the surface
-                    // is there (it has boxes).
+                    // is there (it has boxes); otherwise the full-frame
+                    // sample decides.
                     ZoneKind::Screen(region) if on_box_row(part.rect, region, boxes) => region,
                     ZoneKind::Screen(_) => continue,
                     // A HUD slot holds names while its region shows its
@@ -241,15 +323,137 @@ pub(crate) fn scan(
                 }
             }
         }
+        let full = FullFrame {
+            frame,
+            boxes,
+            places,
+            matcher,
+            spacing: full_spacing,
+        };
+        full.scan(lines, &mut runs, &mut names);
     }
-    runs.finish()
+    Scan {
+        runs: runs.finish(),
+        out_of_scope: names
+            .finish()
+            .into_iter()
+            .map(|run| Leak {
+                frame_range: FrameRange {
+                    f0: run.first(),
+                    f1: run.last(),
+                },
+                region: None,
+                zone: LeakZone::FullFrame,
+                rect: run.union(),
+                conf: 0.0,
+                kind: LeakKind::OutOfScope,
+                status: LeakStatus::Info,
+                dedup: None,
+            })
+            .collect(),
+    }
+}
+
+/// The full-frame sample of one frame.
+struct FullFrame<'s> {
+    frame: u32,
+    boxes: &'s [BlurBox],
+    places: &'s Places<'s>,
+    matcher: &'s LeakMatcher<'s>,
+    /// Frames between samples a run may skip.
+    spacing: u32,
+}
+
+impl FullFrame<'_> {
+    /// Dictionary names outside every protected zone are out of scope.
+    /// Dictionary names on three or more rows of the scoreboard's name
+    /// column and row grid while the scoreboard has no boxes (its gate
+    /// missed it) are exposed names of the scoreboard.
+    fn scan(&self, lines: &FrameLines, runs: &mut Runs, names: &mut Runs) {
+        let has_boxes = |region: Region| self.boxes.iter().any(|b| b.region == region);
+        let mut column: Vec<(&str, Exposure)> = Vec::new();
+        for line in lines.full_frame() {
+            // Read in the zone of a surface that is there.
+            if self
+                .places
+                .screens
+                .iter()
+                .any(|&(region, zone)| has_boxes(region) && share_inside(line.rect, zone) >= 0.5)
+            {
+                continue;
+            }
+            for part in &line.parts {
+                // Read in its HUD zone.
+                if self
+                    .places
+                    .slots
+                    .region_of(part.rect)
+                    .is_some_and(|r| lines.structure.contains(r))
+                {
+                    continue;
+                }
+                if self.matcher.classify(&part.folded, part.conf) != Some(NameMatch::Dictionary) {
+                    continue;
+                }
+                let exposure = Exposure {
+                    frame: self.frame,
+                    part: part.rect,
+                    line: line.rect,
+                };
+                if !has_boxes(Region::Scoreboard)
+                    && self.places.board.is_some_and(|z| centre_in(part.rect, z))
+                {
+                    column.push((part.folded.as_str(), exposure));
+                } else {
+                    names.add(Region::Manual, &part.folded, self.spacing, exposure);
+                }
+            }
+        }
+        let board = board_rows(&column, self.places.rows) >= BOARD_MIN_ROWS;
+        for (folded, exposure) in column {
+            if board {
+                runs.add(Region::Scoreboard, folded, self.spacing, exposure);
+            } else {
+                names.add(Region::Manual, folded, self.spacing, exposure);
+            }
+        }
+    }
+}
+
+/// The most rows of the scoreboard's row grid, at one slide of the board,
+/// that hold a name part of `parts`; `rows` maps reference rows to source
+/// rows (origin and scale).
+fn board_rows(parts: &[(&str, Exposure)], rows: (f32, f32)) -> usize {
+    let (oy, sy) = rows;
+    let centres: Vec<f32> = parts
+        .iter()
+        .map(|(_, e)| ((e.part.y0 + e.part.y1) as f32 * 0.5 - oy) / sy.max(f32::EPSILON))
+        .collect();
+    (-BOARD_SLIDE..=BOARD_SLIDE)
+        .map(|slide| {
+            let mut hit = [false; 10];
+            for &c in &centres {
+                for (block, &first) in BOARD_ROW_CENTRES.iter().enumerate() {
+                    let k = ((c - first - slide as f32) / BOARD_PITCH).round();
+                    let on_row = (0.0..5.0).contains(&k)
+                        && (c - first - slide as f32 - k * BOARD_PITCH).abs()
+                            <= BOARD_ROW_TOLERANCE;
+                    if on_row {
+                        hit[block * 5 + k as usize] = true;
+                    }
+                }
+            }
+            hit.iter().filter(|&&h| h).count()
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
     use blurrd_core::{BlurBox, RectI, Region};
 
-    use super::{Exposure, Run, Runs, exposed};
+    use super::{Exposure, Run, Runs, board_rows, exposed};
 
     fn rect(x0: i32, y0: i32, x1: i32, y1: i32) -> RectI {
         RectI::new(x0, y0, x1, y1).unwrap()
@@ -304,5 +508,27 @@ mod tests {
             .collect();
         assert_eq!(frames, [vec![0, 6, 12], vec![12], vec![40]]);
         assert_eq!(runs[0].union(), rect(100, 100, 190, 120));
+    }
+
+    #[test]
+    fn counts_names_on_the_scoreboard_grid() {
+        let at = |y| {
+            (
+                "x",
+                Exposure {
+                    frame: 0,
+                    part: rect(640, y - 8, 700, y + 8),
+                    line: rect(640, y - 8, 700, y + 8),
+                },
+            )
+        };
+        // Three rows of the first block, slid 6 rows down, and one of the
+        // second block.
+        let board = [at(361), at(395), at(463), at(592)];
+        assert_eq!(board_rows(&board, (0.0, 1.0)), 4);
+        // A card and a name tag above heads: on no common grid.
+        let decoys = [at(342), at(726)];
+        assert!(board_rows(&decoys, (0.0, 1.0)) < 3);
+        assert_eq!(board_rows(&[], (0.0, 1.0)), 0);
     }
 }

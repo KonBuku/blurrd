@@ -17,7 +17,8 @@
 //! text line is and where each of its name parts is, which the
 //! verification compares with the blur boxes (plan 7.2, steps 2 to 5).
 //! The screen surfaces' name zones are protected zones too while their
-//! gate makes a frame a candidate.
+//! gate makes a frame a candidate, and a full-frame zone is read every
+//! half second for names outside every protected zone.
 //!
 //! The analysis job of the engine feeds the builder from its frame
 //! pipeline on an OCR worker; the verification reads the dictionary and
@@ -53,6 +54,11 @@ pub const LEFT_PANEL_ROI: RectI = RectI {
 /// reliably (measured in M16 against scale 1.5, plan section 18).
 pub const DET_SCALE: f32 = 2.0;
 
+/// Detection input pixels per reference pixel of the full-frame zone: the
+/// whole frame is read at the reference size, which keeps its detection
+/// input near 1920 × 1088 at every resolution.
+pub const FULL_FRAME_SCALE: f32 = 1.0;
+
 /// What a protected zone contains, which decides how its lines are read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ZoneKind {
@@ -63,11 +69,13 @@ pub enum ZoneKind {
     /// The name zone of a screen surface (read while its gate makes a
     /// frame a candidate).
     Screen(Region),
+    /// The whole frame, sampled for names outside every protected zone.
+    FullFrame,
 }
 
 impl ZoneKind {
     /// The zone id of each kind: the HUD zones first, then the screen
-    /// surfaces in [`Region::SCREENS`] order.
+    /// surfaces in [`Region::SCREENS`] order, then the full frame.
     pub fn id(self) -> ZoneId {
         let screens = Region::SCREENS.len() as u16;
         let index = match self {
@@ -79,6 +87,7 @@ impl ZoneKind {
                     .position(|&r| r == region)
                     .map_or(screens, |i| i as u16)
             }
+            Self::FullFrame => 3 + screens,
         };
         ZoneId(index)
     }
@@ -173,6 +182,23 @@ pub fn screen_zones(
         .collect()
 }
 
+/// The full-frame zone of a `width` × `height` source with the HUD scale
+/// of `geometry`: the whole frame, detected at its reference size.
+pub fn full_frame_zone(geometry: &HudGeometry, width: u32, height: u32) -> ProtectedZone {
+    let reference = RectI {
+        x0: 0,
+        y0: 0,
+        x1: (width as f32 / geometry.sx).round().max(1.0) as i32,
+        y1: (height as f32 / geometry.sy).round().max(1.0) as i32,
+    };
+    ProtectedZone {
+        kind: ZoneKind::FullFrame,
+        id: ZoneKind::FullFrame.id(),
+        rect: frame_rect(width, height),
+        reference,
+    }
+}
+
 /// The whole `width` × `height` frame.
 fn frame_rect(width: u32, height: u32) -> RectI {
     RectI {
@@ -258,10 +284,12 @@ impl DictionaryBuilder {
     }
 
     /// A builder that also reads the name zones of the screen surfaces of
-    /// `regions` ([`screen_zones`]), as the verification needs.
+    /// `regions` and the full-frame zone ([`screen_zones`],
+    /// [`full_frame_zone`]), as the verification needs.
     pub fn verifying(geometry: &HudGeometry, width: u32, height: u32, regions: RegionSet) -> Self {
         let mut zones = protected_zones(geometry, width, height);
         zones.extend(screen_zones(geometry, width, height, regions));
+        zones.push(full_frame_zone(geometry, width, height));
         Self::with_zones(zones, geometry)
     }
 
@@ -284,7 +312,14 @@ impl DictionaryBuilder {
     pub fn zone_specs(&self) -> Vec<ZoneSpec> {
         self.zones
             .iter()
-            .map(|z| ZoneSpec::for_crop(z.id, z.reference.width(), z.reference.height(), DET_SCALE))
+            .map(|z| {
+                let scale = if z.kind == ZoneKind::FullFrame {
+                    FULL_FRAME_SCALE
+                } else {
+                    DET_SCALE
+                };
+                ZoneSpec::for_crop(z.id, z.reference.width(), z.reference.height(), scale)
+            })
             .collect()
     }
 

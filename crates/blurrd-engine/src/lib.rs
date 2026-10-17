@@ -53,8 +53,8 @@ mod verify;
 
 pub use analysis::{Analysis, AnalyzeReport, AnalyzeRequest, LOOKAHEAD_MAX};
 pub use dictionary::{
-    DictionaryBuilder, NamePart, Pass0Stats, ProtectedZone, SourceLine, ZoneKind, protected_zones,
-    screen_zones,
+    DictionaryBuilder, NamePart, Pass0Stats, ProtectedZone, SourceLine, ZoneKind, full_frame_zone,
+    protected_zones, screen_zones,
 };
 pub use engine::{Engine, EngineConfig, OcrSetup, PoolSizes, default_cache_dir};
 pub use job::{CancellationToken, ProgressSink};
