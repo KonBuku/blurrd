@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::Outcome;
 use crate::args::AnalyzeArgs;
-use crate::output::Events;
+use crate::output::{Events, verify_line};
 
 /// The final report line of an analysis.
 #[derive(Debug, Serialize)]
@@ -56,8 +56,12 @@ pub(crate) fn analyze(
             .unwrap_or(&report.project_file)
             .display(),
     );
-    if report.pass0.is_none() {
-        summary.push_str("\nnot verified (no OCR)");
+    match &report.verify {
+        Some(verify) => {
+            summary.push('\n');
+            summary.push_str(&verify_line(verify));
+        }
+        None => summary.push_str("\nnot verified (no OCR)"),
     }
     events.report(
         &Report {

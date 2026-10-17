@@ -40,6 +40,10 @@ pub(crate) struct FrameCrops {
     /// when the reference frame is not the frame itself (otherwise `feed`
     /// and `left` are source pixels already).
     native: Option<[Crop; 2]>,
+    /// The name zones of the screen surfaces (in [`Region::SCREENS`]
+    /// order) in source pixels, for pass 0, on frames where the surface's
+    /// gate made a candidate.
+    screens: [Option<Crop>; 4],
 }
 
 impl FrameCrops {
@@ -64,8 +68,21 @@ impl FrameCrops {
         match kind {
             ZoneKind::FeedAndBanner => feed.ocr_view(rect),
             ZoneKind::LeftPanel => left.ocr_view(rect),
+            ZoneKind::Screen(region) => Region::SCREENS
+                .iter()
+                .position(|&r| r == region)
+                .and_then(|i| self.screens[i].as_ref())
+                .and_then(|crop| crop.ocr_view(rect)),
         }
     }
+}
+
+/// What pass 0 reads beyond the HUD zones, so the crop workers cut it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OcrReads {
+    /// The name zones of the screen surfaces in source pixels (in
+    /// [`Region::SCREENS`] order), for the analysed surfaces.
+    pub(crate) screens: [Option<RectI>; 4],
 }
 
 /// Makes the crops of frames; one per crop worker (it keeps buffers).
@@ -84,8 +101,8 @@ pub(crate) struct Cropper {
     /// Whether the downscaled whole frame is read (voice-chat scene cuts,
     /// screen-surface gates).
     quarter: bool,
-    /// Whether pass 0 reads source-pixel crops.
-    ocr: bool,
+    /// What pass 0 reads, when it runs.
+    ocr: Option<OcrReads>,
     roi: YuvRoi,
     /// Reads the screen surfaces, when one is analysed.
     screens: Option<ScreenReader>,
@@ -93,14 +110,14 @@ pub(crate) struct Cropper {
 
 impl Cropper {
     /// A cropper for `regions` of frames mapped by `map`, with colours
-    /// `colour` converted by `converter`; `ocr` when pass 0 reads the
-    /// protected zones.
+    /// `colour` converted by `converter`; `ocr` says what pass 0 reads
+    /// when it runs.
     pub(crate) fn new(
         map: HudMap,
         colour: VideoColour,
         converter: RgbConverter,
         regions: RegionSet,
-        ocr: bool,
+        ocr: Option<OcrReads>,
     ) -> Self {
         Self {
             map,
@@ -193,7 +210,7 @@ impl Cropper {
             }
             None => None,
         };
-        let native = if self.ocr && !self.map.is_identity() {
+        let native = if self.ocr.is_some() && !self.map.is_identity() {
             Some([
                 self.native_crop(&frame, FEED_ROI, Anchor::Right)?,
                 self.native_crop(&frame, LEFT_PANEL_ROI, Anchor::Left)?,
@@ -201,6 +218,7 @@ impl Cropper {
         } else {
             None
         };
+        let screens = self.ocr_crops(&frame, surfaces.as_ref())?;
         Ok(FrameCrops {
             index: frame.index(),
             frame,
@@ -210,7 +228,29 @@ impl Cropper {
             quarter: quarter_image,
             surfaces,
             native,
+            screens,
         })
+    }
+
+    /// What pass 0 reads of `frame` beyond the HUD zones: the name zones
+    /// of the screen surfaces whose gate made a candidate (`surfaces`).
+    fn ocr_crops(
+        &mut self,
+        frame: &VideoFrame,
+        surfaces: Option<&[SurfaceFrame; 4]>,
+    ) -> Result<[Option<Crop>; 4], AppError> {
+        let mut screens: [Option<Crop>; 4] = Default::default();
+        let Some(reads) = self.ocr else {
+            return Ok(screens);
+        };
+        if let Some(surfaces) = surfaces {
+            for ((slot, zone), surface) in screens.iter_mut().zip(reads.screens).zip(surfaces) {
+                if let (Some(zone), true) = (zone, surface.candidate) {
+                    *slot = Some(self.source_crop(frame, zone)?);
+                }
+            }
+        }
+        Ok(screens)
     }
 
     /// The source pixels of reference rectangle `rect` kept at `anchor`.
@@ -223,6 +263,11 @@ impl Cropper {
         let Some(source) = self.map.source_rect(rect, anchor) else {
             return Ok(Crop::default());
         };
+        self.source_crop(frame, source)
+    }
+
+    /// The source pixels of `source` (source coordinates).
+    fn source_crop(&mut self, frame: &VideoFrame, source: RectI) -> Result<Crop, AppError> {
         frame.roi_yuv(source, &mut self.roi)?;
         let mut image = RgbImage::default();
         self.reference.converter.convert(&self.roi, &mut image)?;

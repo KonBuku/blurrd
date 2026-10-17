@@ -45,6 +45,19 @@ the game world are out of scope and never blurred. Without ONNX Runtime and
 the OCR models (or with `--no-verify`) the result is not verified, and
 outputs made from it are named `*_UNVERIFIED`.
 
+With OCR the analysis verifies its result. While the detectors run, OCR
+reads the protected zones of the recording (the kill feed and banner area
+and the left panel on every frame with HUD structure and one frame in six
+elsewhere, a screen surface's names while it is open). Afterwards blurrd makes the blurred pixels of every
+name part the boxes do not cover completely, exactly as the render will,
+and reads them again. A name that stays readable gets an extra box (a fix
+box over the name's slot, grown up to three times) and is listed as a
+fixed leak; one that stays readable after that is open. The report, `verify-<revision>.json` next to
+the project in the cache, holds frames, regions, boxes, confidences and
+counts, never text. The result is `Clean` when no leak is open and OCR
+read every name the detectors boxed; it is `Unverified` when OCR could not
+read some of them on the recording, and `LeaksRemain` with an open leak.
+
 ## `blurrd render`
 
 Blurs the boxes of a project and writes the output.
@@ -84,7 +97,10 @@ and blurs each frame as soon as its boxes are final, so the output is the
 same as `analyze` followed by `render`, in about the time of the slower of
 the two. The project is saved in the cache as by `analyze`. It takes
 `--regions` and `--no-verify` like `analyze` and the export options of
-`render` (`--strength` sets the blur strength).
+`render` (`--strength` sets the blur strength). The verification ends
+after the render wrote its last frames: a clean output gets its own name,
+and when the verification added fix boxes the project is rendered again
+(a fix means a detector missed a name, which is rare).
 
 `-o` names the output file. With several recordings, or when it names an
 existing folder, the outputs go into that folder as `<name>_blurrd.<ext>`
@@ -145,9 +161,13 @@ own state, never `Clean` for an accepted unverified project.
 An analysis reports `project_file` (the project in the cache), `frames`,
 `tracks`, `decoder`, `elapsed_ms`, `fps`, `max_delay` (the largest number of
 frames a temporal model held a frame, at most 240), `pass0` (OCR counters,
-`null` without OCR) and `plan` (the file of `-o`, or `null`). A run reports
-`runs`: per written recording its `analysis` and `render` reports, whether
-it `streamed`, and its `elapsed_ms`.
+`null` without OCR), `verify` (the result and its counts: `state`, `open`,
+`fixed`, `accepted`, `out_of_scope`, `unverifiable_items`), `verify_report`
+(the report in the cache), `verify_ms` (the time of the verification after
+the detectors; all three `null` without OCR) and `plan` (the file of `-o`,
+or `null`). A run reports `runs`: per written recording its `analysis` and
+`render` reports, whether it `streamed`, whether it was `rerendered` with
+fix boxes, and its `elapsed_ms`.
 
 `probe --json` prints the `MediaInfo` object. Errors outside a job are
 printed as `{"type": "Error", "error": {"kind": "NotFound", "message": "…",

@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
-use blurrd_core::{AppError, Track};
+use blurrd_core::{AppError, RegionSet, Track};
 use blurrd_video::{DecodeOptions, Decoder, VideoFrame};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
@@ -36,7 +36,6 @@ use super::pass0::Pass0;
 use super::previews::{PreviewOutput, Previews};
 use super::stages::{Emitted, SOURCES, Stage};
 use super::tracks::{RegionBox, TrackBuilder};
-use crate::dictionary::Pass0Stats;
 use crate::engine::PoolSizes;
 use crate::job::{Job, canceled, internal};
 
@@ -57,8 +56,8 @@ pub(crate) struct PipelineOutput {
     pub(crate) pts: Vec<i64>,
     /// The largest look-ahead of a temporal model, in frames.
     pub(crate) max_delay: u32,
-    /// Pass 0 counters, if pass 0 ran to the end.
-    pub(crate) pass0: Option<Pass0Stats>,
+    /// Pass 0 with what it read, if it ran to the end.
+    pub(crate) pass0: Option<Pass0>,
     /// Why pass 0 stopped, if it failed.
     pub(crate) pass0_error: Option<String>,
     /// What the previews produced, when they ran.
@@ -267,7 +266,7 @@ impl Pipeline<'_> {
         let (crop_tx, crop_rx) = bounded::<Result<FrameCrops, AppError>>(workers * 2);
         let (emit_tx, emit_rx) = unbounded::<Emitted>();
         let hud_stages = stages.iter().filter(|s| s.is_hud()).count();
-        let (signal_tx, signal_rx) = unbounded::<(u32, bool)>();
+        let (signal_tx, signal_rx) = unbounded::<(u32, RegionSet)>();
         let (to_stages, stage_inputs): (Vec<_>, Vec<_>) = stages
             .iter()
             .map(|_| bounded::<Arc<FrameCrops>>(pools.stage_queue.max(1)))
@@ -377,7 +376,7 @@ fn decode_frames(
 }
 
 /// The OCR worker of pass 0, or why it could not start.
-type Pass0Worker = Result<std::thread::JoinHandle<Result<Pass0Stats, String>>, String>;
+type Pass0Worker = Result<std::thread::JoinHandle<Result<Pass0, String>>, String>;
 
 /// Starts pass 0 on its own thread, outside the pipeline's scope: an OCR
 /// call cannot be interrupted, and closing the OCR sessions takes a few
@@ -385,7 +384,7 @@ type Pass0Worker = Result<std::thread::JoinHandle<Result<Pass0Stats, String>>, S
 fn spawn_pass0(
     pass0: Pass0,
     frames: Receiver<Arc<FrameCrops>>,
-    structure: Receiver<(u32, bool)>,
+    structure: Receiver<(u32, RegionSet)>,
     hud_stages: usize,
     control: &Control<'_>,
 ) -> Pass0Worker {
@@ -402,7 +401,7 @@ fn spawn_pass0(
 
 /// The result of pass 0 once the pipeline ended: waits for the worker,
 /// unless the pipeline stopped (then the worker ends on its own).
-fn finish_pass0(worker: Pass0Worker, control: &Control<'_>) -> Result<Pass0Stats, String> {
+fn finish_pass0(worker: Pass0Worker, control: &Control<'_>) -> Result<Pass0, String> {
     let worker = worker?;
     if control.stopped() {
         return Err(String::from("the analysis stopped"));
@@ -474,7 +473,7 @@ fn run_stage(
     mut stage: Box<dyn Stage>,
     frames: &Receiver<Arc<FrameCrops>>,
     emitted: &Sender<Emitted>,
-    signals: Option<&Sender<(u32, bool)>>,
+    signals: Option<&Sender<(u32, RegionSet)>>,
     control: &Control<'_>,
 ) -> Result<(), AppError> {
     for crops in frames {

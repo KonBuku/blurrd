@@ -24,6 +24,10 @@
 //!   render.
 //! - [`dictionary`]: pass 0 of the verification, the in-memory name
 //!   dictionary built by OCR over the protected zones of the source.
+//! - The verification itself: after the detectors, the analysis reads
+//!   the blurred pixels of every name part the boxes do not cover,
+//!   adds `OcrFix` slot boxes where a name stays readable and saves a
+//!   report (`verify-<revision>.json`) next to the project.
 //!
 //! Every job reports through a [`ProgressSink`] and stops at the next
 //! frame once its [`CancellationToken`] fires.
@@ -44,9 +48,14 @@ mod render;
 mod resample;
 mod run;
 mod scaler;
+mod slots;
+mod verify;
 
 pub use analysis::{Analysis, AnalyzeReport, AnalyzeRequest, LOOKAHEAD_MAX};
-pub use dictionary::{DictionaryBuilder, Pass0Stats, ProtectedZone, ZoneKind, protected_zones};
+pub use dictionary::{
+    DictionaryBuilder, NamePart, Pass0Stats, ProtectedZone, SourceLine, ZoneKind, protected_zones,
+    screen_zones,
+};
 pub use engine::{Engine, EngineConfig, OcrSetup, PoolSizes, default_cache_dir};
 pub use job::{CancellationToken, ProgressSink};
 pub use render::{FallbackReport, RenderReport, RenderRequest, SkippedReport};

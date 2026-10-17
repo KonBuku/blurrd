@@ -5,7 +5,7 @@
 use std::io::{IsTerminal, Write};
 use std::sync::Mutex;
 
-use blurrd_core::{AppError, JobEvent, JobId, JobKind};
+use blurrd_core::{AppError, JobEvent, JobId, JobKind, VerifyState, VerifySummary};
 use blurrd_engine::ProgressSink;
 use serde::Serialize;
 
@@ -167,6 +167,19 @@ pub(crate) fn write_error(error: &AppError, json: bool) {
     } else {
         let _ = writeln!(std::io::stderr().lock(), "{}", error_text(error));
     }
+}
+
+/// One line on the result of a verification: the state and the counts.
+pub(crate) fn verify_line(verify: &VerifySummary) -> String {
+    let state = match verify.state {
+        VerifyState::Clean => "clean",
+        VerifyState::Unverified => "unverified",
+        VerifyState::LeaksRemain => "names remain readable",
+    };
+    format!(
+        "verify: {state} ({} fixed, {} open, {} unverifiable, {} out of scope)",
+        verify.fixed, verify.open, verify.unverifiable_items, verify.out_of_scope
+    )
 }
 
 /// `error: <message> (<detail>)`.

@@ -73,10 +73,10 @@ impl Emitted {
 /// A detector stage: pushed every frame in order, then finished once.
 pub(crate) trait Stage: Send {
     /// Runs the stage on one frame; boxes that became final go to `out`.
-    /// Returns whether the frame showed HUD structure (plan 7.2: kill-feed
-    /// rows, a banner gate, voice portraits, the chat box, a screen
-    /// surface gate).
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<bool, AppError>;
+    /// Returns the regions whose structure the frame showed (plan 7.2:
+    /// kill-feed rows, a banner gate, voice portraits, the chat box, a
+    /// screen surface gate).
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError>;
     /// Makes every pushed frame final.
     fn finish(self: Box<Self>, out: &mut Emitted);
     /// Whether the stage reads the HUD (its structure signals drive pass 0).
@@ -178,12 +178,15 @@ impl KillFeedStage {
 }
 
 impl Stage for KillFeedStage {
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<bool, AppError> {
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError> {
         let view = crops.feed.view().map_err(|e| detector_error(&e))?;
         self.detector
             .detect(&view, &mut self.detections)
             .map_err(|e| detector_error(&e))?;
-        let structure = !self.detector.rows().is_empty();
+        let mut structure = RegionSet::empty();
+        if !self.detector.rows().is_empty() {
+            structure.insert(Region::KillFeed);
+        }
         self.tracker
             .push(&KillFeedFrame {
                 frame: crops.index,
@@ -325,13 +328,15 @@ impl PanelStage {
 }
 
 impl Stage for PanelStage {
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<bool, AppError> {
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError> {
         let frame = crops.index;
-        let mut structure = false;
+        let mut structure = RegionSet::empty();
         if self.enabled[0] {
             let view = crops.banner().view().map_err(|e| detector_error(&e))?;
             let seen = self.banner.detect(&view).map_err(|e| detector_error(&e))?;
-            structure |= seen.gate;
+            if seen.gate {
+                structure.insert(Region::Banner);
+            }
             self.banner_tracker
                 .push(frame, &seen, &mut self.banner_ready);
         }
@@ -340,11 +345,14 @@ impl Stage for PanelStage {
             self.voice
                 .detect(&left, &mut self.detections)
                 .map_err(|e| detector_error(&e))?;
-            structure |= self
+            if self
                 .voice
                 .slots()
                 .iter()
-                .any(|s| s.portrait >= MEASURE_PORTRAIT);
+                .any(|s| s.portrait >= MEASURE_PORTRAIT)
+            {
+                structure.insert(Region::VoiceChat);
+            }
             let quarter = crops.quarter_view().map_err(|e| detector_error(&e))?;
             let cut = self.cuts.push(&quarter, &[(Region::VoiceChat, left)]);
             self.voice_tracker
@@ -360,7 +368,9 @@ impl Stage for PanelStage {
             self.chat
                 .detect(&left, &mut self.detections)
                 .map_err(|e| detector_error(&e))?;
-            structure |= !self.chat.bands().is_empty();
+            if !self.chat.bands().is_empty() {
+                structure.insert(Region::TextChat);
+            }
             self.chat_tracker.push(frame, &self.chat);
             self.chat_tracker.drain_ready(&mut self.chat_ready);
         }
@@ -420,13 +430,18 @@ fn emit_screens(
 }
 
 impl Stage for ScreenStage {
-    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<bool, AppError> {
+    fn push(&mut self, crops: &FrameCrops, out: &mut Emitted) -> Result<RegionSet, AppError> {
         // The crop workers gated and read the frame (see `Cropper`).
         let surfaces = crops
             .surfaces
             .clone()
             .ok_or_else(|| internal("the screen surfaces of a frame were not read"))?;
-        let structure = surfaces.iter().any(|s| s.candidate);
+        let structure = surfaces
+            .iter()
+            .zip(Region::SCREENS)
+            .filter(|(s, _)| s.candidate)
+            .map(|(_, region)| region)
+            .collect();
         self.detector.push(crops.index, surfaces, &mut self.ready);
         emit_screens(&self.map, &mut self.ready, Some(crops.index), out);
         Ok(structure)

@@ -8,13 +8,14 @@ mod previews;
 mod stages;
 pub(crate) mod tracks;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use blurrd_blur::PixelParams;
 use blurrd_core::{
-    AppError, BlurParams, DetectorInfo, ErrorKind, HudGeometry, HudLayout, JobEvent, JobId,
-    JobKind, JobSummary, MediaInfo, Mode, Project, ProjectMedia, RegionSet, Sensitivity, Stage,
-    TemporalParams, VerifyState, WarningCode,
+    AppError, BlurParams, Coverage, DetectorInfo, ErrorKind, HudGeometry, HudLayout, JobEvent,
+    JobId, JobKind, JobSummary, MediaInfo, Mode, Project, ProjectMedia, ProjectVerify, RegionSet,
+    Sensitivity, Stage, TemporalParams, VerifyReport, VerifyState, VerifySummary, WarningCode,
 };
 use blurrd_detect::killfeed::BarHues;
 use blurrd_video::{
@@ -25,7 +26,7 @@ use serde::Serialize;
 
 use self::frame::Cropper;
 use self::pass0::Pass0;
-use self::pipeline::Pipeline;
+use self::pipeline::{Pipeline, PipelineOutput};
 use self::previews::Previews;
 use self::tracks::TrackBuilder;
 use crate::cache::{self, ProjectDir};
@@ -33,6 +34,7 @@ use crate::dictionary::Pass0Stats;
 use crate::engine::Engine;
 use crate::hud::HudMap;
 use crate::job::{Job, internal};
+use crate::verify::{self, Context, PixelSetup, Pixels};
 
 /// The most frames any temporal model may hold a frame before its boxes
 /// are final (plan 5.4): banner episodes need about 180, the kill-feed
@@ -52,9 +54,12 @@ pub struct AnalyzeRequest {
     pub regions: RegionSet,
     /// Blur parameters stored in the project.
     pub blur: BlurParams,
-    /// Whether to verify: builds the OCR name dictionary (pass 0) when OCR
+    /// Whether to verify: reads the protected zones with OCR (pass 0),
+    /// checks the blurred result and fixes what stays readable when OCR
     /// is available, and warns when it is not.
     pub verify: bool,
+    /// Which frames the verification reads.
+    pub coverage: Coverage,
     /// Whether to make the thumbnails and, for videos the desktop app's
     /// player cannot play, the preview proxy.
     pub previews: bool,
@@ -70,6 +75,7 @@ impl AnalyzeRequest {
             regions: RegionSet::all(),
             blur: BlurParams::default(),
             verify: true,
+            coverage: Coverage::Structure,
             previews: true,
         }
     }
@@ -96,6 +102,13 @@ pub struct AnalyzeReport {
     pub max_delay: u32,
     /// Pass 0 counters, when OCR ran.
     pub pass0: Option<Pass0Stats>,
+    /// The verification's result, when it ran.
+    pub verify: Option<VerifySummary>,
+    /// The verification report in the cache, when it ran.
+    pub verify_report: Option<PathBuf>,
+    /// Time the verification took after the detectors (pass 0 runs during
+    /// them), in milliseconds, when it ran.
+    pub verify_ms: Option<u64>,
     /// Thumbnails written.
     pub thumbnails: u32,
     /// The preview proxy, when the video needed one.
@@ -138,18 +151,26 @@ pub(crate) struct Prepared {
     pub(crate) pass0: Option<Pass0>,
 }
 
+/// What a verification after the detectors produced.
+struct Verified {
+    report: VerifyReport,
+    path: PathBuf,
+    /// Its time in milliseconds.
+    ms: u64,
+}
+
 impl Engine {
-    /// Probes `input` and prepares its analysis: calibrated geometry,
-    /// colour conversion, decoder, OCR. Emits the warnings that apply to
-    /// the whole video. `beside_render` tells that a render decodes the same
-    /// video at the same time (a streaming run).
+    /// Probes the video of `req` and prepares its analysis: calibrated
+    /// geometry, colour conversion, decoder, OCR. Emits the warnings that
+    /// apply to the whole video. `beside_render` tells that a render
+    /// decodes the same video at the same time (a streaming run).
     pub(crate) fn prepare_analysis(
         &self,
-        input: &std::path::Path,
-        verify: bool,
+        req: &AnalyzeRequest,
         beside_render: bool,
         job: &Job<'_>,
     ) -> Result<Prepared, AppError> {
+        let input = req.input.as_path();
         job.stage(Stage::Probe);
         let fingerprint = cache::fingerprint(input)?;
         let header = blurrd_video::probe_header(input)?;
@@ -207,8 +228,8 @@ impl Engine {
                 None,
             );
         }
-        let pass0 = if verify {
-            self.open_pass0(&geometry, &info, job)
+        let pass0 = if req.verify {
+            self.open_pass0(&geometry, &info, req, job)
         } else {
             None
         };
@@ -244,15 +265,26 @@ impl Engine {
     }
 
     /// Opens pass 0, or warns that the result stays unverified.
-    fn open_pass0(&self, geometry: &HudGeometry, info: &MediaInfo, job: &Job<'_>) -> Option<Pass0> {
+    fn open_pass0(
+        &self,
+        geometry: &HudGeometry,
+        info: &MediaInfo,
+        req: &AnalyzeRequest,
+        job: &Job<'_>,
+    ) -> Option<Pass0> {
         let config = self.config();
         let reason = match &config.ocr {
-            Some(setup) => {
-                match Pass0::open(setup, config.adapter, geometry, info.width, info.height) {
-                    Ok(pass0) => return Some(pass0),
-                    Err(reason) => reason,
-                }
-            }
+            Some(setup) => match Pass0::open(
+                setup,
+                config.adapter,
+                geometry,
+                info,
+                req.regions,
+                req.coverage,
+            ) {
+                Ok(pass0) => return Some(pass0),
+                Err(reason) => reason,
+            },
             None => String::from("ONNX Runtime and the OCR models are not installed"),
         };
         job.warning(
@@ -293,7 +325,7 @@ impl Engine {
     }
 
     fn analyze_job(&self, req: &AnalyzeRequest, job: &Job<'_>) -> Result<Analysis, AppError> {
-        let prepared = self.prepare_analysis(&req.input, req.verify, false, job)?;
+        let prepared = self.prepare_analysis(req, false, job)?;
         let expected = expected_frames(&prepared.info);
         job.started(JobKind::Analyze, expected);
         self.run_analysis(req, prepared, job, Some(expected), &mut |_, _| {})
@@ -332,10 +364,20 @@ impl Engine {
             Previews::open(&dir, &info, converter.clone(), &proxy)
         });
         job.stage(Stage::Detect);
+        let pixels = PixelSetup::source(
+            decode.clone(),
+            &req.blur,
+            &geometry,
+            colour,
+            converter.clone(),
+            req.regions,
+            (info.width, info.height),
+        )?;
+        let reads = pass0.as_ref().map(Pass0::reads);
         let pipeline = Pipeline {
             input: &req.input,
             decode,
-            cropper: Cropper::new(map, colour, converter.clone(), req.regions, pass0.is_some()),
+            cropper: Cropper::new(map, colour, converter.clone(), req.regions, reads),
             stages: stages::stages(req.regions, map, mode, hues.as_ref()),
             sources: stages::sources(req.regions),
             pass0,
@@ -344,27 +386,9 @@ impl Engine {
             progress,
         };
         let output = pipeline.run(job, on_frame)?;
-        if let Some(reason) = &output.pass0_error {
-            job.warning(
-                WarningCode::OcrUnavailable,
-                format!("OCR stopped ({reason}); the result is not verified."),
-                None,
-            );
-        }
-        if output.max_delay > LOOKAHEAD_MAX {
-            return Err(internal(format!(
-                "a temporal model held frames {} frames, more than {LOOKAHEAD_MAX}",
-                output.max_delay
-            )));
-        }
-        if output.pts.is_empty() {
-            return Err(no_frames());
-        }
+        check_output(&output, job)?;
         let previews = output.previews.unwrap_or_default();
-        for problem in &previews.problems {
-            job.warning(WarningCode::PreviewUnavailable, problem.clone(), None);
-        }
-        let pts = PtsTable::new(info.time_base, output.pts)?;
+        let pts = Arc::new(PtsTable::new(info.time_base, output.pts)?);
         pts.write(&dir.pts())?;
         let media = project_media(req, &info, fingerprint, &pts);
         let detector = DetectorInfo {
@@ -381,6 +405,19 @@ impl Engine {
             project.revision = previous.revision + 1;
         }
         project.verify.state = VerifyState::Unverified;
+        let pass0_stats = output.pass0.as_ref().map(Pass0::stats);
+        let verified = match output.pass0 {
+            Some(mut pass0) => {
+                let source = VerifySource {
+                    input: &req.input,
+                    pts: Arc::clone(&pts),
+                    pixels,
+                    dir: &dir,
+                };
+                verify_or_warn(&mut project, &mut pass0, source, job)?
+            }
+            None => None,
+        };
         cache::write_project(&project, &dir.project())?;
         let elapsed = job.elapsed();
         let frames = pts.len();
@@ -393,13 +430,132 @@ impl Engine {
                 elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
                 fps: f64::from(frames) / elapsed.as_secs_f64().max(1e-9),
                 max_delay: output.max_delay,
-                pass0: output.pass0,
+                pass0: pass0_stats,
+                verify: verified.as_ref().map(|v| v.report.summary),
+                verify_ms: verified.as_ref().map(|v| v.ms),
+                verify_report: verified.map(|v| v.path),
                 thumbnails: previews.thumbnails,
                 proxy: previews.proxy,
             },
             project,
         })
     }
+}
+
+/// Checks what the pipeline produced and warns about what stopped on the
+/// way (OCR, previews).
+fn check_output(output: &PipelineOutput, job: &Job<'_>) -> Result<(), AppError> {
+    if let Some(reason) = &output.pass0_error {
+        job.warning(
+            WarningCode::OcrUnavailable,
+            format!("OCR stopped ({reason}); the result is not verified."),
+            None,
+        );
+    }
+    if output.max_delay > LOOKAHEAD_MAX {
+        return Err(internal(format!(
+            "a temporal model held frames {} frames, more than {LOOKAHEAD_MAX}",
+            output.max_delay
+        )));
+    }
+    if output.pts.is_empty() {
+        return Err(no_frames());
+    }
+    for problem in output.previews.iter().flat_map(|p| &p.problems) {
+        job.warning(WarningCode::PreviewUnavailable, problem.clone(), None);
+    }
+    Ok(())
+}
+
+/// Where the verification after the detectors reads blurred pixels and
+/// writes its report.
+struct VerifySource<'a> {
+    /// The video.
+    input: &'a Path,
+    /// Its PTS table.
+    pts: Arc<PtsTable>,
+    /// How its blurred pixels are made.
+    pixels: PixelSetup,
+    /// Its cache folder.
+    dir: &'a ProjectDir,
+}
+
+/// [`verify_project`], or a warning and no result when the verification
+/// fails for another reason than a cancellation.
+fn verify_or_warn(
+    project: &mut Project,
+    pass0: &mut Pass0,
+    source: VerifySource<'_>,
+    job: &Job<'_>,
+) -> Result<Option<Verified>, AppError> {
+    job.stage(Stage::Verify);
+    let started = std::time::Instant::now();
+    match verify_project(project, pass0, source, job) {
+        Ok(verified) => Ok(Some(Verified {
+            ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            ..verified
+        })),
+        Err(error) if error.kind == ErrorKind::Canceled => Err(error),
+        Err(error) => {
+            job.warning(
+                WarningCode::OcrUnavailable,
+                format!("The verification stopped ({error}); the result is not verified."),
+                None,
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// Verifies `project` with what `pass0` read and adds the fixes it made,
+/// reading blurred pixels from `source`. Writes the report next to the
+/// project and records it in the project.
+fn verify_project(
+    project: &mut Project,
+    pass0: &mut Pass0,
+    source: VerifySource<'_>,
+    job: &Job<'_>,
+) -> Result<Verified, AppError> {
+    let VerifySource {
+        input,
+        pts,
+        pixels,
+        dir,
+    } = source;
+    let coverage = pass0.coverage();
+    let parts = pass0.parts();
+    let ctx = Context {
+        log: parts.log,
+        whitelist: parts.whitelist,
+        geometry: &project.geometry,
+        size: (project.media.width, project.media.height),
+        regions: project.detector.regions,
+    };
+    let mut reader = Pixels::open(input, pts, pixels, parts.ocr)?;
+    let outcome = verify::verify(&ctx, &project.plan(), &mut reader, None, job)?;
+    drop(reader);
+    verify::warn(&outcome, job);
+    project.tracks.extend(outcome.fixes.iter().cloned());
+    let report = verify::report(
+        &outcome,
+        project.revision,
+        project.media.fingerprint.clone(),
+        coverage,
+    );
+    let name = verify::report_name(project.revision);
+    let path = dir.project().with_file_name(&name);
+    verify::write_report(&report, &path)?;
+    project.verify = ProjectVerify {
+        plan_revision: project.revision,
+        state: report.summary.state,
+        unverified_ranges: Vec::new(),
+        report: Some(name),
+    };
+    Ok(Verified {
+        report,
+        path,
+        ms: 0,
+    })
 }
 
 /// The media section of the project of `req`'s video, described by

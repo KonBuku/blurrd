@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::Outcome;
 use crate::args::RunArgs;
-use crate::output::Events;
+use crate::output::{Events, verify_line};
 use crate::render::{export_settings, summary};
 
 /// Containers an output keeps from its input; other inputs become MP4.
@@ -72,7 +72,13 @@ pub(crate) fn run(
             }
         }
     }
-    let summaries: Vec<String> = reports.iter().map(|r| summary(&r.render)).collect();
+    let summaries: Vec<String> = reports
+        .iter()
+        .map(|r| match &r.analysis.verify {
+            Some(verify) => format!("{}\n{}", summary(&r.render), verify_line(verify)),
+            None => summary(&r.render),
+        })
+        .collect();
     events.report(&Report { runs: &reports }, &summaries.join("\n"));
     outcome
 }

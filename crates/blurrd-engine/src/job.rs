@@ -5,7 +5,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use blurrd_core::{AppError, ErrorKind, JobEvent, JobId, JobKind, Stage, WarningCode};
+use blurrd_core::{
+    AppError, ErrorKind, JobEvent, JobId, JobKind, LeakStatus, Region, Stage, WarningCode,
+};
 pub use tokio_util::sync::CancellationToken;
 
 /// Receives the events of a job (the desktop app forwards them over IPC,
@@ -74,6 +76,16 @@ impl<'a> Job<'a> {
         self.sink.emit(JobEvent::Stage {
             job: self.id,
             stage,
+        });
+    }
+
+    /// Emits `LeakFound` for a leak from `frame` in `region`.
+    pub(crate) fn leak(&self, frame: u32, region: Region, status: LeakStatus) {
+        self.sink.emit(JobEvent::LeakFound {
+            job: self.id,
+            frame,
+            region,
+            status,
         });
     }
 

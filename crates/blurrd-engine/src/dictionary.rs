@@ -13,19 +13,30 @@
 //! undoes a stretched or squeezed HUD and reads every layout at the same
 //! text size.
 //!
-//! The analysis job of the engine (milestone M14) feeds the builder from
-//! its frame pipeline on an OCR worker; verification (M17) reads the
-//! dictionary.
+//! Besides the dictionary, every read becomes a [`SourceLine`]: where the
+//! text line is and where each of its name parts is, which the
+//! verification compares with the blur boxes (plan 7.2, steps 2 to 5).
+//! The screen surfaces' name zones are protected zones too while their
+//! gate makes a frame a candidate.
+//!
+//! The analysis job of the engine feeds the builder from its frame
+//! pipeline on an OCR worker; the verification reads the dictionary and
+//! the lines.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
-use blurrd_core::{HudGeometry, RectI};
+use blurrd_core::{HudGeometry, RectI, Region, RegionSet};
 use blurrd_detect::killfeed::FEED_ROI;
+use blurrd_detect::screens::{self, ScreenMap};
 use blurrd_ocr::{
     CropDedup, NameDictionary, OcrEngine, OcrError, OcrRead, RgbView, Whitelist, ZoneId, ZoneSpec,
     fold,
 };
 use serde::Serialize;
+
+use crate::slots::NameSlots;
 
 /// The left HUD panel (voice chat and text chat) of plan 5.4, in reference
 /// pixels of a 1920 × 1080 frame.
@@ -49,6 +60,28 @@ pub enum ZoneKind {
     FeedAndBanner,
     /// Voice chat and text chat (bottom left).
     LeftPanel,
+    /// The name zone of a screen surface (read while its gate makes a
+    /// frame a candidate).
+    Screen(Region),
+}
+
+impl ZoneKind {
+    /// The zone id of each kind: the HUD zones first, then the screen
+    /// surfaces in [`Region::SCREENS`] order.
+    pub fn id(self) -> ZoneId {
+        let screens = Region::SCREENS.len() as u16;
+        let index = match self {
+            Self::FeedAndBanner => 0,
+            Self::LeftPanel => 1,
+            Self::Screen(region) => {
+                2 + Region::SCREENS
+                    .iter()
+                    .position(|&r| r == region)
+                    .map_or(screens, |i| i as u16)
+            }
+        };
+        ZoneId(index)
+    }
 }
 
 /// A protected zone of the source frames.
@@ -68,12 +101,7 @@ pub struct ProtectedZone {
 /// The protected zones of a `width` × `height` source whose HUD sits at
 /// `geometry` (right-anchored kill feed, left-anchored panel).
 pub fn protected_zones(geometry: &HudGeometry, width: u32, height: u32) -> Vec<ProtectedZone> {
-    let frame = RectI {
-        x0: 0,
-        y0: 0,
-        x1: width as i32,
-        y1: height as i32,
-    };
+    let frame = frame_rect(width, height);
     let map = |r: RectI, x_of: &dyn Fn(i32) -> f32| {
         let y = |v: i32| geometry.oy + v as f32 * geometry.sy;
         RectI::new(
@@ -113,6 +141,78 @@ pub fn protected_zones(geometry: &HudGeometry, width: u32, height: u32) -> Vec<P
     .collect()
 }
 
+/// The name zones of the screen surfaces of `regions` in a `width` ×
+/// `height` source whose HUD sits at `geometry`.
+pub fn screen_zones(
+    geometry: &HudGeometry,
+    width: u32,
+    height: u32,
+    regions: RegionSet,
+) -> Vec<ProtectedZone> {
+    let map = ScreenMap::from(geometry);
+    let frame = frame_rect(width, height);
+    Region::SCREENS
+        .iter()
+        .filter(|&&region| regions.contains(region))
+        .filter_map(|&region| {
+            let reference = match region {
+                Region::Scoreboard => screens::scoreboard::ZONE,
+                Region::DeathRecap => screens::recap::ZONE,
+                Region::Spectating => screens::spectating::ZONE,
+                _ => screens::match_end::ZONE,
+            };
+            let rect = screens::zone(region, &map)?.intersection(&frame)?;
+            let kind = ZoneKind::Screen(region);
+            Some(ProtectedZone {
+                kind,
+                id: kind.id(),
+                rect,
+                reference,
+            })
+        })
+        .collect()
+}
+
+/// The whole `width` × `height` frame.
+fn frame_rect(width: u32, height: u32) -> RectI {
+    RectI {
+        x0: 0,
+        y0: 0,
+        x1: width as i32,
+        y1: height as i32,
+    }
+}
+
+/// One text line OCR found in a protected zone of the source, in source
+/// pixels. Its text stays in memory, and only as far as the verification
+/// needs it: the folded name parts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceLine {
+    /// The zone it was read in.
+    pub zone: ZoneKind,
+    /// The line's box.
+    pub rect: RectI,
+    /// Recognition confidence of the whole line.
+    pub conf: f32,
+    /// Whether the line has the shape of a chat line: a channel prefix in
+    /// brackets or a colon after the sender. A text-chat line without
+    /// either is part of a message.
+    pub chat_shaped: bool,
+    /// The parts of the line that can be player names.
+    pub parts: Vec<NamePart>,
+}
+
+/// A part of a [`SourceLine`] that can be a player name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamePart {
+    /// Where its characters are, in source pixels (padded by a quarter of
+    /// the line height on each side, inside the line's box).
+    pub rect: RectI,
+    /// The name, folded ([`fold`]).
+    pub folded: String,
+    /// Mean probability of its characters.
+    pub conf: f32,
+}
 /// Counters of pass 0. They hold no text and nothing derived from text.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
 pub struct Pass0Stats {
@@ -134,6 +234,11 @@ pub struct Pass0Stats {
 #[derive(Debug)]
 pub struct DictionaryBuilder {
     zones: Vec<ProtectedZone>,
+    /// The lines last read per zone, given again for a crop that did not
+    /// change.
+    last: BTreeMap<ZoneId, Arc<[SourceLine]>>,
+    /// Where names can be.
+    slots: NameSlots,
     /// Natural width over natural height of one source pixel of the HUD.
     pixel_aspect: f32,
     dedup: CropDedup,
@@ -149,8 +254,22 @@ impl DictionaryBuilder {
     /// A builder for a `width` × `height` source with the HUD at
     /// `geometry`, with the default [`Whitelist`].
     pub fn new(geometry: &HudGeometry, width: u32, height: u32) -> Self {
+        Self::with_zones(protected_zones(geometry, width, height), geometry)
+    }
+
+    /// A builder that also reads the name zones of the screen surfaces of
+    /// `regions` ([`screen_zones`]), as the verification needs.
+    pub fn verifying(geometry: &HudGeometry, width: u32, height: u32, regions: RegionSet) -> Self {
+        let mut zones = protected_zones(geometry, width, height);
+        zones.extend(screen_zones(geometry, width, height, regions));
+        Self::with_zones(zones, geometry)
+    }
+
+    fn with_zones(zones: Vec<ProtectedZone>, geometry: &HudGeometry) -> Self {
         Self {
-            zones: protected_zones(geometry, width, height),
+            zones,
+            last: BTreeMap::new(),
+            slots: NameSlots::new(geometry),
             pixel_aspect: geometry.sy / geometry.sx,
             dedup: CropDedup::new(),
             whitelist: Whitelist::hud_default(),
@@ -182,7 +301,8 @@ impl DictionaryBuilder {
 
     /// Reads one crop of a protected zone (the pixels of [`ProtectedZone::rect`]
     /// of a source frame) and adds the names found, unless the crop did not
-    /// change since the zone was last read.
+    /// change since the zone was last read. Returns the zone's text lines
+    /// in source pixels (for an unchanged crop, those of the last read).
     ///
     /// # Errors
     ///
@@ -193,43 +313,75 @@ impl DictionaryBuilder {
         ocr: &mut OcrEngine,
         zone: ZoneId,
         crop: RgbView<'_>,
-    ) -> Result<(), OcrError> {
-        let kind = self
+    ) -> Result<Arc<[SourceLine]>, OcrError> {
+        let (kind, rect) = self
             .zones
             .iter()
             .find(|z| z.id == zone)
-            .map(|z| z.kind)
+            .map(|z| (z.kind, z.rect))
             .ok_or_else(|| OcrError::InvalidInput(format!("{zone} is not a protected zone")))?;
         self.stats.zone_crops += 1;
-        if !self.dedup.should_ocr(zone, crop) {
-            return Ok(());
+        if !self.dedup.should_ocr(zone, crop)
+            && let Some(lines) = self.last.get(&zone)
+        {
+            return Ok(Arc::clone(lines));
         }
         let started = Instant::now();
         let reads = ocr.read(zone, crop.with_pixel_aspect(self.pixel_aspect))?;
         self.stats.ocr_seconds += started.elapsed().as_secs_f64();
         self.stats.zone_crops_read += 1;
         self.stats.lines += reads.len() as u64;
+        let mut lines = Vec::with_capacity(reads.len());
+        let hud = matches!(kind, ZoneKind::FeedAndBanner | ZoneKind::LeftPanel);
         for read in &reads {
-            self.stats.name_reads += add_names(&mut self.dictionary, &self.whitelist, kind, read);
+            let line = source_line(kind, (rect.x0, rect.y0), read, &self.whitelist);
+            // Only names in a HUD name slot enter the dictionary; the rest
+            // is matched against it.
+            if hud {
+                for part in &line.parts {
+                    if self.slots.region_of(part.rect).is_some() {
+                        self.stats.name_reads +=
+                            u64::from(self.dictionary.insert(&part.folded, line.conf));
+                    }
+                }
+            }
+            lines.push(line);
         }
-        Ok(())
+        let lines: Arc<[SourceLine]> = lines.into();
+        self.last.insert(zone, Arc::clone(&lines));
+        Ok(lines)
     }
 
     /// Reads every protected zone of a whole source frame
-    /// ([`Self::push_zone`] for each).
+    /// ([`Self::push_zone`] for each); returns the lines of every zone.
     ///
     /// # Errors
     ///
     /// [`OcrError`] when OCR fails.
-    pub fn push_frame(&mut self, ocr: &mut OcrEngine, frame: RgbView<'_>) -> Result<(), OcrError> {
-        self.stats.frames += 1;
+    pub fn push_frame(
+        &mut self,
+        ocr: &mut OcrEngine,
+        frame: RgbView<'_>,
+    ) -> Result<Vec<Arc<[SourceLine]>>, OcrError> {
+        self.count_frame();
         let zones: Vec<(ZoneId, RectI)> = self.zones.iter().map(|z| (z.id, z.rect)).collect();
+        let mut lines = Vec::with_capacity(zones.len());
         for (zone, rect) in zones {
             if let Some(crop) = frame.crop(rect) {
-                self.push_zone(ocr, zone, crop)?;
+                lines.push(self.push_zone(ocr, zone, crop)?);
             }
         }
-        Ok(())
+        Ok(lines)
+    }
+
+    /// Counts a frame whose zones are pushed one by one.
+    pub(crate) fn count_frame(&mut self) {
+        self.stats.frames += 1;
+    }
+
+    /// The words that are never names.
+    pub fn whitelist(&self) -> &Whitelist {
+        &self.whitelist
     }
 
     /// The dictionary so far.
@@ -248,21 +400,47 @@ impl DictionaryBuilder {
     }
 }
 
-/// Adds the name parts of one recognised line; returns how many reads were
-/// added.
-fn add_names(
-    dict: &mut NameDictionary,
-    whitelist: &Whitelist,
+/// The [`SourceLine`] of `read`, a read of a crop of zone `kind` whose
+/// top-left pixel is `origin` in the source frame.
+fn source_line(
     kind: ZoneKind,
+    origin: (i32, i32),
     read: &OcrRead,
-) -> u64 {
-    name_candidates(kind, &read.rec.text, whitelist)
-        .iter()
-        .map(|name| u64::from(dict.insert(name, read.rec.conf)))
-        .sum()
+    whitelist: &Whitelist,
+) -> SourceLine {
+    let rect = RectI {
+        x0: read.rect.x0 + origin.0,
+        y0: read.rect.y0 + origin.1,
+        x1: read.rect.x1 + origin.0,
+        y1: read.rect.y1 + origin.1,
+    };
+    let width = rect.width() as f32;
+    let pad = rect.height() as f32 * 0.25;
+    let parts = name_parts(kind, &read.rec.text, whitelist)
+        .into_iter()
+        .filter_map(|(start, end)| {
+            let (fx0, fx1) = read.rec.extent(start, end).unwrap_or((0.0, 1.0));
+            let x0 = (rect.x0 as f32 + fx0 * width - pad).floor() as i32;
+            let x1 = (rect.x0 as f32 + fx1 * width + pad).ceil() as i32;
+            let part = RectI::new(x0.max(rect.x0), rect.y0, x1.min(rect.x1), rect.y1).ok()?;
+            Some(NamePart {
+                rect: part,
+                folded: fold(&read.rec.text[start..end]),
+                conf: read.rec.conf_of(start, end),
+            })
+        })
+        .collect();
+    let text = read.rec.text.trim();
+    SourceLine {
+        zone: kind,
+        rect,
+        conf: read.rec.conf,
+        chat_shaped: text.contains(':') || strip_prefixes(text).1,
+        parts,
+    }
 }
 
-/// The parts of a recognised line that can be player names.
+/// The byte ranges of a recognised line that can be player names.
 ///
 /// - Left panel, chat line `(Channel) Name (Role): message`: the sender.
 /// - Left panel, system line `(System) Name phrase`: the words before the
@@ -271,8 +449,13 @@ fn add_names(
 /// - Anything that consists only of whitelisted words: nothing.
 /// - A line longer than a name (16 folded characters) with spaces, for
 ///   example a killer and a victim merged into one box: each word that is
-///   not whitelisted and has at least three characters.
-fn name_candidates(kind: ZoneKind, text: &str, whitelist: &Whitelist) -> Vec<String> {
+///   not whitelisted and has at least three characters; nothing in the
+///   left panel, where such a line is a chat message.
+pub(crate) fn name_parts(kind: ZoneKind, text: &str, whitelist: &Whitelist) -> Vec<(usize, usize)> {
+    let range = |part: &str| {
+        let start = part.as_ptr() as usize - text.as_ptr() as usize;
+        (start, start + part.len())
+    };
     let mut line = text.trim();
     if kind == ZoneKind::LeftPanel {
         let (rest, had_prefix) = strip_prefixes(line);
@@ -285,18 +468,23 @@ fn name_candidates(kind: ZoneKind, text: &str, whitelist: &Whitelist) -> Vec<Str
             return Vec::new();
         }
     }
-    if line.is_empty() || whitelist.covers(line) {
+    if line.is_empty() || whitelist.covers(line) || whitelist.contains(&fold(line)) {
         return Vec::new();
     }
     if fold(line).chars().count() <= NameDictionary::MAX_LEN || !line.contains(' ') {
-        return vec![line.to_owned()];
+        return vec![range(line)];
+    }
+    // A left-panel line longer than a name is a message the colon of its
+    // sender was not read in; its words are no names.
+    if kind == ZoneKind::LeftPanel {
+        return Vec::new();
     }
     line.split_whitespace()
         .filter(|w| {
             let folded = fold(w);
             folded.chars().count() >= 3 && !whitelist.contains(&folded)
         })
-        .map(str::to_owned)
+        .map(range)
         .collect()
 }
 
@@ -339,21 +527,52 @@ fn is_location_line(line: &str, whitelist: &Whitelist) -> bool {
 }
 
 /// Removes leading `(...)` and `[...]` groups (chat channel prefixes);
-/// returns the rest and whether a group was removed.
+/// returns the rest and whether a group was removed. OCR does not always
+/// read the brackets: a group without its closing bracket ends at the
+/// first space, and a first word that is a channel with its opening
+/// bracket read as a letter (`GALL)`, `CTeam`) or dropped (`Team)`) is a
+/// group too.
 fn strip_prefixes(mut line: &str) -> (&str, bool) {
     let mut removed = false;
     loop {
-        let close = match line.chars().next() {
-            Some('(') => ')',
-            Some('[') => ']',
+        let first = line.split_whitespace().next().unwrap_or_default();
+        let end = match line.chars().next() {
+            Some(open @ ('(' | '[')) => {
+                let close = if open == '(' { ')' } else { ']' };
+                line.find(close)
+                    .filter(|&end| end < first.len())
+                    .map_or(first.len(), |end| end + 1)
+            }
+            Some(_) if !removed && is_misread_channel(first) => first.len(),
             _ => return (line, removed),
         };
-        let Some(end) = line.find(close) else {
-            return (line, removed);
-        };
-        line = line[end + 1..].trim_start();
+        line = line[end..].trim_start();
         removed = true;
     }
+}
+
+/// Whether `word`, the first word of a chat line, is a channel prefix
+/// whose opening bracket OCR read as a letter or dropped.
+fn is_misread_channel(word: &str) -> bool {
+    /// Chat channels of the supported client languages.
+    const CHANNELS: [&str; 10] = [
+        "all",
+        "team",
+        "party",
+        "system",
+        "broadcast",
+        "alle",
+        "todos",
+        "equipo",
+        "sistema",
+        "grupo",
+    ];
+    let folded = fold(word);
+    let closed = word.ends_with([')', ']']);
+    let after_first = folded.char_indices().nth(1).map(|(i, _)| &folded[i..]);
+    CHANNELS
+        .iter()
+        .any(|&c| (closed && folded == c) || after_first == Some(c))
 }
 
 /// Removes a trailing `(...)` group (the role after a broadcast sender).
@@ -371,10 +590,13 @@ mod tests {
     use blurrd_core::{HudGeometry, HudLayout, RectI};
     use blurrd_ocr::Whitelist;
 
-    use super::{DictionaryBuilder, ZoneKind, name_candidates, protected_zones};
+    use super::{DictionaryBuilder, ZoneKind, name_parts, protected_zones};
 
     fn names(kind: ZoneKind, text: &str) -> Vec<String> {
-        name_candidates(kind, text, &Whitelist::hud_default())
+        name_parts(kind, text, &Whitelist::hud_default())
+            .into_iter()
+            .map(|(start, end)| text[start..end].to_owned())
+            .collect()
     }
 
     #[test]
@@ -397,6 +619,16 @@ mod tests {
         assert_eq!(names(LeftPanel, "Inara"), ["Inara"]);
         assert_eq!(names(LeftPanel, "Harbor Light"), ["Harbor Light"]);
         assert_eq!(names(LeftPanel, ": message only"), Vec::<String>::new());
+        // Channel prefixes whose brackets OCR misread.
+        assert_eq!(names(LeftPanel, "(ALL Kestrel: gg"), ["Kestrel"]);
+        assert_eq!(names(LeftPanel, "GALL) Kestrel: gg"), ["Kestrel"]);
+        assert_eq!(names(LeftPanel, "Team) Kestrel: gg"), ["Kestrel"]);
+        assert_eq!(names(LeftPanel, "(All) Ball: hi"), ["Ball"]);
+        assert_eq!(names(LeftPanel, "(ALI"), Vec::<String>::new());
+        assert_eq!(
+            names(LeftPanel, "(Team) Rook hacks only skills"),
+            Vec::<String>::new()
+        );
         assert_eq!(names(FeedAndBanner, "TEAM ACE"), Vec::<String>::new());
         assert_eq!(names(FeedAndBanner, "CLUTCH"), Vec::<String>::new());
         assert_eq!(names(FeedAndBanner, "xX_Vortex_Xx"), ["xX_Vortex_Xx"]);

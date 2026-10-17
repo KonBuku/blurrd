@@ -59,9 +59,19 @@ impl Drop for Workdir {
 /// every 30 frames), an ACE banner, two voice speakers and three chat
 /// lines, over a noise background.
 pub fn hud_scene(layout: Layout, frames: u32, seed: u64) -> Scene {
+    hud_scene_named(layout, frames, seed).0
+}
+
+/// [`hud_scene`] and every name it shows.
+pub fn hud_scene_named(layout: Layout, frames: u32, seed: u64) -> (Scene, Vec<String>) {
     let fonts = FontSet::latin();
     let mut rng = Rng::new(seed);
-    let mut name = || synth_name(&mut rng, NameStyle::LATIN_MIX[seed as usize % 3]);
+    let mut names = Vec::new();
+    let mut name = || {
+        let name = synth_name(&mut rng, NameStyle::LATIN_MIX[seed as usize % 3]);
+        names.push(name.clone());
+        name
+    };
     let kills: Vec<Kill> = (0..5)
         .map(|i| Kill {
             killer: name(),
@@ -100,11 +110,12 @@ pub fn hud_scene(layout: Layout, frames: u32, seed: u64) -> Scene {
         })
         .collect();
     let banner = name();
-    Scene::new(layout, Background::noise(seed), Palette::DEFAULT, frames)
+    let scene = Scene::new(layout, Background::noise(seed), Palette::DEFAULT, frames)
         .with_kill_feed(&fonts, KillFeedSpec::new(kills))
         .with_banner(&fonts, BannerSpec::new("ACE", &banner, 60))
         .with_voice(&fonts, VoiceSpec { speakers })
-        .with_chat(&fonts, ChatSpec::new(Language::English, messages))
+        .with_chat(&fonts, ChatSpec::new(Language::English, messages));
+    (scene, names)
 }
 
 /// A scene of `frames` frames in `layout` without any HUD element: only

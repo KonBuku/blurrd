@@ -17,6 +17,13 @@
 //! the output of an analysis followed by a render of its project. The
 //! render reads the PTS table and opens its decoders and encoders on its
 //! own thread, so the analysis starts right away.
+//!
+//! The verification runs once the analysis has every frame, when the
+//! render has written all but the last frames. A streamed output is
+//! written under its `*_UNVERIFIED` name; when the verification comes out
+//! clean it gets its own name, and when the verification added fix boxes
+//! the project is rendered again (rare: a fix means a detector missed a
+//! name).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,16 +32,16 @@ use std::time::Duration;
 
 use blurrd_core::{
     AppError, BlurBox, BlurParams, EncoderInfo, ErrorKind, ExportSettings, JobEvent, JobId,
-    JobKind, JobSummary, MediaInfo, RegionSet, VerifyState,
+    JobKind, JobSummary, MediaInfo, Project, RegionSet, TrackSource, VerifyState,
 };
 use blurrd_video::{BoxSource, DecodePurpose, HwDecode, PtsTable, VideoError};
 use serde::Serialize;
 
-use crate::analysis::{AnalyzeReport, AnalyzeRequest, expected_frames};
+use crate::analysis::{AnalyzeReport, AnalyzeRequest, Prepared, expected_frames};
 use crate::cache::{self, ProjectDir};
 use crate::engine::Engine;
 use crate::job::{CancellationToken, Job, canceled};
-use crate::render::{RenderReport, RenderRequest, RenderTarget, transcode};
+use crate::render::{RenderReport, RenderRequest, RenderTarget, is_verified, transcode};
 
 /// How often a render waiting for boxes looks at the cancellation.
 const POLL: Duration = Duration::from_millis(20);
@@ -91,6 +98,9 @@ pub struct RunReport {
     /// video's cached project has overrides, which need the finished
     /// tracks: then the run analyses first and renders the project).
     pub streamed: bool,
+    /// Whether the streamed output was rendered again because the
+    /// verification added fix boxes.
+    pub rerendered: bool,
     /// Wall-clock time of the whole run in milliseconds.
     pub elapsed_ms: u64,
 }
@@ -224,7 +234,10 @@ impl Engine {
                 verify: Some(if report.render.verified {
                     VerifyState::Clean
                 } else {
-                    VerifyState::Unverified
+                    match report.analysis.verify.map(|v| v.state) {
+                        Some(VerifyState::LeaksRemain) => VerifyState::LeaksRemain,
+                        _ => VerifyState::Unverified,
+                    }
                 }),
                 warnings: job.warnings(),
             },
@@ -243,32 +256,15 @@ impl Engine {
             regions: req.regions,
             blur: req.blur,
             verify: req.verify,
+            coverage: blurrd_core::Coverage::Structure,
             // Thumbnails and the proxy serve the desktop app's preview; a
             // run goes straight to the output.
             previews: false,
         };
-        let prepared = self.prepare_analysis(&req.input, req.verify, true, job)?;
+        let prepared = self.prepare_analysis(&analyze, true, job)?;
         let dir = ProjectDir::new(&self.config().cache_dir, &prepared.fingerprint);
         if dir.read_project().is_some_and(|p| !p.overrides.is_empty()) {
-            let expected = expected_frames(&prepared.info);
-            job.started(JobKind::Run, expected);
-            let analysis =
-                self.run_analysis(&analyze, prepared, job, Some(expected), &mut |_, _| {})?;
-            let mut render = RenderRequest::new(
-                req.job,
-                req.input.clone(),
-                analysis.project,
-                req.output.clone(),
-            );
-            render.export = req.export.clone();
-            render.accept_unverified = req.accept_unverified;
-            let rendered = self.render_project(&render, job, None)?;
-            return Ok(RunReport {
-                analysis: analysis.report,
-                render: rendered,
-                streamed: false,
-                elapsed_ms: elapsed_ms(job),
-            });
+            return self.run_two_passes(req, &analyze, prepared, job);
         }
 
         let probe = self.start_encoder_probe(&req.export);
@@ -284,8 +280,8 @@ impl Engine {
         let target = RenderTarget {
             output: &req.output,
             export: &req.export,
-            // A fresh analysis is not verified yet (verification arrives
-            // with M17).
+            // The verification ends after the render's last frames; the
+            // output gets its own name afterwards if it comes out clean.
             verified: false,
             accept_unverified: req.accept_unverified,
             blur: &req.blur,
@@ -340,12 +336,92 @@ impl Engine {
             )
             .with_detail("the decoded timestamps differ from the container's"));
         }
+        let (render, rerendered) = self.after_verify(req, &analysis.project, rendered, job)?;
+        Ok(RunReport {
+            analysis: analysis.report,
+            render,
+            streamed: true,
+            rerendered,
+            elapsed_ms: elapsed_ms(job),
+        })
+    }
+
+    /// Analyses first and renders the finished project afterwards (a video
+    /// whose cached project has overrides, which need the finished
+    /// tracks).
+    fn run_two_passes(
+        &self,
+        req: &RunRequest,
+        analyze: &AnalyzeRequest,
+        prepared: Prepared,
+        job: &Job<'_>,
+    ) -> Result<RunReport, AppError> {
+        let expected = expected_frames(&prepared.info);
+        job.started(JobKind::Run, expected);
+        let analysis = self.run_analysis(analyze, prepared, job, Some(expected), &mut |_, _| {})?;
+        let mut render = RenderRequest::new(
+            req.job,
+            req.input.clone(),
+            analysis.project,
+            req.output.clone(),
+        );
+        render.export = req.export.clone();
+        render.accept_unverified = req.accept_unverified;
+        let rendered = self.render_project(&render, job, None)?;
         Ok(RunReport {
             analysis: analysis.report,
             render: rendered,
-            streamed: true,
+            streamed: false,
+            rerendered: false,
             elapsed_ms: elapsed_ms(job),
         })
+    }
+
+    /// Settles a streamed output with the verified `project`: rendered
+    /// again when the verification added fix boxes, renamed to the
+    /// requested name when it came out clean, left `*_UNVERIFIED`
+    /// otherwise. Returns the final render and whether it was rendered
+    /// again.
+    fn after_verify(
+        &self,
+        req: &RunRequest,
+        project: &Project,
+        rendered: RenderReport,
+        job: &Job<'_>,
+    ) -> Result<(RenderReport, bool), AppError> {
+        let fixed = project
+            .tracks
+            .iter()
+            .any(|t| t.source == TrackSource::OcrFix);
+        if fixed {
+            let _ = std::fs::remove_file(&rendered.output);
+            let mut render = RenderRequest::new(
+                req.job,
+                req.input.clone(),
+                project.clone(),
+                req.output.clone(),
+            );
+            render.export = req.export.clone();
+            render.accept_unverified = req.accept_unverified;
+            return Ok((self.render_project(&render, job, None)?, true));
+        }
+        let verified = is_verified(project);
+        let mut output = rendered.output.clone();
+        if verified && output != req.output {
+            std::fs::rename(&output, &req.output).map_err(|e| {
+                cache::io_error(&e, "The verified output could not be renamed.", &req.output)
+            })?;
+            output.clone_from(&req.output);
+        }
+        Ok((
+            RenderReport {
+                output,
+                verified,
+                accepted_unverified: !verified && rendered.accepted_unverified,
+                ..rendered
+            },
+            false,
+        ))
     }
 
     /// The render side of a streaming run. It reads the PTS table from
