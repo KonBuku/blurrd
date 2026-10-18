@@ -13,6 +13,10 @@ export default defineConfig({
   // Encodes the synthetic fixture videos of the preview tests.
   globalSetup: "./e2e/global-setup.ts",
   forbidOnly: ci,
+  // Frame-rate and main-thread budgets (tagged @perf) are measured on a
+  // quiet developer machine; shared CI runners are too slow and noisy for
+  // them. Set BLURRD_E2E_PERF=1 to run them anyway.
+  ...(ci && !process.env.BLURRD_E2E_PERF ? { grepInvert: /@perf/ } : {}),
   retries: ci ? 1 : 0,
   reporter: ci ? [["github"], ["html", { open: "never" }]] : "list",
   expect: {

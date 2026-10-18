@@ -229,6 +229,10 @@ pnpm --filter @blurrd/desktop exec playwright install chromium   # once
 pnpm --filter @blurrd/desktop e2e                                # starts `pnpm dev:mock` itself
 ```
 
+Tests tagged `@perf` measure frame rates and main-thread budgets. They run
+locally (on a quiet machine) and are skipped in CI, where shared runners
+are too slow and noisy; `BLURRD_E2E_PERF=1` runs them there too.
+
 `/?gallery` on the mock server shows the component gallery: every token
 and component in one page. `e2e/gallery.spec.ts` checks that every control
 in it shows a visible focus ring, and compares light and dark screenshots

@@ -249,7 +249,9 @@ test.describe("processing", () => {
     expect(updates).toBeGreaterThan(10);
   });
 
-  test("handles progress events with little main-thread time (measured)", async ({ page }) => {
+  test("handles progress events with little main-thread time (measured) @perf", async ({
+    page,
+  }) => {
     // The engine runs outside the webview; what the UI adds is the time
     // its main thread spends on job events (20 a second, plan M22): script
     // for the stores and React, style and layout for the changed text.

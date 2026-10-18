@@ -168,7 +168,7 @@ test.describe("queue", () => {
     await openApp(page);
   });
 
-  test(`keeps ${MANY} files virtualized and scrolls at 60 fps`, async ({ page }) => {
+  test(`keeps ${MANY} files virtualized and scrolls at 60 fps @perf`, async ({ page }) => {
     await dropFolder(page, MANY);
     await expect(page.getByLabel(`${MANY} recordings`)).toBeVisible();
     const rendered = await options(page).count();

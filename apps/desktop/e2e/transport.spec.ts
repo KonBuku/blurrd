@@ -234,7 +234,7 @@ test.describe("transport", () => {
     await expect(preview.getByText("Space", { exact: true })).toBeVisible();
   });
 
-  test("plays at 60 fps without long tasks", async ({ page }) => {
+  test("plays at 60 fps without long tasks @perf", async ({ page }) => {
     const result = await page.evaluate(async () => {
       const video = document.querySelector("video");
       const canvas = document.querySelector('[data-testid="preview-canvas"]');
