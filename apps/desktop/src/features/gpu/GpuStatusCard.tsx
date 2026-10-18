@@ -33,6 +33,9 @@ function Dot({ health }: { readonly health: GpuHealth }) {
 
 const PROBING = "Probing GPU…";
 
+/** U+00A0: keeps the words of one capability on one line. */
+const NO_BREAK_SPACE = String.fromCodePoint(0xa0);
+
 export interface GpuStatusCardProps {
   /** `compact` for the queue footer, `full` for the empty state. */
   readonly variant: "compact" | "full";
@@ -55,8 +58,13 @@ export function GpuStatusCard({ variant, className }: GpuStatusCardProps) {
 }
 
 function CompactCard({ state, className }: { state: CardState; className?: string | undefined }) {
+  // Lines break only between the parts: spaces inside a part do not break.
   const details =
-    state.kind === "ready" ? [state.summary.title, ...state.summary.chips].join(" · ") : "";
+    state.kind === "ready"
+      ? [state.summary.title, ...state.summary.chips]
+          .map((part) => part.replaceAll(" ", NO_BREAK_SPACE))
+          .join(" · ")
+      : "";
   return (
     // Not a landmark: the empty state's card is the "GPU status" region.
     <div
@@ -75,11 +83,18 @@ function CompactCard({ state, className }: { state: CardState; className?: strin
       )}
       {state.kind === "ready" && (
         <>
-          <p className="flex min-w-0 items-center gap-2 text-ui-sm font-medium">
-            <Dot health={state.summary.health} />
-            <span className="truncate">{state.summary.device}</span>
+          {/* Long names and chip lists wrap (at the separators) instead of
+              running out of the narrow sidebar or hiding behind an ellipsis. */}
+          <p className="flex min-w-0 items-start gap-2 text-ui-sm font-medium">
+            <span className="flex h-[1lh] shrink-0 items-center">
+              <Dot health={state.summary.health} />
+            </span>
+            <span className="min-w-0 [overflow-wrap:anywhere]">{state.summary.device}</span>
           </p>
-          <p className="truncate pl-4 text-ui-xs text-foreground-subtle" title={details}>
+          <p
+            data-testid="gpu-details"
+            className="min-w-0 pl-4 text-ui-xs text-foreground-subtle [overflow-wrap:anywhere]"
+          >
             {details}
           </p>
         </>
@@ -115,10 +130,13 @@ function FullCard({ state, className }: { state: CardState; className?: string |
         )}
         {state.kind === "ready" && (
           <>
-            <p className="text-ui-sm">
+            <p className="text-ui-sm [overflow-wrap:anywhere]">
               {state.summary.device}
               {state.summary.vram && (
-                <span className="text-foreground-subtle"> · {state.summary.vram}</span>
+                <span className="whitespace-nowrap text-foreground-subtle">
+                  {" · "}
+                  {state.summary.vram}
+                </span>
               )}
             </p>
             {state.summary.chips.length > 0 && (
