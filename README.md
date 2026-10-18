@@ -10,7 +10,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-555"></a>
   <img alt="Platform: Windows 11 x64" src="https://img.shields.io/badge/platform-Windows%2011%20x64-555">
-  <img alt="Status: v0.1.0 in preparation" src="https://img.shields.io/badge/status-v0.1.0%20in%20preparation-555">
+  <a href="https://github.com/KonBuku/blurrd/releases/latest"><img alt="Release: v0.1.0" src="https://img.shields.io/badge/release-v0.1.0-555"></a>
 </p>
 
 <p align="center">
@@ -22,10 +22,6 @@ player names in a VALORANT recording, covers them with tight, soft-edged
 blur boxes that follow every animation, checks the result with OCR and
 exports a video with the same resolution, frame rate, timestamps and audio
 as the source.
-
-> **Status:** the first release, v0.1.0, is being prepared and has not
-> been published yet. Until it is, build blurrd from source (see
-> [Building from source](#building-from-source)).
 
 ## Features
 
