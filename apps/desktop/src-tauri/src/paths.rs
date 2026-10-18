@@ -111,9 +111,14 @@ impl UserPaths {
     }
 
     /// Lets the frontend use `path`, a file the backend chose (a restored
-    /// queue entry, a preview proxy).
+    /// queue entry, a preview proxy). The file is added in its canonical
+    /// form, the form the commands check (`8.3` names, links and letter
+    /// case resolved); a path that cannot be resolved is added as it is.
     pub(crate) fn add_file(&self, path: &Path) {
-        self.scope.add_file(path);
+        match absolute(path).and_then(|path| canonical(&path)) {
+            Ok(file) => self.scope.add_file(&file),
+            Err(_) => self.scope.add_file(path),
+        }
     }
 
     /// Lets the commands use the folder at `path` again, a folder the user
@@ -508,5 +513,26 @@ pub(crate) mod tests {
         assert!(paths.target(&dir.join("null.json")).is_ok());
         assert!(paths.target(&dir.join("COM10.json")).is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn files_added_by_the_backend_pass_the_command_check() {
+        // A file the backend adds under another spelling (an `8.3` temp
+        // folder, other letter case) is added in the form the commands
+        // check.
+        let dir = std::env::temp_dir().join(format!("blurrd-paths-add-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("proxy.mp4");
+        std::fs::write(&file, b"proxy").unwrap();
+        let spelled = if cfg!(windows) {
+            PathBuf::from(file.to_string_lossy().to_uppercase())
+        } else {
+            file.clone()
+        };
+        let paths = UserPaths::new(Box::new(TestScope::default()));
+        paths.add_file(&spelled);
+        assert!(paths.existing(&file).is_ok());
+        assert!(paths.existing(&spelled).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
