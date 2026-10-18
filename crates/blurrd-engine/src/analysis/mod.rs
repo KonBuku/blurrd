@@ -52,6 +52,10 @@ pub struct AnalyzeRequest {
     pub input: PathBuf,
     /// The regions to detect.
     pub regions: RegionSet,
+    /// The box geometry. [`Mode::Safe`] gives every name its whole name
+    /// slot; the analysis also switches to it when the HUD calibration is
+    /// unsure or an HDR video's brightness cannot be measured.
+    pub mode: Mode,
     /// Blur parameters stored in the project.
     pub blur: BlurParams,
     /// Whether to verify: reads the protected zones with OCR (pass 0),
@@ -73,6 +77,7 @@ impl AnalyzeRequest {
             job,
             input,
             regions: RegionSet::all(),
+            mode: Mode::Tight,
             blur: BlurParams::default(),
             verify: true,
             coverage: Coverage::Structure,
@@ -204,7 +209,7 @@ impl Engine {
         let info = info?;
         let calibration = calibrate::calibrate(input, &info, colour, samples?, job)?;
         let geometry = calibration.geometry;
-        let mut mode = Mode::Tight;
+        let mut mode = req.mode;
         if let Some(doubt) = calibration.doubt {
             mode = Mode::Safe;
             job.warning(

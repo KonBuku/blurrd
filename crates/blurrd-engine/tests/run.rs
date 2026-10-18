@@ -66,6 +66,21 @@ fn run_request(clip: &Path, output: PathBuf) -> RunRequest {
 }
 
 #[test]
+fn a_run_analyses_with_the_requested_box_fit() {
+    let work = Workdir::new("run-safe");
+    let scene = synthetic::hud_scene(Layout::reference(), 60, 31);
+    let clip = work.path("clip.mkv");
+    synthetic::write_clip(&clip, &scene);
+    let mut req = run_request(&clip, work.path("run.mkv"));
+    req.mode = blurrd_core::Mode::Safe;
+    let report = engine(work.path("cache"))
+        .run(&req, &sink(), &CancellationToken::new())
+        .unwrap();
+    let saved = cache::read_project(&report.analysis.project_file).unwrap();
+    assert_eq!(saved.detector.mode, blurrd_core::Mode::Safe);
+}
+
+#[test]
 fn a_streamed_run_equals_analysis_then_render() {
     let work = Workdir::new("run-identical");
     let scene = synthetic::hud_scene(Layout::reference(), 240, 29);

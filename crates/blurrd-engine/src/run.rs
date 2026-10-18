@@ -34,8 +34,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use blurrd_core::{
-    AppError, BlurBox, BlurParams, EncoderInfo, ErrorKind, ExportSettings, FrameBoxTable, JobEvent,
-    JobId, JobKind, JobSummary, MediaInfo, Project, RegionSet, TrackSource, VerifyState,
+    AppError, BlurBox, BlurParams, Coverage, EncoderInfo, ErrorKind, ExportSettings, FrameBoxTable,
+    JobEvent, JobId, JobKind, JobSummary, MediaInfo, Mode, Project, RegionSet, TrackSource,
+    VerifyState,
 };
 use blurrd_video::{BoxSource, DecodePurpose, HwDecode, PtsTable, VideoError};
 use serde::Serialize;
@@ -61,6 +62,8 @@ pub struct RunRequest {
     pub output: PathBuf,
     /// The regions to detect and blur.
     pub regions: RegionSet,
+    /// The box geometry (see [`AnalyzeRequest::mode`]).
+    pub mode: Mode,
     /// Blur parameters.
     pub blur: BlurParams,
     /// Codec, encoder, quality, audio and container settings.
@@ -70,6 +73,8 @@ pub struct RunRequest {
     /// Whether to verify (pass 0 of the OCR verification when OCR is
     /// installed).
     pub verify: bool,
+    /// Which frames the verification reads.
+    pub coverage: Coverage,
 }
 
 impl RunRequest {
@@ -81,10 +86,12 @@ impl RunRequest {
             input,
             output,
             regions: RegionSet::all(),
+            mode: Mode::Tight,
             blur: BlurParams::default(),
             export: ExportSettings::default(),
             accept_unverified: false,
             verify: true,
+            coverage: Coverage::Structure,
         }
     }
 }
@@ -257,9 +264,10 @@ impl Engine {
             job: req.job,
             input: req.input.clone(),
             regions: req.regions,
+            mode: req.mode,
             blur: req.blur,
             verify: req.verify,
-            coverage: blurrd_core::Coverage::Structure,
+            coverage: req.coverage,
             // Thumbnails and the proxy serve the desktop app's preview; a
             // run goes straight to the output.
             previews: false,

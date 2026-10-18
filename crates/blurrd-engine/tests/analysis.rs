@@ -276,6 +276,38 @@ fn analysis_without_hud_structure_is_safe_and_warned() {
 }
 
 #[test]
+fn analysis_draws_safe_boxes_when_asked() {
+    // The box fit of the request reaches the detectors: Safe covers every
+    // name with its whole slot, so the boxes cover more than Tight ones.
+    let work = Workdir::new("analysis-safe");
+    let scene = synthetic::hud_scene(Layout::reference(), 120, 11);
+    let clip = work.path("clip.mkv");
+    synthetic::write_clip(&clip, &scene);
+    let regions = RegionSet::all();
+    let area = |mode: Mode| {
+        let mut req = request(clip.clone(), regions);
+        req.mode = mode;
+        // A fresh cache per mode, so neither analysis sees the other.
+        let analysis = engine(&Workdir::new(&format!("analysis-safe-{mode:?}")))
+            .analyze(&req, &Events::default(), &CancellationToken::new())
+            .unwrap();
+        assert_eq!(analysis.project.detector.mode, mode);
+        let summary = synthetic::evaluate(&analysis.project, &scene, regions);
+        assert_eq!(summary.leaked_item_frames, 0, "{mode:?}: {summary:?}");
+        let table = analysis.project.plan().frame_table(&regions);
+        (0..table.frame_count())
+            .flat_map(|f| table.boxes(f).iter().map(|b| b.rect.area()))
+            .sum::<u64>()
+    };
+    let (tight, safe) = (area(Mode::Tight), area(Mode::Safe));
+    assert!(tight > 0, "no boxes");
+    assert!(
+        safe > tight,
+        "Safe {safe} px is not larger than Tight {tight} px"
+    );
+}
+
+#[test]
 fn analysis_runs_only_the_requested_regions_and_keeps_overrides() {
     let work = Workdir::new("analysis-regions");
     let scene = synthetic::hud_scene(Layout::reference(), 120, 7);
