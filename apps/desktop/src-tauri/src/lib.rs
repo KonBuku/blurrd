@@ -148,11 +148,39 @@ pub fn run() -> Result<(), tauri::Error> {
 fn app_state(app: &AppHandle) -> Result<AppState, Box<dyn std::error::Error>> {
     let config_dir = app.path().app_config_dir()?;
     let paths = UserPaths::new(Box::new(app.asset_protocol_scope()));
-    let origin = app
-        .get_webview_window(MAIN_WINDOW)
-        .and_then(|window| window.url().ok())
-        .map_or_else(|| "null".to_owned(), |url| window_origin(&url));
+    let origin = page_origin(app);
+    tauri_plugin_log::log::info!("page origin {origin}");
     Ok(AppState::new(&config_dir, paths, &origin)?)
+}
+
+/// The origin the main window's page will have, from the configuration:
+/// the setup hook runs before the webview has navigated, so the window's
+/// live URL is still `about:blank` there.
+fn page_origin(app: &AppHandle) -> String {
+    let config = app.config();
+    let https = config
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN_WINDOW)
+        .is_some_and(|window| window.use_https_scheme);
+    let dev_url = if tauri::is_dev() {
+        config.build.dev_url.as_ref()
+    } else {
+        None
+    };
+    configured_origin(dev_url, https)
+}
+
+/// The page origin for a development server at `dev_url`, or for the
+/// bundled frontend on the app scheme (served over `https` when `https`).
+fn configured_origin(dev_url: Option<&tauri::Url>, https: bool) -> String {
+    match dev_url {
+        Some(url) => window_origin(url),
+        None if cfg!(windows) && https => "https://tauri.localhost".to_owned(),
+        None if cfg!(windows) => "http://tauri.localhost".to_owned(),
+        None => "tauri://localhost".to_owned(),
+    }
 }
 
 /// The origin of a page at `url` as the webview reports it, the value
@@ -254,7 +282,7 @@ fn file_arguments(argv: &[String], cwd: &Path) -> Vec<String> {
 mod tests {
     use std::path::Path;
 
-    use super::{file_arguments, window_origin};
+    use super::{configured_origin, file_arguments, window_origin};
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
@@ -290,6 +318,21 @@ mod tests {
             "http://localhost:1420"
         );
         assert_eq!(origin("data:text/html,x"), "null");
+    }
+
+    #[test]
+    fn configured_origins_are_the_page_origins() {
+        let dev = tauri::Url::parse("http://localhost:1420").unwrap();
+        assert_eq!(
+            configured_origin(Some(&dev), false),
+            "http://localhost:1420"
+        );
+        if cfg!(windows) {
+            assert_eq!(configured_origin(None, false), "http://tauri.localhost");
+            assert_eq!(configured_origin(None, true), "https://tauri.localhost");
+        } else {
+            assert_eq!(configured_origin(None, false), "tauri://localhost");
+        }
     }
 
     #[test]
