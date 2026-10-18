@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installMockBackend, type MockBackend } from "@/ipc/mock";
 import { fakeMedia } from "@/ipc/mock/media";
 import { DEFAULT_DEFAULTS } from "@/lib/app-defaults";
-import { DEFAULT_JOB_SETTINGS } from "@/lib/job-settings";
 import { pathKey } from "@/lib/media";
 import { settingsOf, useJobSettingsStore } from "@/store/job-settings";
 import { useQueueStore } from "@/store/queue";
@@ -158,9 +157,6 @@ describe("settings pages", () => {
     backend = installMockBackend();
     await useSettingsStore.getState().load();
     expect(useJobSettingsStore.getState().defaults.values.verify.enabled).toBe(false);
-    expect(useJobSettingsStore.getState().defaults.values.detector).toEqual(
-      DEFAULT_JOB_SETTINGS.detector,
-    );
 
     renderPage(<VerificationSettings />);
     expect(

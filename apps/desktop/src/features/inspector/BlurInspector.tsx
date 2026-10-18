@@ -34,9 +34,7 @@ export function BlurInspector() {
       <Disclosure label="Advanced detection">
         <DetectionSection
           mode={settings.regions.mode}
-          detector={settings.detector}
           onModeChange={(mode) => update("regions", (regions) => ({ ...regions, mode }))}
-          onDetectorChange={(change) => update("detector", change)}
         />
         {lead && project && (
           <div className="flex flex-col gap-1 px-1">

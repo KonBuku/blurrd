@@ -38,10 +38,8 @@ const SCREENS = ALL_REGIONS.filter((region) => REGIONS[region].group === "screen
 
 /**
  * Settings › Detection (plan 6.3 `defaults.regions` and `defaults.blur`):
- * which regions new files blur and how the blur looks. Only what the
- * analysis and the export read: the regions and the blur. Box fit, kept
- * names, chat options and the detector's sensitivity are not read by the
- * engine yet, so they are not offered here.
+ * which regions new files blur and how the blur looks. The box fit of
+ * new files follows the preset (or the inspector per file).
  */
 export function DetectionSettings() {
   const regions = useJobSettingsStore((state) => state.defaults.values.regions);

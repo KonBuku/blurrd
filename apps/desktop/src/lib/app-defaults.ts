@@ -23,10 +23,10 @@ export const DEFAULT_PROCESSING: Processing = {
 /** `Privacy::default()`. */
 export const DEFAULT_PRIVACY: Privacy = { log_level: "Info" };
 
-/** `Defaults::default()`: the *Default* preset without detector options. */
+/** `Defaults::default()`: the values of the *Default* preset. */
 export const DEFAULT_DEFAULTS: Defaults = defaultsOf(DEFAULT_JOB_SETTINGS);
 
-/** The stored part of job settings (the detector options are not stored). */
+/** The stored form of job settings. */
 export function defaultsOf(values: JobSettings): Defaults {
   return {
     regions: values.regions,
@@ -36,7 +36,7 @@ export function defaultsOf(values: JobSettings): Defaults {
   };
 }
 
-/** Job settings with the stored defaults, keeping `values`' detector options. */
+/** Job settings with the stored defaults. */
 export function withDefaults(values: JobSettings, defaults: Defaults): JobSettings {
   return { ...values, ...defaults };
 }

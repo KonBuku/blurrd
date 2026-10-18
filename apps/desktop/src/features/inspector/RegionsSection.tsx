@@ -1,4 +1,4 @@
-import { Fragment, useId } from "react";
+import { useId } from "react";
 
 import type { Region } from "@/bindings/Region";
 import type { RegionSettings } from "@/bindings/RegionSettings";
@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { ALL_REGIONS, orderedRegions, type DetectedRegion } from "@/lib/job-settings";
 import { REGIONS } from "@/lib/regions";
 
-import { InspectorRow, InspectorSection, WordListInput } from "./parts";
+import { InspectorRow, InspectorSection } from "./parts";
 
 /** What each region blurs (design 8.1 REGIONS). */
 export const REGION_DESCRIPTIONS: Readonly<Record<DetectedRegion, string>> = {
@@ -35,9 +35,8 @@ export interface RegionsSectionProps {
 
 /**
  * Inspector › Blur › Regions: "All regions" and one switch per region in
- * two groups, HUD and Screens, with the kill feed's keep-my-name options
- * and the text chat options under their rows. World-space name tags are
- * out of scope (D8), which the section says.
+ * two groups, HUD and Screens. World-space name tags are out of scope
+ * (D8), which the section says.
  */
 export function RegionsSection({ regions, tracks, onChange }: RegionsSectionProps) {
   const enabled = new Set(regions.enabled);
@@ -87,17 +86,7 @@ export function RegionsSection({ regions, tracks, onChange }: RegionsSectionProp
         }
       />
       <GroupHeading>HUD</GroupHeading>
-      {HUD.map((region) => (
-        <Fragment key={region}>
-          {row(region)}
-          {region === "KillFeed" && enabled.has("KillFeed") && (
-            <KeepNames regions={regions} onChange={onChange} />
-          )}
-          {region === "TextChat" && enabled.has("TextChat") && (
-            <ChatOptions regions={regions} onChange={onChange} />
-          )}
-        </Fragment>
-      ))}
+      {HUD.map(row)}
       <GroupHeading>Screens</GroupHeading>
       {SCREENS.map(row)}
     </InspectorSection>
@@ -152,91 +141,5 @@ function RegionRow({ region, description, on, count, onToggle }: RegionRowProps)
         />
       }
     />
-  );
-}
-
-interface RegionOptionsProps {
-  readonly regions: RegionSettings;
-  readonly onChange: RegionsSectionProps["onChange"];
-}
-
-/** Kill feed: keep the own row or listed names readable (off by default, privacy first). */
-function KeepNames({ regions, onChange }: RegionOptionsProps) {
-  const ownId = useId();
-  const namesId = useId();
-  return (
-    <>
-      <InspectorRow
-        nested
-        label="Keep my own row readable"
-        labelId={ownId}
-        control={
-          <Switch
-            size="sm"
-            aria-labelledby={ownId}
-            checked={regions.keep_names.own_row}
-            onCheckedChange={(own_row) =>
-              onChange((current) => ({
-                ...current,
-                keep_names: { ...current.keep_names, own_row },
-              }))
-            }
-          />
-        }
-      />
-      <InspectorRow
-        nested
-        label={<label htmlFor={namesId}>Names to keep readable</label>}
-        description="Comma separated. A name stays readable only where every read of it matches."
-      >
-        <WordListInput
-          id={namesId}
-          words={regions.keep_names.names}
-          onChange={(names) =>
-            onChange((current) => ({ ...current, keep_names: { ...current.keep_names, names } }))
-          }
-        />
-      </InspectorRow>
-    </>
-  );
-}
-
-/** Text chat: also blur messages, and names in system lines. */
-function ChatOptions({ regions, onChange }: RegionOptionsProps) {
-  const messageId = useId();
-  const systemId = useId();
-  return (
-    <>
-      <InspectorRow
-        nested
-        label="Also blur message text"
-        labelId={messageId}
-        control={
-          <Switch
-            size="sm"
-            aria-labelledby={messageId}
-            checked={regions.chat_blur_message}
-            onCheckedChange={(chat_blur_message) =>
-              onChange((current) => ({ ...current, chat_blur_message }))
-            }
-          />
-        }
-      />
-      <InspectorRow
-        nested
-        label="Blur names in system lines"
-        labelId={systemId}
-        control={
-          <Switch
-            size="sm"
-            aria-labelledby={systemId}
-            checked={regions.chat_blur_system}
-            onCheckedChange={(chat_blur_system) =>
-              onChange((current) => ({ ...current, chat_blur_system }))
-            }
-          />
-        }
-      />
-    </>
   );
 }

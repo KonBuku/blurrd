@@ -626,8 +626,9 @@ edits unverified; `window.blurrdMock.projects.touch(path)` and
 
 The inspector (`src/features/inspector`) edits the job settings of the
 queued files (`src/store/job-settings.ts`, `src/lib/job-settings.ts`):
-regions and detector options for `start_analysis`, blur and export
-settings for `start_render`, and the verification settings. Every file
+regions and box fit for `start_analysis`, blur and export settings for
+`start_render`, and the verification settings (OCR on or off and the
+coverage). The inspector offers only what the engine reads. Every file
 has its own settings once it is changed; files without own settings, and
 files added later, use the defaults for new files. "Apply to" switches
 between the selected files (or the defaults when nothing is selected) and
@@ -637,22 +638,22 @@ regions from the shown file's settings.
 
 - **Preset row:** the preset the shown values started from, "Modified"
   when they differ, and a menu to reset, update a user preset, save as a
-  new preset, import, export and delete. Built-ins (_Default_, _Max
-  privacy_, _Kill feed only_) mirror `Preset::builtins`. Exported files
-  leave out the names kept readable unless the box is ticked.
+  new preset, import, export and delete. Built-ins (_Default_, _Max privacy_, _Kill feed
+  only_) mirror `Preset::builtins`. Preset files of older revisions load;
+  fields the engine never read (kept names, chat options, more
+  verification options) are dropped.
 - **Blur:** "All regions" and one switch per region in the HUD and
   Screens groups (world-space name tags are out of scope and say so), the
-  kill feed's keep-my-name options, the chat options, the manual boxes of
-  the shown file, the style, and the advanced detection options with
-  Re-analyze.
+  manual boxes of the shown file, the style, and the box fit (Tight or
+  Safe) with Re-analyze. An export analyses again when Safe is chosen for
+  a file analysed with Tight boxes.
 - **Export:** codec (disabled with the reason when this PC has no
   working encoder for it, read from `get_capabilities`), encoder, rate
   control, preset, 10-bit, NVENC sessions, audio, container, metadata,
   output folder, file name template and conflict policy; the output name
   and the size and time estimate come from `get_output_preview`.
-- **Verify:** OCR on or off, mode, coverage, audit, ignore words,
-  confidence and the full-frame interval, and the last result of the shown
-  file. The report dialog shows stat tiles, the positive control per
+- **Verify:** OCR on or off, the coverage (HUD activity or every
+  frame), and the last result of the shown file. The report dialog shows stat tiles, the positive control per
   region, the leaks, the items OCR could not read and the names outside
   every region. Leak crops are the backend's blurred crops; "Reveal" asks
   the backend for the clear crop of that one leak and the image is

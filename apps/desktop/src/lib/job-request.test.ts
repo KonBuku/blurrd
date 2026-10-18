@@ -1,36 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import { analysisRequest } from "./job-request";
-import { DEFAULT_JOB_SETTINGS, orderedRegions, parseWordList } from "./job-settings";
+import { analysisRequest, runFile } from "./job-request";
+import { DEFAULT_JOB_SETTINGS, orderedRegions, type JobSettings } from "./job-settings";
 
 describe("job requests", () => {
   it("carries the default settings unchanged", () => {
-    const { regions, detector, verify } = DEFAULT_JOB_SETTINGS;
+    const { regions, verify } = DEFAULT_JOB_SETTINGS;
     expect(analysisRequest("p1", DEFAULT_JOB_SETTINGS)).toEqual({
       projectId: "p1",
       regions,
-      detector,
       verify,
     });
   });
 
-  it("normalises region order and word lists", () => {
-    const request = analysisRequest("p1", {
+  it("normalises the region order and carries box fit and coverage", () => {
+    const settings: JobSettings = {
       ...DEFAULT_JOB_SETTINGS,
-      regions: {
-        ...DEFAULT_JOB_SETTINGS.regions,
-        enabled: ["MatchEnd", "KillFeed", "MatchEnd", "Banner"],
-        keep_names: { own_row: false, names: [" Ally ", "Ally", ""] },
-      },
-      verify: { ...DEFAULT_JOB_SETTINGS.verify, ignore_words: ["ACE", "ACE", " Haven"] },
-    });
-    expect(request.regions.enabled).toEqual(["KillFeed", "Banner", "MatchEnd"]);
-    expect(request.regions.keep_names.names).toEqual(["Ally"]);
-    expect(request.verify.ignore_words).toEqual(["ACE", "Haven"]);
+      regions: { enabled: ["MatchEnd", "KillFeed", "MatchEnd", "Banner"], mode: "Safe" },
+      verify: { enabled: true, coverage: "EveryFrame" },
+    };
+    const request = analysisRequest("p1", settings);
+    expect(request.regions).toEqual({ enabled: ["KillFeed", "Banner", "MatchEnd"], mode: "Safe" });
+    expect(request.verify).toEqual({ enabled: true, coverage: "EveryFrame" });
+    const file = runFile("p1", settings);
+    expect(file.regions.mode).toBe("Safe");
+    expect(file.verify.coverage).toBe("EveryFrame");
   });
 
-  it("parses typed word lists and orders regions", () => {
-    expect(parseWordList("a, b;c\n a ,,")).toEqual(["a", "b", "c"]);
+  it("orders regions", () => {
     expect(orderedRegions(["Scoreboard", "VoiceChat", "Manual"])).toEqual([
       "VoiceChat",
       "Scoreboard",

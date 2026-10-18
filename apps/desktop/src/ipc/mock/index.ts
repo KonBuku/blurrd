@@ -333,7 +333,7 @@ export function installMockBackend(): MockBackend {
         };
         const frames = frameCount(path);
         return backend.jobs.start("Analyze", frames, onEvent, () => {
-          backend.projects.analyze(path, new Set(regions.enabled), verify.enabled);
+          backend.projects.analyze(path, new Set(regions.enabled), verify.enabled, regions.mode);
           const { report } = backend.projects.state(path);
           return {
             frames,
@@ -382,15 +382,24 @@ export function installMockBackend(): MockBackend {
         const { files, onEvent } = args as unknown as { files: RunFile[]; onEvent: MockChannel };
         const entries = files.map((file) => {
           const path = pathOf(file);
-          const { analyzed, unverified } = backend.projects.state(path);
-          // Like the backend: a file whose analysis is current is only rendered.
-          const current = analyzed && unverified.length === 0;
+          const { analyzed, unverified, mode } = backend.projects.state(path);
+          // Like the backend: a file whose analysis is current is only
+          // rendered; Safe boxes asked for a Tight analysis analyse again.
+          const current =
+            analyzed &&
+            unverified.length === 0 &&
+            (file.regions.mode === "Tight" || mode === "Safe");
           return {
             kind: current ? ("Render" as const) : ("Run" as const),
             totalFrames: frameCount(path),
             finish: () => {
               if (!current) {
-                backend.projects.analyze(path, new Set(file.regions.enabled), file.verify.enabled);
+                backend.projects.analyze(
+                  path,
+                  new Set(file.regions.enabled),
+                  file.verify.enabled,
+                  file.regions.mode,
+                );
               }
               return render(path, file.settings);
             },
@@ -442,12 +451,8 @@ export function installMockBackend(): MockBackend {
       case "import_preset":
         return backend.presets.import((args as { path: string }).path);
       case "export_preset": {
-        const { id, path, includeKeptNames } = args as {
-          id: string;
-          path: string;
-          includeKeptNames: boolean;
-        };
-        backend.presets.export(id, path, includeKeptNames);
+        const { id, path } = args as { id: string; path: string };
+        backend.presets.export(id, path);
         return null;
       }
       case "plugin:dialog|save":

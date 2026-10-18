@@ -117,19 +117,13 @@ impl Presets {
         Ok(added)
     }
 
-    /// Writes preset `id` to `path`, without the names kept readable unless
-    /// `include_kept_names` is set.
+    /// Writes preset `id` to `path`.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::NotFound`] for an unknown id, I/O errors of the file.
-    pub(crate) fn export(
-        &self,
-        id: &str,
-        path: &Path,
-        include_kept_names: bool,
-    ) -> Result<(), AppError> {
-        let mut preset = self
+    pub(crate) fn export(&self, id: &str, path: &Path) -> Result<(), AppError> {
+        let preset = self
             .list()?
             .into_iter()
             .find(|preset| preset.id == id)
@@ -137,9 +131,6 @@ impl Presets {
                 AppError::new(ErrorKind::NotFound, "The preset does not exist.")
                     .with_detail(id.to_owned())
             })?;
-        if !include_kept_names {
-            preset.regions.keep_names.names.clear();
-        }
         write_file(path, &PresetFile::new(vec![preset]))
     }
 
@@ -228,7 +219,7 @@ mod tests {
         preset.id = id.to_owned();
         preset.name = format!("Mine {id}");
         preset.builtin = true;
-        preset.regions.keep_names.names = vec!["SomeName".to_owned()];
+        preset.regions.mode = blurrd_core::Mode::Safe;
         preset
     }
 
@@ -256,23 +247,18 @@ mod tests {
     }
 
     #[test]
-    fn exports_leave_out_kept_names_and_imports_rename_taken_ids() {
+    fn exports_round_trip_and_imports_rename_taken_ids() {
         let dir = temp("exchange");
         let presets = Presets::new(dir.join("presets.json"));
         presets.save(user("a")).unwrap();
         let file = dir.join("a.blurrd-preset.json");
-        presets.export("a", &file, false).unwrap();
+        presets.export("a", &file).unwrap();
         let added = presets.import(&file).unwrap();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0].id, "a-2");
-        assert_eq!(added[0].regions.keep_names.names, Vec::<String>::new());
-        presets.export("a", &file, true).unwrap();
+        assert_eq!(added[0].regions.mode, blurrd_core::Mode::Safe);
         let again = presets.import(&file).unwrap();
         assert_eq!(again[0].id, "a-3");
-        assert_eq!(
-            again[0].regions.keep_names.names,
-            vec!["SomeName".to_owned()]
-        );
         std::fs::write(&file, "{}").unwrap();
         assert_eq!(
             presets.import(&file).unwrap_err().kind,

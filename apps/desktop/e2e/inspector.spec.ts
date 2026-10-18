@@ -101,19 +101,27 @@ test.describe("inspector", () => {
     expect(mean(clear)).toBeGreaterThan(40);
   });
 
-  test("re-analysis runs with the inspector's regions", async ({ page }) => {
+  test("re-analysis runs with the inspector's regions, box fit and coverage", async ({ page }) => {
     const panel = inspector(page);
+    await panel.getByRole("tab", { name: "Verify" }).click();
+    await panel.getByRole("radio", { name: "Every frame" }).click();
+    await panel.getByRole("tab", { name: "Blur" }).click();
     await panel.getByRole("switch", { name: /^Round banner/ }).click();
     await panel.getByRole("button", { name: "Advanced detection" }).click();
+    await panel.getByRole("radio", { name: "Safe" }).click();
     await panel.getByRole("button", { name: "Re-analyze" }).click();
     await expect(page.getByRole("listbox", { name: "Recordings" })).toContainText("Ready");
     // The new analysis found no banner track: the region is off.
     await expect(panel.getByRole("switch", { name: /^Round banner none found/ })).not.toBeChecked();
-    const regions = await page.evaluate(() => {
+    const args = await page.evaluate(() => {
       const call = window.blurrdMock?.calls.find((c) => c.cmd === "start_analysis");
-      return (call?.args as { regions: { enabled: string[] } } | undefined)?.regions.enabled;
+      return call?.args as
+        | { regions: { enabled: string[]; mode: string }; verify: { coverage: string } }
+        | undefined;
     });
-    expect(regions).toEqual([
+    expect(args?.regions.mode).toBe("Safe");
+    expect(args?.verify.coverage).toBe("EveryFrame");
+    expect(args?.regions.enabled).toEqual([
       "KillFeed",
       "VoiceChat",
       "TextChat",
@@ -215,7 +223,6 @@ test.describe("inspector", () => {
       await chooseTheme(page, theme);
       const panel = inspector(page);
       await panel.getByRole("tab", { name: "Verify" }).click();
-      await panel.getByRole("button", { name: "Advanced verification" }).click();
       await expect(panel.getByText("240 frames checked")).toBeVisible();
       let results = await new AxeBuilder({ page }).include('[aria-label="Inspector"]').analyze();
       expect(results.violations).toEqual([]);

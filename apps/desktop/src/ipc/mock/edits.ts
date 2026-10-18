@@ -13,6 +13,7 @@ import type { Leak } from "@/bindings/Leak";
 import type { Override } from "@/bindings/Override";
 import type { OverridesSaved } from "@/bindings/OverridesSaved";
 import type { RectI } from "@/bindings/RectI";
+import type { Mode } from "@/bindings/Mode";
 import type { Region } from "@/bindings/Region";
 import type { TrackSet } from "@/bindings/TrackSet";
 import type { VerifyReport } from "@/bindings/VerifyReport";
@@ -37,6 +38,8 @@ export interface MockProjectState {
   unverified: FrameRange[];
   /** Whether an analysis has produced the tracks. */
   analyzed: boolean;
+  /** Box fit of the last analysis (`DetectorInfo.mode`). */
+  mode: Mode;
   /** The last verification report, `null` before the first one. */
   report: VerifyReport | null;
   /** The file the last export wrote, if any. */
@@ -144,6 +147,7 @@ export class MockProjects {
         set: mockTracks(path),
         unverified: mergeRanges(mockProject(path).verify.unverified_ranges),
         analyzed: initiallyAnalyzed(path),
+        mode: "Tight",
         report: mockVerifyReport(path),
         lastOutput: null,
       };
@@ -192,10 +196,16 @@ export class MockProjects {
    * Like the engine, a re-analysis moves the revision on, while the first
    * analysis of a video keeps revision 0 (the empty project's). With
    * `verified`, the whole video counts as verified again (no unverified
-   * ranges) and the report is renewed.
+   * ranges) and the report is renewed. `mode` is the box fit it records.
    */
-  analyze(path: string, enabled: ReadonlySet<Region>, verified: boolean): void {
+  analyze(
+    path: string,
+    enabled: ReadonlySet<Region>,
+    verified: boolean,
+    mode: Mode = "Tight",
+  ): void {
     const state = this.state(path);
+    state.mode = mode;
     const tracks = mockTracks(path, true).tracks.filter((track) => enabled.has(track.region));
     const revision = state.analyzed ? state.set.revision + 1 : state.set.revision;
     state.analyzed = true;

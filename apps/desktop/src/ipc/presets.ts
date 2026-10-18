@@ -2,8 +2,7 @@
  * The preset commands (plan 9.1): the presets live in `presets.json` in
  * the app config directory (plan 6.5); the built-ins are always listed
  * first and cannot be changed or deleted. Exported files
- * (`.blurrd-preset.json`, schema `blurrd-presets/1`) leave out the names
- * kept readable unless `includeKeptNames` is set.
+ * (`.blurrd-preset.json`, schema `blurrd-presets/1`) hold one preset.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -33,6 +32,6 @@ export function importPreset(path: string): Promise<Preset[]> {
 }
 
 /** Writes one preset to a file chosen in the save dialog. */
-export function exportPreset(id: string, path: string, includeKeptNames: boolean): Promise<void> {
-  return invoke<void>("export_preset", { id, path, includeKeptNames });
+export function exportPreset(id: string, path: string): Promise<void> {
+  return invoke<void>("export_preset", { id, path });
 }

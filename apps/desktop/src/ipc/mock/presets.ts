@@ -1,13 +1,14 @@
 /**
  * Presets of the mock backend (plan 6.5): the built-ins, user presets kept
  * in session storage (they survive reloads like `presets.json` survives
- * restarts), and preset files in the fake file system. Exported files
- * leave out the names kept readable unless asked to keep them.
+ * restarts), and preset files in the fake file system. Imported presets
+ * keep only the fields of the current schema, like the backend, so files
+ * of older revisions (kept names, more verification options) still load.
  */
 import type { AppError } from "@/bindings/AppError";
 import type { Preset } from "@/bindings/Preset";
 import type { PresetFile } from "@/bindings/PresetFile";
-import { BUILTIN_PRESETS, withoutKeptNames } from "@/lib/presets";
+import { BUILTIN_PRESETS } from "@/lib/presets";
 
 /** Session storage key of the user presets. */
 const STORAGE_KEY = "blurrd.mock.presets";
@@ -60,13 +61,13 @@ export class MockPresets {
   }
 
   /** `export_preset`: writes one preset to `path`. */
-  export(id: string, path: string, includeKeptNames: boolean): void {
+  export(id: string, path: string): void {
     const preset = this.list().find((candidate) => candidate.id === id);
     if (!preset) throw failure("NotFound", "The preset does not exist.");
     const file: PresetFile = {
       schema: SCHEMA,
       version: 1,
-      presets: [includeKeptNames ? preset : withoutKeptNames(preset)],
+      presets: [preset],
     };
     this.files.set(path, JSON.stringify(file));
   }
@@ -84,7 +85,15 @@ export class MockPresets {
       let id = preset.id;
       for (let n = 2; taken.has(id); n += 1) id = `${preset.id}-${n}`;
       taken.add(id);
-      return { ...preset, id, builtin: false };
+      const { enabled, mode } = preset.regions;
+      const { enabled: verify, coverage } = preset.verify;
+      return {
+        ...preset,
+        id,
+        builtin: false,
+        regions: { enabled, mode },
+        verify: { enabled: verify, coverage },
+      };
     });
     this.store([...this.user(), ...added]);
     return added;

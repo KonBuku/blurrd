@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use blurrd_core::{
-    AppError, BlurParams, ExportSettings, FrameRange, JobEvent, JobKind, JobSummary, RegionSet,
-    VerifyState, WarningCode,
+    AppError, BlurParams, DetectorInfo, ExportSettings, FrameRange, JobEvent, JobKind, JobSummary,
+    Mode, Project, RegionSet, RegionSettings, VerifySettings, VerifyState, WarningCode,
 };
 use blurrd_engine::{
     AnalyzeRequest, Engine, ProgressSink, RenderRequest, ReverifyRequest, RunRequest, is_verified,
@@ -32,17 +32,20 @@ pub(crate) struct ExportRequest {
     pub(crate) enabled: RegionSet,
 }
 
-/// Analyses `project`: detects `regions` and verifies when `verify` is set.
+/// Analyses `project`: detects the enabled regions with the chosen box
+/// fit, and verifies with the chosen coverage when verification is on.
 pub(crate) fn analysis(
     engine: Arc<Engine>,
     project: Arc<OpenProject>,
-    regions: RegionSet,
-    verify: bool,
+    regions: RegionSettings,
+    verify: VerifySettings,
 ) -> Work {
     Box::new(move |sink| {
         let mut req = AnalyzeRequest::new(sink.job(), project.source().to_path_buf());
-        req.regions = regions;
-        req.verify = verify;
+        req.regions = regions.enabled;
+        req.mode = regions.mode;
+        req.verify = verify.enabled;
+        req.coverage = verify.coverage;
         if let Some(existing) = project.project() {
             req.blur = existing.blur;
         }
@@ -71,23 +74,39 @@ pub(crate) fn render(
     })
 }
 
+/// Whether the cached analysis `existing` can be rendered as it is for
+/// `regions`: it covers every enabled region, no edit waits for
+/// verification, and it has Safe boxes when Safe is asked for (a Tight
+/// request accepts Safe boxes, which the analysis picks itself when the
+/// HUD calibration is unsure).
+fn analysis_is_current(existing: &Project, regions: RegionSettings) -> bool {
+    existing.verify.unverified_ranges.is_empty() && detector_covers(&existing.detector, regions)
+}
+
+/// Whether an analysis made by `detector` serves `regions`: every enabled
+/// region was detected, and with Safe boxes when Safe is asked for.
+fn detector_covers(detector: &DetectorInfo, regions: RegionSettings) -> bool {
+    regions
+        .enabled
+        .iter()
+        .all(|region| detector.regions.contains(region))
+        && (regions.mode == Mode::Tight || detector.mode == Mode::Safe)
+}
+
 /// Exports `project` as one file of a run: renders it when its analysis
-/// covers the requested regions and no edit waits for verification,
-/// otherwise analyses and renders it in one streaming pass.
+/// is current for `regions` ([`analysis_is_current`]), otherwise analyses
+/// and renders it in one streaming pass.
 pub(crate) fn run(
     engine: Arc<Engine>,
     project: Arc<OpenProject>,
     request: ExportRequest,
-    regions: RegionSet,
-    verify: bool,
+    regions: RegionSettings,
+    verify: VerifySettings,
 ) -> Work {
     Box::new(move |sink| {
-        let current = project.project().is_some_and(|existing| {
-            existing.verify.unverified_ranges.is_empty()
-                && regions
-                    .iter()
-                    .all(|region| existing.detector.regions.contains(region))
-        });
+        let current = project
+            .project()
+            .is_some_and(|existing| analysis_is_current(&existing, regions));
         if current {
             return render(engine, project, request)(sink);
         }
@@ -97,10 +116,12 @@ pub(crate) fn run(
             Err(error) => return sink.failed(error),
         };
         let mut req = RunRequest::new(sink.job(), project.source().to_path_buf(), output);
-        req.regions = regions;
+        req.regions = regions.enabled;
+        req.mode = regions.mode;
         req.blur = request.blur;
         req.export = request.export;
-        req.verify = verify;
+        req.verify = verify.enabled;
+        req.coverage = verify.coverage;
         let result = engine.run(&req, sink, sink.cancel());
         project.forget_pts();
         match result {
@@ -224,8 +245,9 @@ pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use blurrd_core::{
-        BlurParams, Container, EncoderSetting, ExportSettings, JobEvent, JobId, Override, RectI,
-        Region, RegionSet,
+        BlurParams, Container, DetectorInfo, EncoderSetting, ExportSettings, JobEvent, JobId, Mode,
+        Override, RectI, Region, RegionSet, RegionSettings, Sensitivity, TemporalParams,
+        VerifySettings,
     };
     use blurrd_engine::{Engine, EngineConfig};
     use uuid::Uuid;
@@ -267,6 +289,42 @@ pub(crate) mod tests {
         let source = paths.existing(clip).unwrap();
         let project = Projects::new(work.join("cache")).open(&source).unwrap();
         (engine, project, work)
+    }
+
+    #[test]
+    fn a_cached_analysis_serves_its_regions_and_box_fit() {
+        let detector = |regions: RegionSet, mode: Mode| DetectorInfo {
+            version: "detect/test".to_owned(),
+            regions,
+            mode,
+            sensitivity: Sensitivity::default(),
+            temporal: TemporalParams::default(),
+        };
+        let kill_feed: RegionSet = [Region::KillFeed].into_iter().collect();
+        let asked = |enabled: RegionSet, mode: Mode| RegionSettings { enabled, mode };
+        let tight = detector(RegionSet::all(), Mode::Tight);
+        let safe = detector(RegionSet::all(), Mode::Safe);
+        assert!(super::detector_covers(
+            &tight,
+            asked(kill_feed, Mode::Tight)
+        ));
+        assert!(!super::detector_covers(
+            &detector(kill_feed, Mode::Tight),
+            asked(RegionSet::all(), Mode::Tight)
+        ));
+        // Safe asked: Tight boxes are analysed again; Safe ones serve both.
+        assert!(!super::detector_covers(
+            &tight,
+            asked(RegionSet::all(), Mode::Safe)
+        ));
+        assert!(super::detector_covers(
+            &safe,
+            asked(RegionSet::all(), Mode::Safe)
+        ));
+        assert!(super::detector_covers(
+            &safe,
+            asked(RegionSet::all(), Mode::Tight)
+        ));
     }
 
     /// Checks the progress of `job`: frames never go back, events are at
@@ -320,8 +378,11 @@ pub(crate) mod tests {
             analysis(
                 Arc::clone(&engine),
                 Arc::clone(&project),
-                RegionSet::all(),
-                false,
+                RegionSettings::default(),
+                VerifySettings {
+                    enabled: false,
+                    ..VerifySettings::default()
+                },
             ),
         );
         recorder.wait_end(job);
@@ -464,8 +525,8 @@ pub(crate) mod tests {
                     Arc::clone(&engine),
                     project,
                     request,
-                    RegionSet::all(),
-                    true,
+                    RegionSettings::default(),
+                    VerifySettings::default(),
                 ),
             );
             recorder.wait_end(job);
@@ -594,8 +655,8 @@ pub(crate) mod tests {
         let (end, took) = run(analysis(
             Arc::clone(&engine),
             Arc::clone(&project),
-            RegionSet::all(),
-            true,
+            RegionSettings::default(),
+            VerifySettings::default(),
         ));
         assert!(matches!(end, Some(JobEvent::Finished { .. })), "{end:?}");
         let analysed = project.analysed().unwrap();

@@ -50,12 +50,11 @@ function processingProblem(processing: Processing): string | null {
 
 /** Why defaults cannot be saved, or `null`. */
 function defaultsProblem(defaults: Defaults): string | null {
-  const { export: output, verify } = defaults;
+  const { export: output } = defaults;
   if (output.preset < 1 || output.preset > 7) return `preset ${output.preset} is outside 1..=7`;
   if (templateProblem(output.output.template) !== null) {
     return `the file name template \`${output.output.template}\` does not name a valid file`;
   }
-  if (verify.min_conf < 0 || verify.min_conf > 1) return "verification confidence is outside 0..=1";
   const folder = output.output.folder;
   if (typeof folder !== "string" && !/^[a-z]:\\|^\\\\/i.test(folder.Folder)) {
     return "Only absolute paths are accepted.";

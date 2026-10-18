@@ -52,9 +52,9 @@ pub use hud::{
     HudAnchor, HudGeometry, HudLayout, REFERENCE_HEIGHT, REFERENCE_WIDTH, RegionCalibration,
 };
 pub use ipc::{
-    CacheInfo, DetectorOptions, ExactFrame, ExactPatchInfo, ExactSettings, FramePts, HealthSpan,
-    OutputPreview, OverridesSaved, ProbeOutcome, ProjectSummary, RunFile, StartAnalysis,
-    StartRender, StoredSettings, ThumbnailStrip, TrackSet,
+    CacheInfo, ExactFrame, ExactPatchInfo, ExactSettings, FramePts, HealthSpan, OutputPreview,
+    OverridesSaved, ProbeOutcome, ProjectSummary, RunFile, StartAnalysis, StartRender,
+    StoredSettings, ThumbnailStrip, TrackSet,
 };
 pub use job::{JobEvent, JobId, JobKind, JobSummary, Stage, WarningCode};
 pub use media::{AudioStreamInfo, ColorInfo, ColorRange, Fingerprint, HdrKind, MediaInfo};
@@ -69,9 +69,9 @@ pub use project::{DetectorInfo, Project, ProjectMedia, ProjectVerify};
 pub use region::{NameKind, Region, RegionSet};
 pub use schema::{Document, SchemaError};
 pub use settings::{
-    Appearance, Audit, Coverage, Defaults, General, HwDecodeSetting, KeepNames, LogLevel, Mode,
-    Preset, PresetFile, PreviewQuality, Privacy, Processing, ReduceMotion, RegionSettings,
-    Sensitivity, Settings, TemporalParams, Theme, VerifyMode, VerifySettings,
+    Appearance, Coverage, Defaults, General, HwDecodeSetting, LogLevel, Mode, Preset, PresetFile,
+    PreviewQuality, Privacy, Processing, ReduceMotion, RegionSettings, Sensitivity, Settings,
+    TemporalParams, Theme, VerifySettings,
 };
 pub use time::{FrameRange, Rational, ReversedRangeError, ZeroDenominatorError};
 pub use verify::{

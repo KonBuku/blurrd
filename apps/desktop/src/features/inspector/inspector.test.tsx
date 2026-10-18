@@ -115,16 +115,13 @@ describe("inspector", () => {
       renderInspector();
       await screen.findByText("Manual boxes");
 
-      // Regions: one HUD region and one screen surface off, the options of
-      // the kill feed and the text chat changed.
+      // Regions: one HUD region and one screen surface off. Controls the
+      // engine does not read are not offered.
       toggle("Voice chat");
       toggle("Scoreboard");
-      toggle("Keep my own row readable");
-      const names = screen.getByRole("textbox", { name: "Names to keep readable" });
-      fireEvent.change(names, { target: { value: "Ally, Friend , Ally" } });
-      fireEvent.keyDown(names, { key: "Enter" });
-      toggle("Also blur message text");
-      toggle("Blur names in system lines");
+      for (const gone of ["Keep my own row readable", "Also blur message text"]) {
+        expect(screen.queryByRole("switch", { name: gone })).toBeNull();
+      }
 
       // Style.
       choose("Strength", "Custom");
@@ -139,23 +136,14 @@ describe("inspector", () => {
       // Advanced detection.
       fireEvent.click(screen.getByRole("button", { name: "Advanced detection" }));
       choose("Box fit", "Safe");
-      choose("Sensitivity", "High");
-      press(screen.getByRole("spinbutton", { name: "Start early" }), "ArrowUp");
-      press(screen.getByRole("spinbutton", { name: "Stay at least" }), "ArrowDown", 3);
-      press(screen.getByRole("spinbutton", { name: "Bridge gaps up to" }), "ArrowUp", 5);
+      expect(screen.queryByRole("group", { name: "Sensitivity" })).toBeNull();
+      expect(screen.queryByRole("spinbutton", { name: "Start early" })).toBeNull();
 
       const expected: JobSettings = {
         ...DEFAULT_JOB_SETTINGS,
         regions: {
           enabled: ["KillFeed", "Banner", "TextChat", "DeathRecap", "Spectating", "MatchEnd"],
           mode: "Safe",
-          keep_names: { own_row: true, names: ["Ally", "Friend"] },
-          chat_blur_message: true,
-          chat_blur_system: false,
-        },
-        detector: {
-          sensitivity: "High",
-          temporal: { pre_roll: 4, post_roll_min: 15, max_gap: 50 },
         },
         blur: {
           style: "PixelBlur",
@@ -177,7 +165,6 @@ describe("inspector", () => {
       expect(request).toEqual({
         projectId: projectId(PATH),
         regions: expected.regions,
-        detector: expected.detector,
         verify: expected.verify,
       });
       await waitFor(() =>
@@ -411,28 +398,17 @@ describe("inspector", () => {
       renderInspector();
       await screen.findByText("240 frames checked");
 
-      choose("Verification mode", "Report only");
       choose("Coverage", "Every frame");
-      choose("Audit the export", "Sampled");
-      const words = screen.getByRole("textbox", { name: "Ignore words" });
-      fireEvent.change(words, { target: { value: "ACE, CLUTCH, Haven" } });
-      fireEvent.keyDown(words, { key: "Enter" });
-      fireEvent.click(screen.getByRole("button", { name: "Advanced verification" }));
-      press(screen.getByRole("slider", { name: "Confidence threshold" }), "ArrowRight", 2);
-      press(screen.getByRole("spinbutton", { name: "Full-frame sample interval" }), "ArrowUp", 3);
       toggle("Verify with OCR");
+      // Controls the engine does not read are not offered.
+      expect(screen.queryByRole("group", { name: "Verification mode" })).toBeNull();
+      expect(screen.queryByRole("group", { name: "Audit the export" })).toBeNull();
+      expect(screen.queryByRole("textbox", { name: "Ignore words" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Advanced verification" })).toBeNull();
 
       const expected: JobSettings = {
         ...DEFAULT_JOB_SETTINGS,
-        verify: {
-          enabled: false,
-          mode: "ReportOnly",
-          coverage: "EveryFrame",
-          full_frame_sample_ms: 800,
-          min_conf: 0.6,
-          audit_output: "Sampled",
-          ignore_words: ["ACE", "CLUTCH", "Haven"],
-        },
+        verify: { enabled: false, coverage: "EveryFrame" },
       };
       expect(settingsFor(PATH)).toEqual(expected);
 
@@ -467,74 +443,75 @@ describe("inspector", () => {
     expect(screen.queryByTestId("preset-modified")).toBeNull();
   });
 
-  it(
-    "saves, exports without kept names, imports and deletes presets",
-    { timeout: 30_000 },
-    async () => {
-      queue(PATH);
-      renderInspector();
-      await screen.findByText("Manual boxes");
-      toggle("Keep my own row readable");
-      const names = screen.getByRole("textbox", { name: "Names to keep readable" });
-      fireEvent.change(names, { target: { value: "Ally" } });
-      fireEvent.keyDown(names, { key: "Enter" });
+  it("saves, exports, imports and deletes presets", { timeout: 30_000 }, async () => {
+    queue(PATH);
+    renderInspector();
+    await screen.findByText("Manual boxes");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced detection" }));
+    choose("Box fit", "Safe");
 
-      await menu("Save as preset…");
-      fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), {
-        target: { value: "Scrims" },
-      });
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await waitFor(() =>
-        expect(screen.getByRole("combobox", { name: "Preset" }).textContent).toBe("Scrims"),
-      );
-      const saved = backend.presets.list().find((preset) => preset.name === "Scrims");
-      expect(saved?.regions.keep_names).toEqual({ own_row: true, names: ["Ally"] });
+    await menu("Save as preset…");
+    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), {
+      target: { value: "Scrims" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Preset" }).textContent).toBe("Scrims"),
+    );
+    const saved = backend.presets.list().find((preset) => preset.name === "Scrims");
+    expect(saved?.regions.mode).toBe("Safe");
 
-      // Export: the kept names stay out unless ticked.
-      backend.dialogResult = ["D:\\Presets\\scrims.blurrd-preset.json"];
-      await menu("Export Scrims…");
-      fireEvent.click(await screen.findByRole("button", { name: "Export…" }));
-      await waitFor(() => expect(backend.presets.files.size).toBe(1));
-      const plain = JSON.parse(
-        backend.presets.files.get("D:\\Presets\\scrims.blurrd-preset.json") ?? "{}",
-      ) as {
-        presets: Preset[];
-      };
-      expect(plain.presets[0]?.regions.keep_names).toEqual({ own_row: true, names: [] });
+    backend.dialogResult = ["D:\\Presets\\scrims.blurrd-preset.json"];
+    await menu("Export Scrims…");
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Export…" }));
+    await waitFor(() => expect(backend.presets.files.size).toBe(1));
+    const file = JSON.parse(
+      backend.presets.files.get("D:\\Presets\\scrims.blurrd-preset.json") ?? "{}",
+    ) as { presets: Preset[] };
+    expect(file.presets[0]?.regions).toEqual(saved?.regions);
 
-      backend.dialogResult = ["D:\\Presets\\scrims-names.blurrd-preset.json"];
-      await menu("Export Scrims…");
-      fireEvent.click(
-        await screen.findByRole("checkbox", { name: /Include the names kept readable/ }),
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-      await waitFor(() => expect(backend.presets.files.size).toBe(2));
-      const withNames = JSON.parse(
-        backend.presets.files.get("D:\\Presets\\scrims-names.blurrd-preset.json") ?? "{}",
-      ) as { presets: Preset[] };
-      expect(withNames.presets[0]?.regions.keep_names.names).toEqual(["Ally"]);
+    // Import: the taken id gets a new one.
+    backend.dialogResult = ["D:\\Presets\\scrims.blurrd-preset.json"];
+    await menu("Import presets…");
+    await waitFor(() =>
+      expect(backend.presets.list().filter((p) => p.name === "Scrims")).toHaveLength(2),
+    );
+    const ids = backend.presets
+      .list()
+      .filter((p) => p.name === "Scrims")
+      .map((p) => p.id);
+    expect(ids[1]).toBe(`${ids[0]}-2`);
 
-      // Import: the taken id gets a new one.
-      backend.dialogResult = ["D:\\Presets\\scrims.blurrd-preset.json"];
-      await menu("Import presets…");
-      await waitFor(() =>
-        expect(backend.presets.list().filter((p) => p.name === "Scrims")).toHaveLength(2),
-      );
-      const ids = backend.presets
-        .list()
-        .filter((p) => p.name === "Scrims")
-        .map((p) => p.id);
-      expect(ids[1]).toBe(`${ids[0]}-2`);
+    // A file of an older revision (kept names, more verification
+    // options) still loads, with only the current fields.
+    const old = {
+      ...file,
+      presets: [
+        {
+          ...file.presets[0],
+          id: "old",
+          name: "Old",
+          regions: { ...saved?.regions, keep_names: { own_row: true, names: ["x"] } },
+          verify: { ...saved?.verify, mode: "ReportOnly", min_conf: 0.7 },
+        },
+      ],
+    };
+    backend.presets.files.set("D:\\Presets\\old.blurrd-preset.json", JSON.stringify(old));
+    backend.dialogResult = ["D:\\Presets\\old.blurrd-preset.json"];
+    await menu("Import presets…");
+    await waitFor(() => expect(backend.presets.list().some((p) => p.id === "old")).toBe(true));
+    const imported = backend.presets.list().find((p) => p.id === "old");
+    expect(imported?.regions).toEqual(saved?.regions);
+    expect(imported?.verify).toEqual(saved?.verify);
 
-      await menu("Delete Scrims");
-      await waitFor(() =>
-        expect(backend.presets.list().filter((p) => p.name === "Scrims")).toHaveLength(1),
-      );
-      expect(lastArgs(backend, "export_preset")).toEqual({
-        id: saved?.id,
-        path: "D:\\Presets\\scrims-names.blurrd-preset.json",
-        includeKeptNames: true,
-      });
-    },
-  );
+    await menu("Delete Scrims");
+    await waitFor(() =>
+      expect(backend.presets.list().filter((p) => p.name === "Scrims")).toHaveLength(1),
+    );
+    expect(lastArgs(backend, "export_preset")).toEqual({
+      id: saved?.id,
+      path: "D:\\Presets\\scrims.blurrd-preset.json",
+    });
+  });
 });

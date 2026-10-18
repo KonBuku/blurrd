@@ -9,11 +9,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use blurrd_core::{
-    AppError, BlurParams, CacheInfo, Capabilities, DensityLanes, DetectorOptions, Document,
-    ExactFrame, ExactSettings, ExportSettings, FramePts, JobEvent, MediaInfo, OutputPreview,
-    OverrideBinding, OverridesSaved, PresetFile, ProbeOutcome, Project, ProjectSummary,
-    RegionSettings, RunFile, Settings, StartAnalysis, StartRender, StoredSettings, TrackSet,
-    VerifyReport, VerifySettings,
+    AppError, BlurParams, CacheInfo, Capabilities, DensityLanes, Document, ExactFrame,
+    ExactSettings, ExportSettings, FramePts, JobEvent, MediaInfo, OutputPreview, OverrideBinding,
+    OverridesSaved, PresetFile, ProbeOutcome, Project, ProjectSummary, RegionSettings, RunFile,
+    Settings, StartAnalysis, StartRender, StoredSettings, TrackSet, VerifyReport, VerifySettings,
 };
 use schemars::JsonSchema;
 use ts_rs::{Config, TS};
@@ -36,7 +35,7 @@ pub(crate) fn bindings(dir: &Path) -> Result<usize> {
     let cfg = Config::from_env()
         .with_out_dir(dir)
         .with_large_int("number");
-    let exports: [ExportFn; 28] = [
+    let exports: [ExportFn; 27] = [
         Project::export_all,
         Settings::export_all,
         PresetFile::export_all,
@@ -57,7 +56,6 @@ pub(crate) fn bindings(dir: &Path) -> Result<usize> {
         FramePts::export_all,
         OverridesSaved::export_all,
         OutputPreview::export_all,
-        DetectorOptions::export_all,
         ExactFrame::export_all,
         ExactSettings::export_all,
         StartAnalysis::export_all,

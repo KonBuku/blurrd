@@ -1,8 +1,7 @@
 /**
  * Presets (plan 6.5): named region, blur, export and verification
  * settings. The built-ins mirror `Preset::builtins` (*Default*, *Max
- * privacy*, *Kill feed only*). The detector options are not part of a
- * preset.
+ * privacy*, *Kill feed only*).
  */
 import type { Preset } from "@/bindings/Preset";
 
@@ -39,7 +38,7 @@ export const BUILTIN_PRESETS: readonly Preset[] = [
     name: "Max privacy",
     regions: { ...DEFAULT_REGIONS, mode: "Safe" },
     blur: { ...DEFAULT_BLUR, strength: "High" },
-    verify: { ...DEFAULT_VERIFY, coverage: "EveryFrame", audit_output: "EveryFrame" },
+    verify: { ...DEFAULT_VERIFY, coverage: "EveryFrame" },
   },
   {
     ...DEFAULT_PRESET,
@@ -49,10 +48,7 @@ export const BUILTIN_PRESETS: readonly Preset[] = [
   },
 ];
 
-/**
- * Applies a preset to settings: regions, blur, export and verification
- * come from the preset, the detector options stay.
- */
+/** Applies a preset to settings: every value comes from the preset. */
 export function withPreset(settings: JobSettings, preset: PresetValues): JobSettings {
   return {
     ...settings,
@@ -87,12 +83,4 @@ export function differsFromPreset(settings: JobSettings, preset: PresetValues): 
   return (["regions", "blur", "export", "verify"] as const).some(
     (key) => !sameValue(values[key], preset[key]),
   );
-}
-
-/** A copy without the names kept readable (the default when a preset is shared). */
-export function withoutKeptNames<T extends PresetValues>(preset: T): T {
-  return {
-    ...preset,
-    regions: { ...preset.regions, keep_names: { ...preset.regions.keep_names, names: [] } },
-  };
 }

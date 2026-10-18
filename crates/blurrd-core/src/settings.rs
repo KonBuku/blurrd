@@ -59,34 +59,19 @@ impl Default for TemporalParams {
     }
 }
 
-/// Names that stay readable.
-///
-/// A kept name applies to a whole track only if every read of the track
-/// matches exactly (case-folded, confidence at least 0.9 on at least five
-/// frames), or if the track is the local player's own row. Never per frame.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct KeepNames {
-    /// Keep the local player's own row readable.
-    pub own_row: bool,
-    /// Names to keep. Excluded from exported presets by default.
-    pub names: Vec<String>,
-}
-
 /// Which regions are blurred, and how.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+///
+/// Fields of older revisions (kept names, chat options) are ignored when
+/// a file is read, so presets and settings that hold them still load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(default)]
 pub struct RegionSettings {
     /// Enabled detector regions.
     pub enabled: RegionSet,
-    /// Box geometry mode.
+    /// Box geometry mode (the engine may still choose
+    /// [`Mode::Safe`] when the HUD calibration is unsure).
     pub mode: Mode,
-    /// Names that stay readable.
-    pub keep_names: KeepNames,
-    /// Also blur the message text of chat lines.
-    pub chat_blur_message: bool,
-    /// Blur names inside chat system lines (for example "X joined").
-    pub chat_blur_system: bool,
 }
 
 impl Default for RegionSettings {
@@ -94,22 +79,8 @@ impl Default for RegionSettings {
         Self {
             enabled: RegionSet::all(),
             mode: Mode::Tight,
-            keep_names: KeepNames::default(),
-            chat_blur_message: false,
-            chat_blur_system: true,
         }
     }
-}
-
-/// What the OCR verification does with a leak.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum VerifyMode {
-    /// Add slot boxes over every readable name and check again.
-    #[default]
-    DetectAndFix,
-    /// Only report leaks.
-    ReportOnly,
 }
 
 /// Which frames the verification reads.
@@ -124,50 +95,26 @@ pub enum Coverage {
     EveryFrame,
 }
 
-/// Whether the rendered output is read again with OCR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum Audit {
-    /// No output audit.
-    #[default]
-    Off,
-    /// Audit sampled frames.
-    Sampled,
-    /// Audit every frame.
-    EveryFrame,
-}
-
 /// OCR verification settings.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+///
+/// Fields of older revisions (fix or report, full-frame interval,
+/// confidence, output audit, ignored words) are ignored when a file is
+/// read, so presets and settings that hold them still load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(default)]
 pub struct VerifySettings {
     /// Run the verification during analysis.
     pub enabled: bool,
-    /// Fix or only report.
-    pub mode: VerifyMode,
     /// Which frames are read.
     pub coverage: Coverage,
-    /// Interval of the full-frame sample for names outside every region, in
-    /// milliseconds.
-    pub full_frame_sample_ms: u32,
-    /// Minimum recognition confidence of a dictionary-free leak.
-    pub min_conf: f32,
-    /// Output audit.
-    pub audit_output: Audit,
-    /// Words that never count as names (callouts, places).
-    pub ignore_words: Vec<String>,
 }
 
 impl Default for VerifySettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            mode: VerifyMode::DetectAndFix,
             coverage: Coverage::Structure,
-            full_frame_sample_ms: 500,
-            min_conf: 0.5,
-            audit_output: Audit::Off,
-            ignore_words: Vec::new(),
         }
     }
 }
@@ -316,10 +263,10 @@ pub struct Defaults {
 }
 
 impl Defaults {
-    /// Why these defaults cannot be used, or `None`: invalid blur, export
-    /// or verification values.
+    /// Why these defaults cannot be used, or `None`: invalid blur or
+    /// export values.
     pub fn problem(&self) -> Option<String> {
-        validate_defaults(&self.blur, &self.export, &self.verify)
+        validate_defaults(&self.blur, &self.export)
             .err()
             .map(|error| match error {
                 SchemaError::Invalid(problem) => problem,
@@ -445,11 +392,7 @@ impl Document for Settings {
         if let Some(problem) = self.processing.problem() {
             return Err(SchemaError::Invalid(problem));
         }
-        validate_defaults(
-            &self.defaults.blur,
-            &self.defaults.export,
-            &self.defaults.verify,
-        )
+        validate_defaults(&self.defaults.blur, &self.defaults.export)
     }
 }
 
@@ -499,7 +442,6 @@ impl Preset {
             },
             verify: VerifySettings {
                 coverage: Coverage::EveryFrame,
-                audit_output: Audit::EveryFrame,
                 ..VerifySettings::default()
             },
             ..default.clone()
@@ -514,15 +456,6 @@ impl Preset {
             ..default.clone()
         };
         vec![default, max_privacy, kill_feed_only]
-    }
-
-    /// A copy for exporting, without the kept names (the default when a
-    /// preset is shared).
-    #[must_use]
-    pub fn without_kept_names(&self) -> Self {
-        let mut preset = self.clone();
-        preset.regions.keep_names.names.clear();
-        preset
     }
 }
 
@@ -565,16 +498,12 @@ impl Document for PresetFile {
         }
         self.presets
             .iter()
-            .try_for_each(|p| validate_defaults(&p.blur, &p.export, &p.verify))
+            .try_for_each(|p| validate_defaults(&p.blur, &p.export))
     }
 }
 
-/// Checks the blur, export and verification part of settings and presets.
-fn validate_defaults(
-    blur: &BlurParams,
-    export: &ExportSettings,
-    verify: &VerifySettings,
-) -> Result<(), SchemaError> {
+/// Checks the blur and export part of settings and presets.
+fn validate_defaults(blur: &BlurParams, export: &ExportSettings) -> Result<(), SchemaError> {
     if !blur.is_valid() {
         return Err(SchemaError::Invalid(format!(
             "blur feather {} is invalid",
@@ -584,18 +513,14 @@ fn validate_defaults(
     if let Some(problem) = export.problem() {
         return Err(SchemaError::Invalid(problem));
     }
-    if !(0.0..=1.0).contains(&verify.min_conf) {
-        return Err(SchemaError::Invalid(format!(
-            "verification confidence {} is outside 0..=1",
-            verify.min_conf
-        )));
-    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Defaults, HwDecodeSetting, Mode, Preset, PresetFile, Processing, Settings};
+    use super::{
+        Coverage, Defaults, HwDecodeSetting, Mode, Preset, PresetFile, Processing, Settings,
+    };
     use crate::region::Region;
     use crate::schema::{self, SchemaError};
 
@@ -647,9 +572,6 @@ mod tests {
 
         assert_eq!(Defaults::default().problem(), None);
         let mut defaults = Defaults::default();
-        defaults.verify.min_conf = 2.0;
-        assert!(defaults.problem().unwrap().contains("confidence"));
-        let mut defaults = Defaults::default();
         defaults.export.output.template = " ".to_owned();
         assert!(defaults.problem().is_some());
     }
@@ -670,13 +592,33 @@ mod tests {
     }
 
     #[test]
-    fn exported_presets_drop_kept_names() {
+    fn presets_of_older_revisions_still_load() {
+        // Kept names, chat options and the verification options of earlier
+        // revisions were never read by the engine; they are ignored now.
         let mut preset = Preset::builtins().remove(0);
-        preset.regions.keep_names.names.push("someone".to_owned());
+        preset.id = "user-1".to_owned();
+        preset.builtin = false;
+        let mut json = serde_json::to_value(PresetFile::new(vec![preset])).unwrap();
+        let old = &mut json["presets"][0];
+        old["regions"] = serde_json::json!({
+            "enabled": ["KillFeed"], "mode": "Safe",
+            "keep_names": { "own_row": true, "names": ["someone"] },
+            "chat_blur_message": true, "chat_blur_system": false });
+        old["verify"] = serde_json::json!({
+            "enabled": true, "mode": "ReportOnly", "coverage": "EveryFrame",
+            "full_frame_sample_ms": 500, "min_conf": 0.7,
+            "audit_output": "Sampled", "ignore_words": ["ACE"] });
+        let json = json.to_string();
+        let file: PresetFile = schema::from_json(&json).unwrap();
+        let preset = &file.presets[0];
+        assert_eq!(preset.regions.mode, Mode::Safe);
         assert_eq!(
-            preset.without_kept_names().regions.keep_names.names,
-            Vec::<String>::new()
+            preset.regions.enabled.iter().collect::<Vec<_>>(),
+            [Region::KillFeed]
         );
+        assert_eq!(preset.verify.coverage, Coverage::EveryFrame);
+        let again = schema::to_json(&file).unwrap();
+        assert!(!again.contains("keep_names") && !again.contains("min_conf"));
     }
 
     #[test]

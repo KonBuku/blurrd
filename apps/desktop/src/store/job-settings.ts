@@ -47,7 +47,7 @@ export interface JobSettingsState {
     key: K,
     change: (section: JobSettings[K]) => JobSettings[K],
   ) => void;
-  /** Applies a preset to the targets (their detector options stay). */
+  /** Applies a preset to the targets. */
   readonly applyPreset: (targets: SettingsTargets, preset: Preset) => void;
   /**
    * Changes one section of the defaults for new files (Settings › Output

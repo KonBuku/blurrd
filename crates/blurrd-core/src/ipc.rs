@@ -20,9 +20,7 @@ use crate::overrides::{Override, OverrideBinding};
 use crate::plan::Track;
 use crate::project::ProjectVerify;
 use crate::region::{Region, RegionSet};
-use crate::settings::{
-    Defaults, Privacy, Processing, RegionSettings, Sensitivity, TemporalParams, VerifySettings,
-};
+use crate::settings::{Defaults, Privacy, Processing, RegionSettings, VerifySettings};
 use crate::time::{FrameRange, Rational};
 
 /// What `probe_media` answers for one file: its media facts, or why it
@@ -157,16 +155,6 @@ pub struct OutputPreview {
     pub est_seconds: f64,
 }
 
-/// Detector options of `start_analysis` that are not part of a preset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct DetectorOptions {
-    /// Sensitivity.
-    pub sensitivity: Sensitivity,
-    /// Temporal parameters.
-    pub temporal: TemporalParams,
-}
-
 /// The settings sections the backend owns (`get_settings`): processing,
 /// the defaults for new files and privacy, read leniently from
 /// `settings.json` (a missing or invalid section is its default).
@@ -221,11 +209,8 @@ pub struct ExactPatchInfo {
 pub struct StartAnalysis {
     /// The project to analyse.
     pub project_id: String,
-    /// The regions to detect.
+    /// The regions to detect and the box geometry.
     pub regions: RegionSettings,
-    /// Detector options (not read yet: the engine has no detector
-    /// settings).
-    pub detector: DetectorOptions,
     /// Whether and how to verify.
     pub verify: VerifySettings,
 }
@@ -254,10 +239,9 @@ pub struct StartRender {
 pub struct RunFile {
     /// The project to export.
     pub project_id: String,
-    /// The regions to detect when the file is analysed.
+    /// The regions to detect and the box geometry when the file is
+    /// analysed.
     pub regions: RegionSettings,
-    /// Detector options (not read yet).
-    pub detector: DetectorOptions,
     /// Whether and how to verify.
     pub verify: VerifySettings,
     /// Codec, encoder, container and output naming.

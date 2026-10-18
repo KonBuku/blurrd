@@ -59,26 +59,6 @@
         }
       ]
     },
-    "Audit": {
-      "description": "Whether the rendered output is read again with OCR.",
-      "oneOf": [
-        {
-          "description": "No output audit.",
-          "type": "string",
-          "const": "Off"
-        },
-        {
-          "description": "Audit sampled frames.",
-          "type": "string",
-          "const": "Sampled"
-        },
-        {
-          "description": "Audit every frame.",
-          "type": "string",
-          "const": "EveryFrame"
-        }
-      ]
-    },
     "BlurParams": {
       "description": "Parameters of the blur applied to every box.",
       "type": "object",
@@ -395,27 +375,6 @@
       "maxItems": 2,
       "minItems": 2
     },
-    "KeepNames": {
-      "description": "Names that stay readable.\n\nA kept name applies to a whole track only if every read of the track\nmatches exactly (case-folded, confidence at least 0.9 on at least five\nframes), or if the track is the local player's own row. Never per frame.",
-      "type": "object",
-      "properties": {
-        "names": {
-          "description": "Names to keep. Excluded from exported presets by default.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "own_row": {
-          "description": "Keep the local player's own row readable.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "own_row",
-        "names"
-      ]
-    },
     "KeyframePolicy": {
       "description": "Where the output's keyframes go.",
       "oneOf": [
@@ -723,37 +682,29 @@
       }
     },
     "RegionSettings": {
-      "description": "Which regions are blurred, and how.",
+      "description": "Which regions are blurred, and how.\n\nFields of older revisions (kept names, chat options) are ignored when\na file is read, so presets and settings that hold them still load.",
       "type": "object",
       "properties": {
-        "chat_blur_message": {
-          "description": "Also blur the message text of chat lines.",
-          "type": "boolean"
-        },
-        "chat_blur_system": {
-          "description": "Blur names inside chat system lines (for example \"X joined\").",
-          "type": "boolean"
-        },
         "enabled": {
           "description": "Enabled detector regions.",
-          "$ref": "#/$defs/RegionSet"
-        },
-        "keep_names": {
-          "description": "Names that stay readable.",
-          "$ref": "#/$defs/KeepNames"
+          "$ref": "#/$defs/RegionSet",
+          "default": [
+            "KillFeed",
+            "Banner",
+            "VoiceChat",
+            "TextChat",
+            "Scoreboard",
+            "DeathRecap",
+            "Spectating",
+            "MatchEnd"
+          ]
         },
         "mode": {
-          "description": "Box geometry mode.",
-          "$ref": "#/$defs/Mode"
+          "description": "Box geometry mode (the engine may still choose\n[`Mode::Safe`] when the HUD calibration is unsure).",
+          "$ref": "#/$defs/Mode",
+          "default": "Tight"
         }
-      },
-      "required": [
-        "enabled",
-        "mode",
-        "keep_names",
-        "chat_blur_message",
-        "chat_blur_system"
-      ]
+      }
     },
     "SolidColor": {
       "description": "Fill colour of [`BlurStyle::Solid`].",
@@ -842,69 +793,21 @@
         }
       ]
     },
-    "VerifyMode": {
-      "description": "What the OCR verification does with a leak.",
-      "oneOf": [
-        {
-          "description": "Add slot boxes over every readable name and check again.",
-          "type": "string",
-          "const": "DetectAndFix"
-        },
-        {
-          "description": "Only report leaks.",
-          "type": "string",
-          "const": "ReportOnly"
-        }
-      ]
-    },
     "VerifySettings": {
-      "description": "OCR verification settings.",
+      "description": "OCR verification settings.\n\nFields of older revisions (fix or report, full-frame interval,\nconfidence, output audit, ignored words) are ignored when a file is\nread, so presets and settings that hold them still load.",
       "type": "object",
       "properties": {
-        "audit_output": {
-          "description": "Output audit.",
-          "$ref": "#/$defs/Audit"
-        },
         "coverage": {
           "description": "Which frames are read.",
-          "$ref": "#/$defs/Coverage"
+          "$ref": "#/$defs/Coverage",
+          "default": "Structure"
         },
         "enabled": {
           "description": "Run the verification during analysis.",
-          "type": "boolean"
-        },
-        "full_frame_sample_ms": {
-          "description": "Interval of the full-frame sample for names outside every region, in\nmilliseconds.",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "ignore_words": {
-          "description": "Words that never count as names (callouts, places).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "min_conf": {
-          "description": "Minimum recognition confidence of a dictionary-free leak.",
-          "type": "number",
-          "format": "float"
-        },
-        "mode": {
-          "description": "Fix or only report.",
-          "$ref": "#/$defs/VerifyMode"
+          "type": "boolean",
+          "default": true
         }
-      },
-      "required": [
-        "enabled",
-        "mode",
-        "coverage",
-        "full_frame_sample_ms",
-        "min_conf",
-        "audit_output",
-        "ignore_words"
-      ]
+      }
     }
   }
 }

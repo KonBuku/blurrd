@@ -6,7 +6,6 @@ import { toast } from "sonner";
 
 import type { Preset } from "@/bindings/Preset";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -263,14 +262,8 @@ interface ExportPresetDialogProps {
   readonly preset: Preset;
 }
 
-/**
- * Exports a preset to a file. The names kept readable stay out of the
- * file unless the box is ticked (plan 6.5).
- */
+/** Exports a preset to a file. */
 function ExportPresetDialog({ open: shown, onOpenChange, preset }: ExportPresetDialogProps) {
-  const [keepNames, setKeepNames] = useState(false);
-  const id = useId();
-  const names = preset.regions.keep_names.names.length;
   const run = async () => {
     try {
       const path = await save({
@@ -279,7 +272,7 @@ function ExportPresetDialog({ open: shown, onOpenChange, preset }: ExportPresetD
         filters: [PRESET_FILTER],
       });
       if (path === null) return;
-      await exportPreset(preset.id, path, keepNames);
+      await exportPreset(preset.id, path);
       toast.success(`Preset “${preset.name}” exported`);
       onOpenChange(false);
     } catch (reason) {
@@ -288,13 +281,7 @@ function ExportPresetDialog({ open: shown, onOpenChange, preset }: ExportPresetD
     }
   };
   return (
-    <Dialog
-      open={shown}
-      onOpenChange={(next) => {
-        if (!next) setKeepNames(false);
-        onOpenChange(next);
-      }}
-    >
+    <Dialog open={shown} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Export {preset.name}</DialogTitle>
@@ -302,22 +289,6 @@ function ExportPresetDialog({ open: shown, onOpenChange, preset }: ExportPresetD
             Writes the preset to a file you can share or import on another PC.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id={id}
-            className="mt-0.5"
-            checked={keepNames}
-            onCheckedChange={(checked) => setKeepNames(checked === true)}
-          />
-          <label htmlFor={id} className="text-ui-sm">
-            Include the names kept readable
-            <span className="block text-foreground-subtle">
-              {names === 0
-                ? "This preset keeps no names readable."
-                : `${names} ${names === 1 ? "name" : "names"}; left out unless ticked.`}
-            </span>
-          </label>
-        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel

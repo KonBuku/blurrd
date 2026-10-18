@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use blurrd_core::{
-    AppError, BlurParams, CacheInfo, Capabilities, Defaults, DensityLanes, DetectorOptions,
-    ErrorKind, ExportSettings, FramePts, JobEvent, JobId, OutputFolder, OutputPreview, Override,
+    AppError, BlurParams, CacheInfo, Capabilities, Defaults, DensityLanes, ErrorKind,
+    ExportSettings, FramePts, JobEvent, JobId, OutputFolder, OutputPreview, Override,
     OverridesSaved, Preset, Privacy, ProbeOutcome, Processing, ProjectSummary, RegionSet,
     RegionSettings, RunFile, StoredSettings, TrackSet, VerifyReport, VerifySettings,
 };
@@ -351,22 +351,19 @@ fn new_job() -> JobId {
 }
 
 /// Analyses a project. The arguments are the fields of
-/// [`blurrd_core::StartAnalysis`]. The detector options are not read: the
-/// engine has no detector settings yet (plan section 18, M22).
+/// [`blurrd_core::StartAnalysis`].
 #[tauri::command]
 pub(crate) fn start_analysis(
     state: State<'_, AppState>,
     project_id: String,
     regions: RegionSettings,
-    detector: DetectorOptions,
     verify: VerifySettings,
     on_event: Channel<JobEvent>,
 ) -> Result<JobId, AppError> {
-    let _ = detector;
     let engine = state.engine()?;
     let project = project(&state, &project_id)?;
     let job = new_job();
-    let work = tasks::analysis(engine, project, regions.enabled, verify.enabled);
+    let work = tasks::analysis(engine, project, regions, verify);
     state.jobs.enqueue(job, Arc::new(on_event), work);
     Ok(job)
 }
@@ -432,7 +429,7 @@ pub(crate) fn start_run(
             blur: file.blur,
             enabled: file.enabled,
         };
-        prepared.push((project, request, file.regions.enabled, file.verify.enabled));
+        prepared.push((project, request, file.regions, file.verify));
     }
     Ok(prepared
         .into_iter()
@@ -510,12 +507,11 @@ pub(crate) async fn export_preset(
     state: State<'_, AppState>,
     id: String,
     path: PathBuf,
-    include_kept_names: bool,
 ) -> Result<(), AppError> {
     let state = state.inner().clone();
     blocking(move || {
         let file = state.paths.target(&path)?;
-        state.presets.export(&id, &file, include_kept_names)
+        state.presets.export(&id, &file)
     })
     .await
 }
