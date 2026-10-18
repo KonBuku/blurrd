@@ -2,7 +2,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import type { RectI } from "../src/bindings/RectI";
-import { requireFixtureMedia } from "./fixtures";
+import { chooseTheme, requireFixtureMedia } from "./fixtures";
 import { canvasPixels, openFresh, openRecording, seekFrame } from "./preview-helpers";
 
 const PATH = "D:\\Recordings\\match_ascent_01.mp4";
@@ -194,6 +194,7 @@ test.describe("inspector", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`verify tab and report have no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
+      await chooseTheme(page, theme);
       const panel = inspector(page);
       await panel.getByRole("tab", { name: "Verify" }).click();
       await panel.getByRole("button", { name: "Advanced verification" }).click();
@@ -208,6 +209,7 @@ test.describe("inspector", () => {
 
     test(`export tab has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
+      await chooseTheme(page, theme);
       const panel = inspector(page);
       await panel.getByRole("tab", { name: "Export" }).click();
       await panel.getByRole("radio", { name: "Quality" }).click();
@@ -219,6 +221,7 @@ test.describe("inspector", () => {
 
     test(`blur tab has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
+      await chooseTheme(page, theme);
       const panel = inspector(page);
       await panel.getByRole("switch", { name: /^Text chat/ }).focus();
       await panel.getByRole("button", { name: "Advanced detection" }).click();

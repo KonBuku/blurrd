@@ -9,7 +9,7 @@
       "$ref": "#/$defs/Appearance",
       "default": {
         "reduce_motion": "System",
-        "theme": "System",
+        "theme": "Dark",
         "timeline_thumbs": true,
         "ui_font_size": 14
       }
@@ -150,7 +150,7 @@
         "theme": {
           "description": "Colour theme.",
           "$ref": "#/$defs/Theme",
-          "default": "System"
+          "default": "Dark"
         },
         "timeline_thumbs": {
           "description": "Show thumbnails in the timeline.",
@@ -1196,7 +1196,7 @@
           "const": "Light"
         },
         {
-          "description": "Dark.",
+          "description": "Dark, the theme of a fresh install.",
           "type": "string",
           "const": "Dark"
         }

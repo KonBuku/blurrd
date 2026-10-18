@@ -1,13 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>blurrd</title>
+    <!-- First paint in the cached theme, before the app loads (public/). -->
+    <link rel="stylesheet" href="/boot.css" />
+    <script src="/boot.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- The loading screen; React replaces it when the interface renders. -->
+      <div class="boot" role="status" aria-label="blurrd is starting">
+        <img class="boot-dark" src="../../assets/brand/blurrd-icon-light.svg" alt="" />
+        <img class="boot-light" src="../../assets/brand/blurrd-icon.svg" alt="" />
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

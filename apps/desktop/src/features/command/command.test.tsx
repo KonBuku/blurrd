@@ -101,12 +101,13 @@ describe("command palette", () => {
   it("filters by label and keywords and runs the chosen command after closing", async () => {
     render(withQuery(<CommandPalette />));
     await openPalette();
-    search("dark mode");
+    // Dark is the default (and current) theme, so pick Light.
+    search("light mode");
     const options = screen.getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toContain("Theme: Dark");
-    fireEvent.click(screen.getByRole("option", { name: /Theme: Dark/ }));
+    expect(options.map((option) => option.textContent)).toContain("Theme: Light");
+    fireEvent.click(screen.getByRole("option", { name: /Theme: Light/ }));
     await waitFor(() => expect(useCommandStore.getState().open).toBe(false));
-    await waitFor(() => expect(useSettingsStore.getState().appearance.theme).toBe("Dark"));
+    await waitFor(() => expect(useSettingsStore.getState().appearance.theme).toBe("Light"));
   });
 
   it("says so when nothing matches", async () => {

@@ -177,11 +177,11 @@ impl Default for VerifySettings {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Theme {
     /// Follow Windows.
-    #[default]
     System,
     /// Light.
     Light,
-    /// Dark.
+    /// Dark, the theme of a fresh install.
+    #[default]
     Dark,
 }
 
@@ -216,7 +216,7 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            theme: Theme::System,
+            theme: Theme::Dark,
             ui_font_size: 14,
             reduce_motion: ReduceMotion::System,
             timeline_thumbs: true,

@@ -26,8 +26,10 @@ mod tasks;
 
 use std::path::Path;
 
+use blurrd_core::Theme;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, RunEvent};
+use tauri::webview::Color;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewWindowBuilder};
 use tauri_plugin_store::StoreBuilder;
 
 use crate::paths::UserPaths;
@@ -40,6 +42,13 @@ const MAIN_WINDOW: &str = "main";
 /// data directory (`%APPDATA%\io.github.konbuku.blurrd`). The frontend
 /// opens it with `getStore` under the same name.
 const SETTINGS_FILE: &str = "settings.json";
+
+/// Window shell colours of the dark and the light theme
+/// (`--color-background-win-alt` in `apps/desktop/src/styles/globals.css`).
+/// The window and its webview paint them until the page has loaded, so a
+/// start never flashes white.
+const DARK_SHELL: Color = Color(0x2b, 0x2b, 0x2b, 0xff);
+const LIGHT_SHELL: Color = Color(0xec, 0xec, 0xee, 0xff);
 
 /// Event that hands the files of a second app start to the frontend,
 /// which adds them to the queue.
@@ -83,7 +92,8 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             tauri_plugin_log::log::info!("blurrd {} started", env!("CARGO_PKG_VERSION"));
-            open_settings(app.handle());
+            let theme = open_settings(app.handle());
+            create_main_window(app.handle(), theme)?;
             let state = app_state(app.handle())?;
             state.probe_capabilities();
             app.manage(state);
@@ -209,14 +219,61 @@ fn window_origin(url: &tauri::Url) -> String {
 /// it with `getStore`; the frontend may not open store files itself. A
 /// missing file is created on the first save. An unreadable file is
 /// logged and left untouched: the frontend then runs on defaults and does
-/// not save.
-fn open_settings(app: &AppHandle) {
-    if let Err(error) = StoreBuilder::new(app, SETTINGS_FILE)
+/// not save. Answers the stored theme (the default when there is none),
+/// which the window paints before the page loads.
+fn open_settings(app: &AppHandle) -> Theme {
+    match StoreBuilder::new(app, SETTINGS_FILE)
         .disable_auto_save()
         .build()
     {
-        tauri_plugin_log::log::warn!("could not open {SETTINGS_FILE}: {error}");
+        Ok(store) => stored_theme(store.get("appearance").as_ref()),
+        Err(error) => {
+            tauri_plugin_log::log::warn!("could not open {SETTINGS_FILE}: {error}");
+            Theme::default()
+        }
     }
+}
+
+/// The theme of the settings file's `appearance` section; a missing or
+/// invalid value is the default, as in the frontend's `parseAppearance`.
+fn stored_theme(appearance: Option<&serde_json::Value>) -> Theme {
+    appearance
+        .and_then(|appearance| appearance.get("theme"))
+        .and_then(|theme| serde_json::from_value(theme.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// The shell colour of `theme`; `system_dark` tells what "System" follows.
+fn shell_color(theme: Theme, system_dark: bool) -> Color {
+    match theme {
+        Theme::Dark => DARK_SHELL,
+        Theme::System if system_dark => DARK_SHELL,
+        Theme::Light | Theme::System => LIGHT_SHELL,
+    }
+}
+
+/// Creates the main window of `tauri.conf.json` (`create: false` there)
+/// with the background of `theme`. "System" starts dark and switches as
+/// soon as the window reports the Windows theme.
+fn create_main_window(app: &AppHandle, theme: Theme) -> tauri::Result<()> {
+    let Some(config) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN_WINDOW)
+        .cloned()
+    else {
+        return Err(tauri::Error::WindowNotFound);
+    };
+    let window = WebviewWindowBuilder::from_config(app, &config)?
+        .background_color(shell_color(theme, true))
+        .build()?;
+    if theme == Theme::System {
+        let system_dark = window.theme().map_or(true, |os| os == tauri::Theme::Dark);
+        window.set_background_color(Some(shell_color(theme, system_dark)))?;
+    }
+    Ok(())
 }
 
 /// Brings the main window to the front, restoring it when it is minimised.
@@ -282,7 +339,12 @@ fn file_arguments(argv: &[String], cwd: &Path) -> Vec<String> {
 mod tests {
     use std::path::Path;
 
-    use super::{configured_origin, file_arguments, window_origin};
+    use blurrd_core::Theme;
+
+    use super::{
+        DARK_SHELL, LIGHT_SHELL, configured_origin, file_arguments, shell_color, stored_theme,
+        window_origin,
+    };
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
@@ -333,6 +395,32 @@ mod tests {
         } else {
             assert_eq!(configured_origin(None, false), "tauri://localhost");
         }
+    }
+
+    #[test]
+    fn a_fresh_install_starts_dark_and_a_stored_choice_wins() {
+        assert_eq!(stored_theme(None), Theme::Dark);
+        assert_eq!(stored_theme(Some(&serde_json::json!({}))), Theme::Dark);
+        assert_eq!(
+            stored_theme(Some(&serde_json::json!({ "theme": "Blue" }))),
+            Theme::Dark
+        );
+        assert_eq!(
+            stored_theme(Some(&serde_json::json!({ "theme": "Light" }))),
+            Theme::Light
+        );
+        assert_eq!(
+            stored_theme(Some(&serde_json::json!({ "theme": "System" }))),
+            Theme::System
+        );
+    }
+
+    #[test]
+    fn the_window_paints_the_shell_colour_of_its_theme() {
+        assert_eq!(shell_color(Theme::Dark, false), DARK_SHELL);
+        assert_eq!(shell_color(Theme::Light, true), LIGHT_SHELL);
+        assert_eq!(shell_color(Theme::System, true), DARK_SHELL);
+        assert_eq!(shell_color(Theme::System, false), LIGHT_SHELL);
     }
 
     #[test]

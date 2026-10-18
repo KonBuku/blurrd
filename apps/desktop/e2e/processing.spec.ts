@@ -1,7 +1,7 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { requireFixtureMedia } from "./fixtures";
+import { chooseTheme, requireFixtureMedia } from "./fixtures";
 import { openFresh, openRecording } from "./preview-helpers";
 
 const PATH = "D:\\Recordings\\match_ascent_01.mp4";
@@ -179,6 +179,7 @@ test.describe("processing", () => {
       page,
     }) => {
       await page.emulateMedia({ colorScheme: scheme });
+      await chooseTheme(page, scheme);
       await jobDuration(page, 5000);
       await exportShown(page);
       await expect(card(page).locator('[aria-current="step"]')).toBeVisible();

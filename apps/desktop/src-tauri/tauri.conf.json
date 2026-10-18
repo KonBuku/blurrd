@@ -12,13 +12,15 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "blurrd",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,
         "minHeight": 680,
         "center": true,
-        "decorations": false
+        "decorations": false,
+        "backgroundColor": "#2b2b2b"
       }
     ],
     "security": {

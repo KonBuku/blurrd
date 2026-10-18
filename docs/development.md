@@ -323,12 +323,23 @@ The settings view (gear button or Ctrl+, in the title bar; Escape closes
 it) replaces the preview and inspector. Appearance (theme, interface size,
 reduce motion) is applied by `src/lib/appearance.ts` and saved by
 `src/store/settings.ts` to `settings.json` (schema `blurrd-settings/1`) in
-`%APPDATA%\io.github.konbuku.blurrd` through the store plugin; a copy in
-local storage paints the first frame in the right theme before the file
-has loaded. A settings file of another schema major is read but never
-overwritten. `e2e/settings.spec.ts` covers theme switching (system, light,
-dark, title bar menu), persistence across reloads, interface size, reduce
-motion, focus handling and an axe scan of each page in both themes.
+`%APPDATA%\io.github.konbuku.blurrd` through the store plugin. A fresh
+install is dark (Settings › Appearance offers System, Light and Dark; a
+stored choice wins). No start flashes white: the Rust side creates the
+window (`create: false` in `tauri.conf.json`) with the window shell colour
+of the stored theme as its and the WebView's background, and
+`public/boot.css` and `public/boot.js` paint the cached theme and the
+brand mark as a loading screen before the app's bundle has loaded; a copy
+of the appearance in local storage applies it before the settings file
+has loaded. index.html has no inline `<style>` or `<script>`: Tauri would
+add a nonce to the CSP, which disables the `'unsafe-inline'` that React's
+style attributes need (`src/styles/first-paint.test.ts` keeps the colours
+and this in sync). A settings file of another schema major is read but
+never overwritten. `e2e/settings.spec.ts` covers the dark default, theme
+switching (system, light, dark, title bar menu), persistence across
+reloads, interface size, reduce motion, focus handling and an axe scan of
+each page in both themes; tests that check both themes pick one with
+`chooseTheme` (`e2e/fixtures.ts`).
 
 The command palette (`src/features/command`, Ctrl+K or the search button
 in the title bar) lists the actions of the mounted features. A feature

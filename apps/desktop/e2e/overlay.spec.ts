@@ -2,7 +2,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { FIXTURE, TARGET_RECT } from "../src/ipc/mock/fixture-media";
-import { requireFixtureMedia } from "./fixtures";
+import { chooseTheme, requireFixtureMedia } from "./fixtures";
 import { openFresh, openRecording, seekFrame } from "./preview-helpers";
 
 /** Zoom levels of acceptance M24 (25–400 %). */
@@ -212,6 +212,7 @@ test.describe("timeline", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`preview, overlay and timeline have no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await chooseTheme(page, theme);
       await seekFrame(page, 31);
       await page.getByRole("radio", { name: "Split" }).click();
       const results = await new AxeBuilder({ page }).analyze();

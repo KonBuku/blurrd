@@ -1,0 +1,36 @@
+/*
+ * First paint, before the app's stylesheet and script load: the window
+ * shell colour of the theme (`--color-background-win-alt` in
+ * src/styles/globals.css; the Tauri window starts in the same colour) and
+ * the brand mark as the loading screen (index.html). A file, not an
+ * inline <style>: Tauri would add a nonce to the CSP for an inline one,
+ * and a nonce turns off the 'unsafe-inline' that React's style
+ * attributes need.
+ */
+html {
+  height: 100%;
+  background-color: #2b2b2b;
+  color-scheme: dark;
+}
+
+html:not(.dark) {
+  background-color: #ececee;
+  color-scheme: light;
+}
+
+.boot {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.boot img {
+  width: 64px;
+  height: 64px;
+}
+
+html:not(.dark) .boot-dark,
+html.dark .boot-light {
+  display: none;
+}

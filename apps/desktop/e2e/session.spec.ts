@@ -1,6 +1,8 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseTheme } from "./fixtures";
+
 /** Session storage keys of the mock backend (src/ipc/mock/index.ts). */
 const SESSION_KEY = "blurrd.mock.session";
 const PROBE_DURATION_KEY = "blurrd.mock.capabilitiesDelayMs";
@@ -170,6 +172,7 @@ test.describe("empty state and GPU card", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`empty state and settings page have no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await chooseTheme(page, theme);
       await openFresh(page);
       await expect(page.getByText("GPU ready", { exact: true })).toBeVisible();
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

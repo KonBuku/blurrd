@@ -1,6 +1,8 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseTheme } from "./fixtures";
+
 /** Number of files the scrolling test drops (acceptance M23: 200 files). */
 const MANY = 200;
 
@@ -252,6 +254,7 @@ test.describe("queue", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`queue with recordings has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await chooseTheme(page, theme);
       await dropFolder(page, 12);
       await options(page).nth(1).click();
       await page.getByRole("listbox", { name: "Recordings" }).focus();

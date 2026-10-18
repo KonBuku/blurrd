@@ -1,6 +1,7 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseTheme } from "./fixtures";
 import { openFresh } from "./preview-helpers";
 
 /** Runs a command of the palette by typing its label. */
@@ -91,6 +92,7 @@ test.describe("about and licences", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`About and the licences have no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
+      await chooseTheme(page, theme);
       await runCommand(page, "About blurrd");
       const about = page.getByRole("dialog", { name: "blurrd" });
       await expect(about.getByRole("button", { name: "Source code" })).toBeVisible();

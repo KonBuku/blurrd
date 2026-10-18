@@ -1,6 +1,8 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseTheme } from "./fixtures";
+
 /** Window sizes from the minimum window to a maximized 1440p screen. */
 const SIZES = [
   { width: 1024, height: 680 },
@@ -102,6 +104,7 @@ test.describe("accessibility smoke", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`shell has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await chooseTheme(page, theme);
       await openApp(page);
       const results = await new AxeBuilder({ page }).analyze();
       expect(results.violations).toEqual([]);
@@ -109,6 +112,7 @@ test.describe("accessibility smoke", () => {
 
     test(`inspector sheet has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await chooseTheme(page, theme);
       await page.setViewportSize({ width: 1024, height: 680 });
       await openApp(page);
       await page.getByRole("button", { name: "Show inspector" }).click();

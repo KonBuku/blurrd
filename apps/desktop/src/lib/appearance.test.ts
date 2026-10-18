@@ -30,6 +30,14 @@ function setup(systemDark: boolean) {
 }
 
 describe("parseAppearance", () => {
+  it("defaults to the dark theme, matching the Rust default", () => {
+    expect(DEFAULT_APPEARANCE.theme).toBe("Dark");
+    expect(parseAppearance({}).theme).toBe("Dark");
+    // A stored choice wins over the default.
+    expect(parseAppearance({ theme: "System" }).theme).toBe("System");
+    expect(parseAppearance({ theme: "Light" }).theme).toBe("Light");
+  });
+
   it("keeps valid values", () => {
     const value = { theme: "Dark", ui_font_size: 16, reduce_motion: "On", timeline_thumbs: false };
     expect(parseAppearance(value)).toEqual(value);
@@ -49,7 +57,7 @@ describe("parseAppearance", () => {
 describe("applyAppearance", () => {
   it("follows the system theme in System mode until stopped", () => {
     const { root, media, list } = setup(true);
-    const stop = applyAppearance(DEFAULT_APPEARANCE, root, list);
+    const stop = applyAppearance({ ...DEFAULT_APPEARANCE, theme: "System" }, root, list);
     expect(root.classList.contains("dark")).toBe(true);
     media.set(false);
     expect(root.classList.contains("dark")).toBe(false);
@@ -90,9 +98,9 @@ describe("appearance cache", () => {
 
   it("round-trips and falls back to the defaults", () => {
     expect(cachedAppearance()).toEqual(DEFAULT_APPEARANCE);
-    const dark = { ...DEFAULT_APPEARANCE, theme: "Dark" as const };
-    cacheAppearance(dark);
-    expect(cachedAppearance()).toEqual(dark);
+    const light = { ...DEFAULT_APPEARANCE, theme: "Light" as const };
+    cacheAppearance(light);
+    expect(cachedAppearance()).toEqual(light);
 
     localStorage.setItem("blurrd.appearance", "{not json");
     expect(cachedAppearance()).toEqual(DEFAULT_APPEARANCE);

@@ -4,7 +4,7 @@ import type { Theme } from "@/bindings/Theme";
 
 /** Appearance of a fresh install (matches the Rust `Appearance::default`). */
 export const DEFAULT_APPEARANCE: Appearance = {
-  theme: "System",
+  theme: "Dark",
   ui_font_size: 14,
   reduce_motion: "System",
   timeline_thumbs: true,

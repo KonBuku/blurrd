@@ -1,10 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseTheme } from "./fixtures";
+
 const THEMES = ["light", "dark"] as const;
 
 /** Opens the component gallery in the given colour scheme. */
 async function openGallery(page: Page, theme: (typeof THEMES)[number]) {
   await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+  await chooseTheme(page, theme);
   await page.goto("/?gallery");
   await expect(page.getByRole("heading", { name: "Component gallery" })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
@@ -24,6 +27,7 @@ test.describe("gallery screenshots", { tag: "@screenshot" }, () => {
 
     test(`window shell (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+      await chooseTheme(page, theme);
       await page.setViewportSize({ width: 1024, height: 680 });
       await page.goto("/");
       await expect(page.getByRole("banner")).toBeVisible();

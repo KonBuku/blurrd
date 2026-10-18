@@ -1,7 +1,7 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { requireFixtureMedia } from "./fixtures";
+import { chooseTheme, requireFixtureMedia } from "./fixtures";
 import { openFresh, openRecording } from "./preview-helpers";
 
 /** The palette dialog. */
@@ -20,6 +20,7 @@ async function searchPalette(page: Page, text: string) {
 test.describe("command palette", () => {
   test.beforeEach(async ({ page }) => {
     await page.emulateMedia({ colorScheme: "light" });
+    await chooseTheme(page, "light");
     await openFresh(page);
   });
 
@@ -75,6 +76,7 @@ test.describe("command palette", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`has no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
+      await chooseTheme(page, theme);
       await searchPalette(page, "");
       const results = await new AxeBuilder({ page })
         .include('[role="dialog"]')
