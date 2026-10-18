@@ -34,10 +34,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parse as parseToml } from "smol-toml";
 
+import { wrongText } from "./license-texts/check.mjs";
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DESKTOP = join(ROOT, "apps", "desktop");
 const NOTICES_FILE = join(ROOT, "THIRD-PARTY-NOTICES.md");
 const DATA_FILE = join(DESKTOP, "src", "features", "about", "licenses.json");
+/** The canonical Apache License 2.0 text, for the OCR models. */
+const APACHE_TEXT = join(ROOT, "scripts", "license-texts", "Apache-2.0.txt");
 
 /** Format tag of the data file, checked by the app. */
 const SCHEMA = "blurrd-licenses/1";
@@ -130,6 +134,8 @@ class Collector {
   text(license, text) {
     const normalized = normalize(text);
     if (normalized === "") fail(`empty licence text for ${license}`);
+    const wrong = wrongText(license, normalized);
+    if (wrong !== null) fail(wrong);
     let index = this.#index.get(normalized);
     if (index === undefined) {
       index = this.texts.length;
@@ -226,8 +232,9 @@ function addModels(collector) {
   if (conversion.license !== "Apache-2.0") {
     fail(`models.toml: no licence text for "${conversion.license}"`);
   }
-  // The Apache License 2.0 text for the OCR models.
-  const text = collector.text("Apache-2.0", readText(join(ROOT, "LICENSE")));
+  // The canonical Apache License 2.0 (apache.org/licenses/LICENSE-2.0.txt),
+  // pinned in the repository: blurrd's own LICENSE is a different licence.
+  const text = collector.text("Apache-2.0", readText(APACHE_TEXT));
   for (const model of (pin.model ?? []).filter((item) => item.bundled)) {
     collector.add({
       kind: "model",
