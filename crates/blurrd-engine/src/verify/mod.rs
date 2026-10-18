@@ -135,6 +135,9 @@ pub(crate) struct LineLog {
     /// The most frames between two reads of the HUD zones while a name
     /// stays on screen: exposures of one name this close form one run.
     hud_spacing: u32,
+    /// Whether pass 0 read every zone on every frame
+    /// ([`blurrd_core::Coverage::EveryFrame`]).
+    every_frame: bool,
 }
 
 /// The lines of one frame, per zone read.
@@ -175,6 +178,7 @@ impl LineLog {
             frames: BTreeMap::new(),
             half_second: half_second.max(1),
             hud_spacing: DictionaryBuilder::CADENCE,
+            every_frame: false,
         }
     }
 
@@ -188,6 +192,11 @@ impl LineLog {
     /// stays on screen.
     pub(crate) fn hud_spacing(&self) -> u32 {
         self.hud_spacing
+    }
+
+    /// Records whether pass 0 read every zone on every frame.
+    pub(crate) fn set_every_frame(&mut self, every_frame: bool) {
+        self.every_frame = every_frame;
     }
 
     /// Records the lines read on `frame`, where the HUD zones `hud` were
@@ -632,8 +641,10 @@ fn spread(len: usize, max: usize) -> Vec<usize> {
 /// the frame before the next one, at most a reading interval beyond the
 /// run; a run of the full-frame samples (one frame a second) reaches half
 /// its sampling gap beyond the run on both sides, as nothing is known
-/// between two samples.
-fn fix_range(log: &LineLog, run: &Run, frame_count: u32) -> (u32, u32) {
+/// between two samples. When every frame was read, a protected-zone run
+/// reaches a reading interval beyond the run on both sides: as far as the
+/// fix of HUD activity's reads could, so Every frame never fixes less.
+pub(super) fn fix_range(log: &LineLog, run: &Run, frame_count: u32) -> (u32, u32) {
     let (first, last) = (run.first(), run.last());
     let last_frame = frame_count.saturating_sub(1);
     if run.spacing > log.hud_spacing() {
@@ -644,6 +655,12 @@ fn fix_range(log: &LineLog, run: &Run, frame_count: u32) -> (u32, u32) {
         );
     }
     let gap = run.spacing.saturating_sub(1);
+    if log.every_frame {
+        return (
+            first.saturating_sub(gap),
+            last.saturating_add(gap).min(last_frame).max(last),
+        );
+    }
     let f0 = log
         .checked_before(first, run.region)
         .map_or(first.saturating_sub(gap), |f| f + 1)

@@ -424,6 +424,7 @@ impl Opening {
         } = self;
         let mut schedule = ReadSchedule::new(coverage, log.half_second());
         log.set_hud_spacing(schedule.spacing());
+        log.set_every_frame(schedule.every);
         let half_second = log.half_second();
         let plans: Vec<Vec<ZoneKind>> = builders
             .iter()
@@ -965,13 +966,11 @@ impl ReadSchedule {
     }
 
     /// The most frames between two HUD reads of one name on screen: what
-    /// joins the exposures of one name into one run.
+    /// joins the exposures of one name into one run. Every frame joins
+    /// like HUD activity (its reads include those of HUD activity), so its
+    /// runs and fixes never cover less.
     fn spacing(&self) -> u32 {
-        if self.every {
-            DictionaryBuilder::CADENCE
-        } else {
-            self.cadence
-        }
+        self.cadence
     }
 
     /// The zones read on `frame`, where the HUD stages saw `seen` and the
@@ -1122,6 +1121,7 @@ mod tests {
             |d| d.hud.feed && d.hud.left && d.screens[0],
         );
         assert_eq!(both, (0..10).collect::<Vec<_>>());
-        assert_eq!(schedule.spacing(), crate::DictionaryBuilder::CADENCE);
+        // Runs join like HUD activity.
+        assert_eq!(schedule.spacing(), 60);
     }
 }

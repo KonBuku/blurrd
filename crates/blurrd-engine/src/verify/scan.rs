@@ -525,6 +525,51 @@ mod tests {
     }
 
     #[test]
+    fn every_frame_fixes_reach_as_far_as_hud_activity_ones() {
+        use blurrd_core::RegionSet;
+
+        use crate::verify::{HudRead, LineLog, fix_range};
+
+        let at = |frame| Exposure {
+            frame,
+            part: rect(100, 100, 150, 120),
+            line: rect(90, 100, 160, 120),
+        };
+        let read = HudRead {
+            feed: true,
+            left: true,
+        };
+        let mut every = LineLog::new(30);
+        every.set_hud_spacing(60);
+        every.set_every_frame(true);
+        let mut hud = LineLog::new(30);
+        hud.set_hud_spacing(60);
+        for frame in 0..600 {
+            every.record(frame, read, RegionSet::empty(), Vec::new());
+            if frame % 60 == 0 || frame == 230 {
+                hud.record(frame, read, RegionSet::empty(), Vec::new());
+            }
+        }
+        // The name is on frames 200..=300; HUD activity read it on 230, 240
+        // and 300 only, Every frame on all of them.
+        let mut runs = Runs::default();
+        for frame in 200..=300 {
+            runs.add(Region::KillFeed, "nova", 60, at(frame));
+        }
+        let every_run = runs.finish().remove(0);
+        let mut runs = Runs::default();
+        for frame in [230, 240, 300] {
+            runs.add(Region::KillFeed, "nova", 60, at(frame));
+        }
+        let hud_run = runs.finish().remove(0);
+        let (e0, e1) = fix_range(&every, &every_run, 600);
+        let (h0, h1) = fix_range(&hud, &hud_run, 600);
+        assert_eq!((h0, h1), (181, 359));
+        assert!(e0 <= h0 && e1 >= h1, "{e0}..{e1} vs {h0}..{h1}");
+        assert_eq!((e0, e1), (141, 359));
+    }
+
+    #[test]
     fn counts_names_on_the_scoreboard_grid() {
         let at = |y| {
             (

@@ -124,7 +124,8 @@ all. Know its limits before you publish:
 - **Not every frame is read.** The source is read at the HUD's layout
   changes and at least once a second; fix boxes cover the whole time
   between the reads. The app's Verify settings can read every frame
-  instead (slower).
+  instead (slower); its fix boxes reach at least as far as those of the
+  default reads.
 - **HUD words are not names.** Words the HUD shows itself are on a list
   that the check ignores: location names, callouts (also joined, such as
   "MidTop"), agent names, distance markers such as "28m", scoreboard
