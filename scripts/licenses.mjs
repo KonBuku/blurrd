@@ -271,18 +271,28 @@ function addModels(collector) {
   }
 }
 
-/** Runs cargo-about for one shipped binary. */
+/**
+ * Runs cargo-about for one shipped binary. The JSON goes to a file:
+ * cargo-about refuses to write redirected output when PowerShell started
+ * it (as in CI).
+ */
 function cargoAbout(manifest) {
-  const result = spawnSync(
-    "cargo",
-    ["about", "generate", "--format", "json", "--locked", "--fail", "-m", manifest],
-    { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
-  );
-  if (result.error) fail(`cargo about could not start: ${result.error.message}`);
-  if (result.status !== 0) {
-    fail(`cargo about failed for ${manifest}:\n${result.stderr}\nInstall cargo-about 0.9.2.`);
+  const dir = mkdtempSync(join(tmpdir(), "blurrd-about-"));
+  const out = join(dir, "about.json");
+  try {
+    const result = spawnSync(
+      "cargo",
+      ["about", "generate", "--format", "json", "--locked", "--fail", "-m", manifest, "-o", out],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+    );
+    if (result.error) fail(`cargo about could not start: ${result.error.message}`);
+    if (result.status !== 0) {
+      fail(`cargo about failed for ${manifest}:\n${result.stderr}\nInstall cargo-about 0.9.2.`);
+    }
+    return JSON.parse(readFileSync(out, "utf8"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  return JSON.parse(result.stdout);
 }
 
 /** The crates of the desktop app and the CLI. */
