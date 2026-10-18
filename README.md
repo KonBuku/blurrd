@@ -5,7 +5,17 @@
   </picture>
 </p>
 
-<p align="center">Blur player names in gameplay recordings: fast, on your GPU, fully offline.</p>
+<p align="center"><strong>Blur player names in gameplay recordings: fast, on your GPU, fully offline, checked by OCR.</strong></p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-555"></a>
+  <img alt="Platform: Windows 11 x64" src="https://img.shields.io/badge/platform-Windows%2011%20x64-555">
+  <img alt="Status: v0.1.0 in preparation" src="https://img.shields.io/badge/status-v0.1.0%20in%20preparation-555">
+</p>
+
+<p align="center">
+  <img src="docs/assets/showcase/hero.webp" alt="The blurrd app in its dark theme: a VALORANT recording with the round banner and kill-feed names blurred, the queue on the left and the region switches on the right" width="100%">
+</p>
 
 blurrd is a Windows desktop app, plus a command-line tool, that finds the
 player names in a VALORANT recording, covers them with tight, soft-edged
@@ -19,35 +29,89 @@ as the source.
 
 ## Features
 
-- **Names in the HUD and on the game's screens:** the kill feed, the
-  ACE/clutch round banner, the voice-chat speaker, the text-chat sender,
-  the scoreboard, the death recap, the spectating widget and the
-  match-end/MVP screens. Pick all of them or only some.
-- **Boxes that follow the HUD:** rows that slide in, stack, wipe and fade
-  stay covered from their first to their last visible frame. The blur
-  has a soft edge, a minimum block size and noise, so names cannot simply
-  be sharpened back.
-- **Checked with OCR:** during the analysis, OCR reads the names on the
-  source and then the blurred result exactly as the export will show it.
-  A name that stays readable gets an extra box; an output that cannot be
-  shown to be clean is named `*_UNVERIFIED` until you check it.
-- **Review and edit:** the app previews the blur on the video (before,
-  after or split, frame stepping, a box overlay and a timeline that marks
-  every region and the verification). Add, move or hide boxes; edited
-  frames are checked again before the export.
-- **Faithful export:** same resolution, frame rate, timestamps and
-  keyframes; audio and subtitles copied packet for packet; recorder
-  metadata removed. H.264, HEVC or AV1 through NVIDIA NVENC, AMD AMF,
-  Intel Quick Sync or Windows Media Foundation, chosen automatically.
-- **Structure-based detection:** names are found from the layout of the
-  HUD, not from fixed colours or pixel positions, so the same code covers
-  custom highlight colours, colour filters (greyscale, saturation, gamma,
-  vibrance, sharpening), other resolutions (720p to 4K) and other aspect
-  ratios (4:3 stretched or pillarboxed, 16:10).
-- **Offline and private:** no account, no telemetry, no network access.
-  Reports and logs never contain the text OCR read.
-- **Batch and command line:** export many files in one queue, or script
-  everything with the `blurrd` command-line tool.
+### Every HUD region
+
+<img src="docs/assets/showcase/regions.webp" alt="The box overlay on a recording: the round banner name and a kill-feed row covered by boxes, next to the list of regions with the number of names found in each" width="100%">
+
+The kill feed, the ACE/clutch round banner, the voice-chat speaker, the
+text-chat sender, the scoreboard, the death recap, the spectating widget
+and the match-end/MVP screens, each with its own switch. Rows that slide
+in, stack, wipe and fade stay covered from their first to their last
+visible frame. Names are found from the layout of the HUD, not from fixed
+colours or pixel positions, so custom highlight colours, colour filters,
+720p to 4K and 4:3 or 16:10 run through the same code.
+
+### Checked by OCR before export
+
+<img src="docs/assets/showcase/verified.webp" alt="The verification report of a recording: 326 frames checked, 0 open, 2 fixed, every region read on the source" width="100%">
+
+During the analysis, OCR reads the names on the source and then the
+blurred frames exactly as the export will show them. A name that stays
+readable gets another box; an output that cannot be shown to be clean is
+named `*_UNVERIFIED` until you check it. The blur has a soft edge, a
+minimum block size and noise, so names cannot simply be sharpened back.
+
+### Edit any box
+
+<img src="docs/assets/showcase/edit.webp" alt="A selected box on the round banner with its handles, above the timeline with one lane per region and the verification lane" width="100%">
+
+Before, after or split view, frame stepping, a box overlay and a timeline
+with one lane per region. Add, move or hide boxes and undo; edited frames
+are checked again before the export.
+
+### Fast on your GPU
+
+<img src="docs/assets/showcase/fast.webp" alt="An export in progress at 885 frames per second, with the measured speed of blurrd for a 60-second 1080p60 recording" width="100%">
+
+About 10 seconds for a 60-second 1080p60 recording, analysis, OCR check
+and export included (RTX 4080 SUPER; see [Speed](#speed)). Exports keep
+the resolution, frame rate, timestamps and keyframes, copy audio and
+subtitles packet for packet and remove recorder metadata. H.264, HEVC or
+AV1 through NVIDIA NVENC, AMD AMF, Intel Quick Sync or Windows Media
+Foundation, chosen automatically. Many files export from one queue, or
+from the `blurrd` command-line tool.
+
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
+  <img src="docs/assets/how-it-works-light.svg" alt="How blurrd works: the recording is decoded once on the GPU (NVDEC), the HUD layout is calibrated, per-region detectors track the names in the kill feed, round banner, voice chat, text chat, scoreboard, death recap, spectating widget and match-end screens, blur boxes are applied and the video is encoded on the GPU (NVENC); OCR verification reads the blurred frames and adds fix boxes for missed names, up to three rounds, before the verified export. Everything runs on your PC." width="100%">
+</picture>
+
+One decoder feeds every detector. A frame's boxes are final at most 240
+frames after it was decoded, and the render waits for them instead of
+ever blurring a frame early. The OCR models run through ONNX Runtime on
+DirectML or on the CPU. [docs/architecture.md](docs/architecture.md)
+describes the crates, the jobs and the data on disk.
+
+## Speed
+
+Measured on 2026-10-17 with a release build on an NVIDIA GeForce RTX 4080
+SUPER and an AMD Ryzen 7 7800X3D, for a 60-second 1080p60 H.264 recording
+(3,601 frames); wall-clock time of the command-line tool, including its
+start and exit:
+
+| Command                                             | Time                |
+| --------------------------------------------------- | ------------------- |
+| `blurrd run`: analysis, OCR verification and export | 9.9–10.3 s          |
+| `blurrd run --no-verify`: analysis and export only  | 5.9–6.1 s           |
+| `blurrd analyze` with OCR verification              | 8.2–8.8 s           |
+| `blurrd render`: H.264 export on two NVENC sessions | 4.3 s (830–870 fps) |
+| `blurrd audit`: OCR over the exported file          | 32–38 s             |
+
+Inside those times, the analysis runs at 450–500 frames per second with
+OCR and at 800–890 frames per second without it.
+
+When the verification adds boxes to a streamed export, only the parts
+with new boxes are encoded again (10.4–11.8 s in total). In the app, the
+check of a 2-second range after an edit takes 1.9–2.7 s (about 4 s for
+the first check after the app starts). Without a GPU, decoding, OCR and
+encoding run on the CPU and take considerably longer.
+
+Before the release, the detectors were swept over 31 real recordings in
+34 variants each (resolutions, aspect ratios and colour filters made from
+those recordings): OCR found no readable player name in a supported
+region in any of them.
 
 ## What blurrd blurs, and what it does not
 
@@ -69,11 +133,11 @@ cards. Names that OCR sees outside every supported region are listed in
 the report as "out of scope"; they never change the result.
 
 blurrd was verified on real 1080p60 recordings. Other resolutions, aspect
-ratios and colour settings were tested on variants made from those
-recordings, and some cases have no test footage at all.
-[docs/privacy.md](docs/privacy.md) lists every case as verified or not
-verified and explains the limits of the OCR check and what blurrd stores
-on your computer.
+ratios (4:3, 16:10) and colour settings were tested on variants made from
+those recordings, not on native recordings, and some cases have no test
+footage at all. blurrd runs on Windows only, and its speed was measured on
+NVIDIA hardware. [docs/privacy.md](docs/privacy.md) lists every case as
+verified or not verified and explains the limits of the OCR check.
 
 ## System requirements
 
@@ -148,29 +212,15 @@ When a result cannot be verified, the output is named
 [docs/cli.md](docs/cli.md) describes every command and option, the JSON
 output and the exit codes.
 
-## Performance
+## Privacy
 
-Measured on 2026-10-17 with a release build on an NVIDIA GeForce RTX 4080
-SUPER and an AMD Ryzen 7 7800X3D, for a 60-second 1080p60 H.264 recording
-(3,601 frames); wall-clock time of the command-line tool, including its
-start and exit:
-
-| Command                                             | Time                |
-| --------------------------------------------------- | ------------------- |
-| `blurrd run`: analysis, OCR verification and export | 9.9–10.3 s          |
-| `blurrd run --no-verify`: analysis and export only  | 5.9–6.1 s           |
-| `blurrd analyze` with OCR verification              | 8.2–8.8 s           |
-| `blurrd render`: H.264 export on two NVENC sessions | 4.3 s (830–870 fps) |
-| `blurrd audit`: OCR over the exported file          | 32–38 s             |
-
-Inside those times, the analysis runs at 450–500 frames per second with
-OCR and at 800–890 frames per second without it.
-
-When the verification adds boxes to a streamed export, only the parts
-with new boxes are encoded again (10.4–11.8 s in total). In the app, the
-check of a 2-second range after an edit takes 1.9–2.7 s (about 4 s for
-the first check after the app starts). Without a GPU, decoding, OCR and
-encoding run on the CPU and take considerably longer.
+Everything runs on your PC. blurrd has no account, no telemetry and no
+network access, and recordings are never uploaded. It keeps its projects
+and previews under `%LOCALAPPDATA%\blurrd` and its settings in the app's
+config folder; reports and logs contain frames, regions, boxes,
+confidences and counts, never the text OCR read.
+[docs/privacy.md](docs/privacy.md#what-blurrd-stores-and-sends) lists
+every file.
 
 ## Documentation
 
@@ -199,19 +249,36 @@ cargo run --release -p blurrd-cli -- run match.mp4 -o match_blurrd.mp4
 ## Contributing
 
 Contributions are welcome; please read the [contributing guide](CONTRIBUTING.md)
-and the [Code of Conduct](CODE_OF_CONDUCT.md) first. Report security problems
-as described in the [security policy](SECURITY.md).
+and the [Code of Conduct](CODE_OF_CONDUCT.md) first. Contributions are
+accepted under the licence below, and contributors allow the author to
+also offer them under the commercial licence. Report security problems as
+described in the [security policy](SECURITY.md).
 
 ## License
 
-blurrd is open source under the [GNU GPL 3.0 only](LICENSE), with
-additional terms in [NOTICE](NOTICE): every copy and modified version
-must keep the credit "blurrd by KonBuku
-(https://github.com/KonBuku/blurrd)" in its About screen and
-documentation, and modified versions must be marked as changed. A
-commercial licence is available for closed-source use; see
-[docs/licensing.md](docs/licensing.md). Third-party components keep their
-own licences ([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
+blurrd is open source under the [GNU General Public License 3.0 only](LICENSE)
+(`GPL-3.0-only`) with additional terms in [NOTICE](NOTICE):
+
+- you may use blurrd for anything, also commercially, for example for the
+  videos you publish;
+- whoever distributes blurrd or a modified version must do so under the
+  same licence, with the complete source code;
+- every copy and modified version must keep the credit
+  **blurrd by KonBuku (https://github.com/KonBuku/blurrd)** in its About
+  screen and documentation, and modified versions must be marked as
+  changed.
+
+**Commercial licence:** to use blurrd's code in a closed-source product or
+to distribute it without the GPL's obligations, ask the author for a
+separate commercial licence through a
+[GitHub issue](https://github.com/KonBuku/blurrd/issues) or the
+[author's GitHub profile](https://github.com/KonBuku).
+
+Third-party components keep their own licences (FFmpeg
+LGPL-2.1-or-later, linked dynamically; ONNX Runtime MIT; the OCR models
+Apache-2.0; the libraries in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
+[docs/licensing.md](docs/licensing.md) has the details.
 
 ## Legal
 
@@ -219,4 +286,6 @@ blurrd is an independent open-source project and is not affiliated with,
 endorsed, sponsored or approved by Riot Games, Inc. VALORANT and Riot Games
 are trademarks or registered trademarks of Riot Games, Inc. NVIDIA and
 NVENC are trademarks of NVIDIA Corporation. FFmpeg is a trademark of
-Fabrice Bellard, originator of the FFmpeg project.
+Fabrice Bellard, originator of the FFmpeg project. The gameplay in the
+screenshots is the author's own recording, shown inside the app with the
+names blurred.
