@@ -56,364 +56,364 @@ Corresponding source: <https://github.com/KonBuku/blurrd/releases/download/deps-
 
 | Crate | Version | Licence | Licence texts |
 | --- | --- | --- | --- |
-| [adler2](https://github.com/oyvindln/adler2) | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | [30](#licence-30) |
-| [aho-corasick](https://github.com/BurntSushi/aho-corasick) | 1.1.5 | Unlicense OR MIT | [66](#licence-66) |
-| [alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 3.0.0 | BSD-3-Clause | [35](#licence-35) |
-| [alloc-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 0.3.0 | BSD-3-Clause | [36](#licence-36) |
-| [anstream](https://github.com/rust-cli/anstyle.git) | 1.0.0 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [anstyle](https://github.com/rust-cli/anstyle.git) | 1.0.14 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [anstyle-parse](https://github.com/rust-cli/anstyle.git) | 1.0.0 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [anstyle-query](https://github.com/rust-cli/anstyle.git) | 1.1.5 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [anstyle-wincon](https://github.com/rust-cli/anstyle.git) | 3.0.11 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [anyhow](https://github.com/dtolnay/anyhow) | 1.0.104 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [arrayvec](https://github.com/bluss/arrayvec) | 0.7.8 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [base64](https://github.com/marshallpierce/rust-base64) | 0.22.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [base64](https://github.com/marshallpierce/rust-base64) | 0.23.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [bit-set](https://github.com/contain-rs/bit-set) | 0.8.0 | Apache-2.0 OR MIT | [26](#licence-26) |
-| [bit-vec](https://github.com/contain-rs/bit-vec) | 0.8.0 | Apache-2.0 OR MIT | [26](#licence-26) |
-| [bitflags](https://github.com/bitflags/bitflags) | 1.3.2 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [bitflags](https://github.com/bitflags/bitflags) | 2.13.2 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [blake3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.7 | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | [34](#licence-34) |
-| [block-buffer](https://github.com/RustCrypto/utils) | 0.10.4 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [block-buffer](https://github.com/RustCrypto/utils) | 0.12.1 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [brotli](https://github.com/dropbox/rust-brotli) | 9.0.0 | BSD-3-Clause AND MIT | [35](#licence-35), [40](#licence-40) |
-| [brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) | 6.0.1 | BSD-3-Clause OR MIT | [35](#licence-35) |
-| [bytemuck](https://github.com/Lokathor/bytemuck) | 1.25.2 | Zlib OR Apache-2.0 OR MIT | [33](#licence-33) |
-| [byteorder](https://github.com/BurntSushi/byteorder) | 1.5.0 | Unlicense OR MIT | [66](#licence-66) |
-| [bytes](https://github.com/tokio-rs/bytes) | 1.12.1 | MIT | [45](#licence-45) |
-| [camino](https://github.com/camino-rs/camino) | 1.2.6 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [cargo_metadata](https://github.com/oli-obk/cargo_metadata) | 0.19.2 | MIT | [62](#licence-62) |
-| [cargo-platform](https://github.com/rust-lang/cargo) | 0.1.9 | MIT OR Apache-2.0 | [30](#licence-30) |
-| [cfb](https://github.com/mdsteele/rust-cfb) | 0.14.0 | MIT | [50](#licence-50) |
-| [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.5 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [clap](https://github.com/clap-rs/clap) | 4.6.7 | MIT OR Apache-2.0 | [80](#licence-80) |
-| [clap_builder](https://github.com/clap-rs/clap) | 4.6.7 | MIT OR Apache-2.0 | [80](#licence-80) |
-| [clap_derive](https://github.com/clap-rs/clap) | 4.6.7 | MIT OR Apache-2.0 | [80](#licence-80) |
-| [clap_lex](https://github.com/clap-rs/clap) | 1.1.1 | MIT OR Apache-2.0 | [80](#licence-80) |
-| [colorchoice](https://github.com/rust-cli/anstyle.git) | 1.0.5 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [const-oid](https://github.com/RustCrypto/formats) | 0.10.2 | Apache-2.0 OR MIT | [27](#licence-27) |
-| [constant_time_eq](https://github.com/cesarb/constant_time_eq) | 0.4.2 | CC0-1.0 OR MIT-0 OR Apache-2.0 | [34](#licence-34) |
-| [cookie](https://github.com/SergioBenitez/cookie-rs) | 0.18.2 | MIT OR Apache-2.0 | [22](#licence-22) |
-| [cpufeatures](https://github.com/RustCrypto/utils) | 0.2.17 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [cpufeatures](https://github.com/RustCrypto/utils) | 0.3.1 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [crc32fast](https://github.com/srijs/rust-crc32fast) | 1.5.2 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) | 0.5.17 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [crossbeam-utils](https://github.com/crossbeam-rs/crossbeam) | 0.8.23 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [crypto-common](https://github.com/RustCrypto/traits) | 0.1.7 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [crypto-common](https://github.com/RustCrypto/traits) | 0.2.2 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [cssparser](https://github.com/servo/rust-cssparser) | 0.37.0 | MPL-2.0 | [74](#licence-74) |
-| [cssparser-macros](https://github.com/servo/rust-cssparser) | 0.7.1 | MPL-2.0 | [74](#licence-74) |
-| [ctor](https://github.com/mmastrac/linktime) | 1.0.13 | Apache-2.0 OR MIT | [18](#licence-18) |
-| [ctrlc](https://github.com/Detegr/rust-ctrlc.git) | 3.5.2 | MIT OR Apache-2.0 | [81](#licence-81) |
-| [darling](https://github.com/TedDriggs/darling) | 0.24.1 | MIT | [51](#licence-51) |
-| [darling_core](https://github.com/TedDriggs/darling) | 0.24.1 | MIT | [51](#licence-51) |
-| [darling_macro](https://github.com/TedDriggs/darling) | 0.24.1 | MIT | [51](#licence-51) |
+| [adler2](https://github.com/oyvindln/adler2) | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | [31](#licence-31) |
+| [aho-corasick](https://github.com/BurntSushi/aho-corasick) | 1.1.5 | Unlicense OR MIT | [67](#licence-67) |
+| [alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 3.0.0 | BSD-3-Clause | [36](#licence-36) |
+| [alloc-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 0.3.0 | BSD-3-Clause | [37](#licence-37) |
+| [anstream](https://github.com/rust-cli/anstyle.git) | 1.0.0 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [anstyle](https://github.com/rust-cli/anstyle.git) | 1.0.14 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [anstyle-parse](https://github.com/rust-cli/anstyle.git) | 1.0.0 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [anstyle-query](https://github.com/rust-cli/anstyle.git) | 1.1.5 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [anstyle-wincon](https://github.com/rust-cli/anstyle.git) | 3.0.11 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [anyhow](https://github.com/dtolnay/anyhow) | 1.0.104 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [arrayvec](https://github.com/bluss/arrayvec) | 0.7.8 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [base64](https://github.com/marshallpierce/rust-base64) | 0.22.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [base64](https://github.com/marshallpierce/rust-base64) | 0.23.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [bit-set](https://github.com/contain-rs/bit-set) | 0.8.0 | Apache-2.0 OR MIT | [27](#licence-27) |
+| [bit-vec](https://github.com/contain-rs/bit-vec) | 0.8.0 | Apache-2.0 OR MIT | [27](#licence-27) |
+| [bitflags](https://github.com/bitflags/bitflags) | 1.3.2 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [bitflags](https://github.com/bitflags/bitflags) | 2.13.2 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [blake3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.7 | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | [35](#licence-35) |
+| [block-buffer](https://github.com/RustCrypto/utils) | 0.10.4 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [block-buffer](https://github.com/RustCrypto/utils) | 0.12.1 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [brotli](https://github.com/dropbox/rust-brotli) | 9.0.0 | BSD-3-Clause AND MIT | [36](#licence-36), [41](#licence-41) |
+| [brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) | 6.0.1 | BSD-3-Clause OR MIT | [36](#licence-36) |
+| [bytemuck](https://github.com/Lokathor/bytemuck) | 1.25.2 | Zlib OR Apache-2.0 OR MIT | [34](#licence-34) |
+| [byteorder](https://github.com/BurntSushi/byteorder) | 1.5.0 | Unlicense OR MIT | [67](#licence-67) |
+| [bytes](https://github.com/tokio-rs/bytes) | 1.12.1 | MIT | [46](#licence-46) |
+| [camino](https://github.com/camino-rs/camino) | 1.2.6 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [cargo_metadata](https://github.com/oli-obk/cargo_metadata) | 0.19.2 | MIT | [63](#licence-63) |
+| [cargo-platform](https://github.com/rust-lang/cargo) | 0.1.9 | MIT OR Apache-2.0 | [31](#licence-31) |
+| [cfb](https://github.com/mdsteele/rust-cfb) | 0.14.0 | MIT | [51](#licence-51) |
+| [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.5 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [clap](https://github.com/clap-rs/clap) | 4.6.7 | MIT OR Apache-2.0 | [81](#licence-81) |
+| [clap_builder](https://github.com/clap-rs/clap) | 4.6.7 | MIT OR Apache-2.0 | [81](#licence-81) |
+| [clap_derive](https://github.com/clap-rs/clap) | 4.6.7 | MIT OR Apache-2.0 | [81](#licence-81) |
+| [clap_lex](https://github.com/clap-rs/clap) | 1.1.1 | MIT OR Apache-2.0 | [81](#licence-81) |
+| [colorchoice](https://github.com/rust-cli/anstyle.git) | 1.0.5 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [const-oid](https://github.com/RustCrypto/formats) | 0.10.2 | Apache-2.0 OR MIT | [28](#licence-28) |
+| [constant_time_eq](https://github.com/cesarb/constant_time_eq) | 0.4.2 | CC0-1.0 OR MIT-0 OR Apache-2.0 | [35](#licence-35) |
+| [cookie](https://github.com/SergioBenitez/cookie-rs) | 0.18.2 | MIT OR Apache-2.0 | [23](#licence-23) |
+| [cpufeatures](https://github.com/RustCrypto/utils) | 0.2.17 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [cpufeatures](https://github.com/RustCrypto/utils) | 0.3.1 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [crc32fast](https://github.com/srijs/rust-crc32fast) | 1.5.2 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) | 0.5.17 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [crossbeam-utils](https://github.com/crossbeam-rs/crossbeam) | 0.8.23 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [crypto-common](https://github.com/RustCrypto/traits) | 0.1.7 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [crypto-common](https://github.com/RustCrypto/traits) | 0.2.2 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [cssparser](https://github.com/servo/rust-cssparser) | 0.37.0 | MPL-2.0 | [75](#licence-75) |
+| [cssparser-macros](https://github.com/servo/rust-cssparser) | 0.7.1 | MPL-2.0 | [75](#licence-75) |
+| [ctor](https://github.com/mmastrac/linktime) | 1.0.13 | Apache-2.0 OR MIT | [19](#licence-19) |
+| [ctrlc](https://github.com/Detegr/rust-ctrlc.git) | 3.5.2 | MIT OR Apache-2.0 | [82](#licence-82) |
+| [darling](https://github.com/TedDriggs/darling) | 0.24.1 | MIT | [52](#licence-52) |
+| [darling_core](https://github.com/TedDriggs/darling) | 0.24.1 | MIT | [52](#licence-52) |
+| [darling_macro](https://github.com/TedDriggs/darling) | 0.24.1 | MIT | [52](#licence-52) |
 | [deranged](https://github.com/jhpratt/deranged) | 0.5.8 | MIT OR Apache-2.0 | [14](#licence-14) |
-| [derive_more](https://github.com/JelteF/derive_more) | 2.1.1 | MIT | [68](#licence-68) |
-| [derive_more-impl](https://github.com/JelteF/derive_more) | 2.1.1 | MIT | [68](#licence-68) |
-| [digest](https://github.com/RustCrypto/traits) | 0.10.7 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [digest](https://github.com/RustCrypto/traits) | 0.11.3 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [dirs](https://codeberg.org/dirs/dirs-rs) | 7.0.0 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [dirs-sys](https://github.com/dirs-dev/dirs-sys-rs) | 0.5.0 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [displaydoc](https://github.com/yaahc/displaydoc) | 0.2.7 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [dom_query](https://github.com/niklak/dom_query) | 0.28.0 | MIT | [58](#licence-58) |
-| [dpi](https://github.com/rust-windowing/winit) | 0.1.2 | Apache-2.0 AND MIT | [18](#licence-18), [59](#licence-59) |
-| [dtoa](https://github.com/dtolnay/dtoa) | 1.0.11 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [dtoa-short](https://github.com/upsuper/dtoa-short) | 0.3.5 | MPL-2.0 | [73](#licence-73) |
-| [dunce](https://gitlab.com/kornelski/dunce) | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | [34](#licence-34) |
-| [dyn-clone](https://github.com/dtolnay/dyn-clone) | 1.0.20 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [equivalent](https://github.com/indexmap-rs/equivalent) | 1.0.2 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [erased-serde](https://github.com/dtolnay/erased-serde) | 0.4.10 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [fastrand](https://github.com/smol-rs/fastrand) | 2.5.0 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [fdeflate](https://github.com/image-rs/fdeflate) | 0.3.7 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [fern](https://github.com/daboross/fern) | 0.7.1 | MIT | [42](#licence-42) |
-| [ffmpeg-sys-the-third](https://github.com/shssoichiro/ffmpeg-the-third) | 6.0.0+ffmpeg-9.0 | WTFPL | [78](#licence-78) |
-| [ffmpeg-the-third](https://github.com/shssoichiro/ffmpeg-the-third) | 6.0.0+ffmpeg-9.0 | WTFPL | [78](#licence-78) |
-| [flate2](https://github.com/rust-lang/flate2-rs) | 1.1.10 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [fnv](https://github.com/servo/rust-fnv) | 1.0.7 | Apache-2.0  OR  MIT | [25](#licence-25) |
-| [foldhash](https://github.com/orlp/foldhash) | 0.2.0 | Zlib | [79](#licence-79) |
-| [form_urlencoded](https://github.com/servo/rust-url) | 1.2.2 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [futures-core](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 | [20](#licence-20) |
-| [futures-sink](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 | [20](#licence-20) |
-| [generic-array](https://github.com/fizyk20/generic-array.git) | 0.14.7 | MIT | [72](#licence-72) |
-| [getrandom](https://github.com/rust-random/getrandom) | 0.3.4 | MIT OR Apache-2.0 | [29](#licence-29) |
-| [getrandom](https://github.com/rust-random/getrandom) | 0.4.3 | MIT OR Apache-2.0 | [29](#licence-29) |
-| [glob](https://github.com/rust-lang/glob) | 0.3.4 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [hashbrown](https://github.com/rust-lang/hashbrown) | 0.17.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [heck](https://github.com/withoutboats/heck) | 0.5.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [html5ever](https://github.com/servo/html5ever) | 0.39.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [http](https://github.com/hyperium/http) | 1.5.0 | MIT OR Apache-2.0 | [23](#licence-23) |
-| [http-range](https://github.com/bancek/rust-http-range.git) | 0.1.5 | MIT | [48](#licence-48) |
-| [hybrid-array](https://github.com/RustCrypto/hybrid-array) | 0.4.15 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [ico](https://github.com/mdsteele/rust-ico) | 0.5.0 | MIT | [52](#licence-52) |
-| [icu_collections](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [77](#licence-77) |
-| [icu_locale_core](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [77](#licence-77) |
-| [icu_normalizer](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [77](#licence-77) |
-| [icu_normalizer_data](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [77](#licence-77) |
-| [icu_properties](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [77](#licence-77) |
-| [icu_properties_data](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [77](#licence-77) |
-| [icu_provider](https://github.com/unicode-org/icu4x) | 2.3.1 | Unicode-3.0 | [77](#licence-77) |
-| [ident_case](https://github.com/TedDriggs/ident_case) | 1.0.1 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [idna](https://github.com/servo/rust-url/) | 1.1.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [idna_adapter](https://github.com/hsivonen/idna_adapter) | 1.2.2 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [indexmap](https://github.com/indexmap-rs/indexmap) | 2.14.2 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [infer](https://github.com/bojand/infer) | 0.22.0 | MIT | [53](#licence-53) |
-| [is_terminal_polyfill](https://github.com/polyfill-rs/is_terminal_polyfill) | 1.70.2 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [itoa](https://github.com/dtolnay/itoa) | 1.0.18 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [jpeg-encoder](https://github.com/vstroebel/jpeg-encoder) | 0.7.1 | (MIT OR Apache-2.0) AND IJG | [31](#licence-31), [37](#licence-37) |
-| [json-patch](https://github.com/idubrov/json-patch) | 4.2.0 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [jsonptr](https://github.com/chanced/jsonptr) | 0.7.1 | MIT OR Apache-2.0 | [19](#licence-19) |
-| [keyboard-types](https://github.com/rust-windowing/keyboard-types) | 0.8.3 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [lazy_static](https://github.com/rust-lang-nursery/lazy-static.rs) | 1.5.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [libc](https://github.com/rust-lang/libc) | 0.2.190 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [libloading](https://github.com/nagisa/rust_libloading/) | 0.9.0 | ISC | [38](#licence-38) |
-| [litemap](https://github.com/unicode-org/icu4x) | 0.8.3 | Unicode-3.0 | [77](#licence-77) |
-| [lock_api](https://github.com/Amanieu/parking_lot) | 0.4.14 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [log](https://github.com/rust-lang/log) | 0.4.34 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [markup5ever](https://github.com/servo/html5ever) | 0.39.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [matchers](https://github.com/hawkw/matchers) | 0.2.0 | MIT | [83](#licence-83) |
-| [memchr](https://github.com/BurntSushi/memchr) | 2.8.3 | Unlicense OR MIT | [66](#licence-66) |
-| [mime](https://github.com/hyperium/mime) | 0.3.17 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) | 0.8.9 | MIT OR Zlib OR Apache-2.0 | [34](#licence-34) |
-| [miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) | 0.9.1 | MIT OR Zlib OR Apache-2.0 | [34](#licence-34) |
-| [mio](https://github.com/tokio-rs/mio) | 1.2.4 | MIT | [41](#licence-41) |
-| [muda](https://github.com/tauri-apps/muda) | 0.20.0 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [new_debug_unreachable](https://github.com/mbrubeck/rust-debug-unreachable) | 1.0.6 | MIT | [44](#licence-44) |
-| [notify-rust](https://github.com/hoodie/notify-rust) | 4.18.2 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [nu-ansi-term](https://github.com/nushell/nu-ansi-term) | 0.50.3 | MIT | [84](#licence-84) |
-| [num-conv](https://github.com/jhpratt/num-conv) | 0.2.2 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [once_cell](https://github.com/matklad/once_cell) | 1.21.4 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [once_cell_polyfill](https://github.com/polyfill-rs/once_cell_polyfill) | 1.70.2 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [open](https://github.com/Byron/open-rs) | 5.4.4 | MIT | [71](#licence-71) |
-| [option-ext](https://github.com/soc/option-ext.git) | 0.2.0 | MPL-2.0 | [75](#licence-75) |
-| [ort](https://github.com/pykeio/ort) | 2.0.0-rc.13 | MIT OR Apache-2.0 | [11](#licence-11) |
-| [ort-sys](https://github.com/pykeio/ort) | 2.0.0-rc.13 | MIT OR Apache-2.0 | [11](#licence-11) |
-| [parking_lot](https://github.com/Amanieu/parking_lot) | 0.12.5 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [parking_lot_core](https://github.com/Amanieu/parking_lot) | 0.9.12 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [percent-encoding](https://github.com/servo/rust-url/) | 2.3.2 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [phf](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [65](#licence-65) |
-| [phf_generator](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [65](#licence-65) |
-| [phf_macros](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [65](#licence-65) |
-| [phf_shared](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [65](#licence-65) |
-| [pin-project-lite](https://github.com/taiki-e/pin-project-lite) | 0.2.17 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [plist](https://github.com/ebarnard/rust-plist/) | 1.10.1 | MIT | [43](#licence-43) |
-| [png](https://github.com/image-rs/image-png) | 0.17.16 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [png](https://github.com/image-rs/image-png) | 0.18.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [potential_utf](https://github.com/unicode-org/icu4x) | 0.1.6 | Unicode-3.0 | [77](#licence-77) |
+| [derive_more](https://github.com/JelteF/derive_more) | 2.1.1 | MIT | [69](#licence-69) |
+| [derive_more-impl](https://github.com/JelteF/derive_more) | 2.1.1 | MIT | [69](#licence-69) |
+| [digest](https://github.com/RustCrypto/traits) | 0.10.7 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [digest](https://github.com/RustCrypto/traits) | 0.11.3 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [dirs](https://codeberg.org/dirs/dirs-rs) | 7.0.0 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [dirs-sys](https://github.com/dirs-dev/dirs-sys-rs) | 0.5.0 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [displaydoc](https://github.com/yaahc/displaydoc) | 0.2.7 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [dom_query](https://github.com/niklak/dom_query) | 0.28.0 | MIT | [59](#licence-59) |
+| [dpi](https://github.com/rust-windowing/winit) | 0.1.2 | Apache-2.0 AND MIT | [19](#licence-19), [60](#licence-60) |
+| [dtoa](https://github.com/dtolnay/dtoa) | 1.0.11 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [dtoa-short](https://github.com/upsuper/dtoa-short) | 0.3.5 | MPL-2.0 | [74](#licence-74) |
+| [dunce](https://gitlab.com/kornelski/dunce) | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | [35](#licence-35) |
+| [dyn-clone](https://github.com/dtolnay/dyn-clone) | 1.0.20 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [equivalent](https://github.com/indexmap-rs/equivalent) | 1.0.2 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [erased-serde](https://github.com/dtolnay/erased-serde) | 0.4.10 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [fastrand](https://github.com/smol-rs/fastrand) | 2.5.0 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [fdeflate](https://github.com/image-rs/fdeflate) | 0.3.7 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [fern](https://github.com/daboross/fern) | 0.7.1 | MIT | [43](#licence-43) |
+| [ffmpeg-sys-the-third](https://github.com/shssoichiro/ffmpeg-the-third) | 6.0.0+ffmpeg-9.0 | WTFPL | [79](#licence-79) |
+| [ffmpeg-the-third](https://github.com/shssoichiro/ffmpeg-the-third) | 6.0.0+ffmpeg-9.0 | WTFPL | [79](#licence-79) |
+| [flate2](https://github.com/rust-lang/flate2-rs) | 1.1.10 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [fnv](https://github.com/servo/rust-fnv) | 1.0.7 | Apache-2.0  OR  MIT | [26](#licence-26) |
+| [foldhash](https://github.com/orlp/foldhash) | 0.2.0 | Zlib | [80](#licence-80) |
+| [form_urlencoded](https://github.com/servo/rust-url) | 1.2.2 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [futures-core](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 | [21](#licence-21) |
+| [futures-sink](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 | [21](#licence-21) |
+| [generic-array](https://github.com/fizyk20/generic-array.git) | 0.14.7 | MIT | [73](#licence-73) |
+| [getrandom](https://github.com/rust-random/getrandom) | 0.3.4 | MIT OR Apache-2.0 | [30](#licence-30) |
+| [getrandom](https://github.com/rust-random/getrandom) | 0.4.3 | MIT OR Apache-2.0 | [30](#licence-30) |
+| [glob](https://github.com/rust-lang/glob) | 0.3.4 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [hashbrown](https://github.com/rust-lang/hashbrown) | 0.17.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [heck](https://github.com/withoutboats/heck) | 0.5.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [html5ever](https://github.com/servo/html5ever) | 0.39.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [http](https://github.com/hyperium/http) | 1.5.0 | MIT OR Apache-2.0 | [24](#licence-24) |
+| [http-range](https://github.com/bancek/rust-http-range.git) | 0.1.5 | MIT | [49](#licence-49) |
+| [hybrid-array](https://github.com/RustCrypto/hybrid-array) | 0.4.15 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [ico](https://github.com/mdsteele/rust-ico) | 0.5.0 | MIT | [53](#licence-53) |
+| [icu_collections](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [78](#licence-78) |
+| [icu_locale_core](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [78](#licence-78) |
+| [icu_normalizer](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [78](#licence-78) |
+| [icu_normalizer_data](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [78](#licence-78) |
+| [icu_properties](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [78](#licence-78) |
+| [icu_properties_data](https://github.com/unicode-org/icu4x) | 2.3.0 | Unicode-3.0 | [78](#licence-78) |
+| [icu_provider](https://github.com/unicode-org/icu4x) | 2.3.1 | Unicode-3.0 | [78](#licence-78) |
+| [ident_case](https://github.com/TedDriggs/ident_case) | 1.0.1 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [idna](https://github.com/servo/rust-url/) | 1.1.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [idna_adapter](https://github.com/hsivonen/idna_adapter) | 1.2.2 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [indexmap](https://github.com/indexmap-rs/indexmap) | 2.14.2 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [infer](https://github.com/bojand/infer) | 0.22.0 | MIT | [54](#licence-54) |
+| [is_terminal_polyfill](https://github.com/polyfill-rs/is_terminal_polyfill) | 1.70.2 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [itoa](https://github.com/dtolnay/itoa) | 1.0.18 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [jpeg-encoder](https://github.com/vstroebel/jpeg-encoder) | 0.7.1 | (MIT OR Apache-2.0) AND IJG | [32](#licence-32), [38](#licence-38) |
+| [json-patch](https://github.com/idubrov/json-patch) | 4.2.0 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [jsonptr](https://github.com/chanced/jsonptr) | 0.7.1 | MIT OR Apache-2.0 | [20](#licence-20) |
+| [keyboard-types](https://github.com/rust-windowing/keyboard-types) | 0.8.3 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [lazy_static](https://github.com/rust-lang-nursery/lazy-static.rs) | 1.5.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [libc](https://github.com/rust-lang/libc) | 0.2.190 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [libloading](https://github.com/nagisa/rust_libloading/) | 0.9.0 | ISC | [39](#licence-39) |
+| [litemap](https://github.com/unicode-org/icu4x) | 0.8.3 | Unicode-3.0 | [78](#licence-78) |
+| [lock_api](https://github.com/Amanieu/parking_lot) | 0.4.14 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [log](https://github.com/rust-lang/log) | 0.4.34 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [markup5ever](https://github.com/servo/html5ever) | 0.39.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [matchers](https://github.com/hawkw/matchers) | 0.2.0 | MIT | [84](#licence-84) |
+| [memchr](https://github.com/BurntSushi/memchr) | 2.8.3 | Unlicense OR MIT | [67](#licence-67) |
+| [mime](https://github.com/hyperium/mime) | 0.3.17 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) | 0.8.9 | MIT OR Zlib OR Apache-2.0 | [35](#licence-35) |
+| [miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) | 0.9.1 | MIT OR Zlib OR Apache-2.0 | [35](#licence-35) |
+| [mio](https://github.com/tokio-rs/mio) | 1.2.4 | MIT | [42](#licence-42) |
+| [muda](https://github.com/tauri-apps/muda) | 0.20.0 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [new_debug_unreachable](https://github.com/mbrubeck/rust-debug-unreachable) | 1.0.6 | MIT | [45](#licence-45) |
+| [notify-rust](https://github.com/hoodie/notify-rust) | 4.18.2 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [nu-ansi-term](https://github.com/nushell/nu-ansi-term) | 0.50.3 | MIT | [85](#licence-85) |
+| [num-conv](https://github.com/jhpratt/num-conv) | 0.2.2 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [once_cell](https://github.com/matklad/once_cell) | 1.21.4 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [once_cell_polyfill](https://github.com/polyfill-rs/once_cell_polyfill) | 1.70.2 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [open](https://github.com/Byron/open-rs) | 5.4.4 | MIT | [72](#licence-72) |
+| [option-ext](https://github.com/soc/option-ext.git) | 0.2.0 | MPL-2.0 | [76](#licence-76) |
+| [ort](https://github.com/pykeio/ort) | 2.0.0-rc.13 | MIT OR Apache-2.0 | [15](#licence-15) |
+| [ort-sys](https://github.com/pykeio/ort) | 2.0.0-rc.13 | MIT OR Apache-2.0 | [15](#licence-15) |
+| [parking_lot](https://github.com/Amanieu/parking_lot) | 0.12.5 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [parking_lot_core](https://github.com/Amanieu/parking_lot) | 0.9.12 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [percent-encoding](https://github.com/servo/rust-url/) | 2.3.2 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [phf](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [66](#licence-66) |
+| [phf_generator](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [66](#licence-66) |
+| [phf_macros](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [66](#licence-66) |
+| [phf_shared](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT | [66](#licence-66) |
+| [pin-project-lite](https://github.com/taiki-e/pin-project-lite) | 0.2.17 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [plist](https://github.com/ebarnard/rust-plist/) | 1.10.1 | MIT | [44](#licence-44) |
+| [png](https://github.com/image-rs/image-png) | 0.17.16 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [png](https://github.com/image-rs/image-png) | 0.18.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [potential_utf](https://github.com/unicode-org/icu4x) | 0.1.6 | Unicode-3.0 | [78](#licence-78) |
 | [powerfmt](https://github.com/jhpratt/powerfmt) | 0.2.1 | MIT OR Apache-2.0 | [13](#licence-13) |
-| [ppv-lite86](https://github.com/cryptocorrosion/cryptocorrosion) | 0.2.21 | MIT OR Apache-2.0 | [24](#licence-24) |
-| [precomputed-hash](https://github.com/emilio/precomputed-hash) | 0.1.1 | MIT | [49](#licence-49) |
-| [proc-macro2](https://github.com/dtolnay/proc-macro2) | 1.0.107 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [quick-xml](https://github.com/tafia/quick-xml) | 0.42.0 | MIT | [69](#licence-69) |
-| [quote](https://github.com/dtolnay/quote) | 1.0.47 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [rand](https://github.com/rust-random/rand) | 0.9.5 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [rand_chacha](https://github.com/rust-random/rand) | 0.9.0 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [rand_core](https://github.com/rust-random/rand) | 0.9.5 | MIT OR Apache-2.0 | [28](#licence-28) |
-| [raw-window-handle](https://github.com/rust-windowing/raw-window-handle) | 0.6.2 | MIT OR Apache-2.0 OR Zlib | [34](#licence-34) |
-| [regex](https://github.com/rust-lang/regex) | 1.13.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [regex-automata](https://github.com/rust-lang/regex) | 0.4.18 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [regex-syntax](https://github.com/rust-lang/regex) | 0.8.11 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [rfd](https://github.com/PolyMeilex/rfd) | 0.16.0 | MIT | [57](#licence-57) |
-| [rustc-hash](https://github.com/rust-lang/rustc-hash) | 2.1.3 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [safe_arch](https://github.com/Lokathor/safe_arch) | 1.2.0 | Zlib OR Apache-2.0 OR MIT | [33](#licence-33) |
-| [same-file](https://github.com/BurntSushi/same-file) | 1.0.6 | Unlicense OR MIT | [70](#licence-70) |
-| [schemars](https://github.com/GREsau/schemars) | 0.8.22 | MIT | [54](#licence-54) |
-| [schemars_derive](https://github.com/GREsau/schemars) | 0.8.22 | MIT | [39](#licence-39), [54](#licence-54) |
-| [scopeguard](https://github.com/bluss/scopeguard) | 1.2.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [selectors](https://github.com/servo/stylo) | 0.38.0 | MPL-2.0 | [75](#licence-75) |
-| [semver](https://github.com/dtolnay/semver) | 1.0.28 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serde](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serde_core](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serde_derive](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serde_derive_internals](https://github.com/serde-rs/serde) | 0.29.1 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serde_json](https://github.com/serde-rs/json) | 1.0.151 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serde_repr](https://github.com/dtolnay/serde-repr) | 0.1.21 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serde_spanned](https://github.com/toml-rs/toml) | 1.1.1 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [serde_with](https://github.com/jonasbb/serde_with/) | 3.24.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [serde_with_macros](https://github.com/jonasbb/serde_with/) | 3.24.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [serde-untagged](https://github.com/dtolnay/serde-untagged) | 0.1.9 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [serialize-to-javascript](https://github.com/chippers/serialize-to-javascript) | 0.1.2 | MIT OR Apache-2.0 | [11](#licence-11) |
-| [serialize-to-javascript-impl](https://github.com/chippers/serialize-to-javascript) | 0.1.2 | MIT OR Apache-2.0 | [11](#licence-11) |
-| [servo_arc](https://github.com/servo/stylo) | 0.4.3 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [sha2](https://github.com/RustCrypto/hashes) | 0.10.9 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [sha2](https://github.com/RustCrypto/hashes) | 0.11.0 | MIT OR Apache-2.0 | [27](#licence-27) |
-| [sharded-slab](https://github.com/hawkw/sharded-slab) | 0.1.7 | MIT | [82](#licence-82) |
-| [simd-adler32](https://github.com/mcountryman/simd-adler32) | 0.3.10 | MIT | [61](#licence-61) |
-| [siphasher](https://github.com/jedisct1/rust-siphash) | 1.0.4 | MIT OR Apache-2.0 | [11](#licence-11) |
-| [smallvec](https://github.com/servo/rust-smallvec) | 1.16.2 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [socket2](https://github.com/rust-lang/socket2) | 0.6.5 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [softbuffer](https://github.com/rust-windowing/softbuffer) | 0.4.8 | MIT OR Apache-2.0 | [32](#licence-32) |
-| [stable_deref_trait](https://github.com/storyyeller/stable_deref_trait) | 1.2.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [string_cache](https://github.com/servo/string-cache) | 0.9.0 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [strsim](https://github.com/rapidfuzz/strsim-rs) | 0.11.1 | MIT | [67](#licence-67) |
-| [syn](https://github.com/dtolnay/syn) | 2.0.119 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [syn](https://github.com/dtolnay/syn) | 3.0.6 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [synstructure](https://github.com/mystor/synstructure) | 0.14.0 | MIT | [47](#licence-47) |
-| [tao](https://github.com/tauri-apps/tao) | 0.37.1 | Apache-2.0 | [18](#licence-18) |
-| [tauri](https://github.com/tauri-apps/tauri) | 2.12.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-codegen](https://github.com/tauri-apps/tauri) | 2.7.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-macros](https://github.com/tauri-apps/tauri) | 2.7.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) | 2.8.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-fs](https://github.com/tauri-apps/plugins-workspace) | 2.6.0 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-log](https://github.com/tauri-apps/plugins-workspace) | 2.10.0 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-notification](https://github.com/tauri-apps/plugins-workspace) | 2.5.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-opener](https://github.com/tauri-apps/plugins-workspace) | 2.7.0 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-single-instance](https://github.com/tauri-apps/plugins-workspace) | 2.5.2 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-store](https://github.com/tauri-apps/plugins-workspace) | 2.5.0 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-plugin-window-state](https://github.com/tauri-apps/plugins-workspace) | 2.5.0 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-runtime](https://github.com/tauri-apps/tauri) | 2.12.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-runtime-wry](https://github.com/tauri-apps/tauri) | 2.12.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-utils](https://github.com/tauri-apps/tauri) | 2.10.1 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [tauri-winrt-notification](https://github.com/tauri-apps/winrt-notification) | 0.8.1 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [tendril](https://github.com/servo/html5ever) | 0.5.1 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [termcolor](https://github.com/BurntSushi/termcolor) | 1.4.1 | Unlicense OR MIT | [66](#licence-66) |
-| [thiserror](https://github.com/dtolnay/thiserror) | 2.0.21 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [thiserror-impl](https://github.com/dtolnay/thiserror) | 2.0.21 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [thread_local](https://github.com/Amanieu/thread_local-rs) | 1.1.10 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [time](https://github.com/time-rs/time) | 0.3.55 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [time-core](https://github.com/time-rs/time) | 0.1.9 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [time-macros](https://github.com/time-rs/time) | 0.2.32 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [tinystr](https://github.com/unicode-org/icu4x) | 0.8.4 | Unicode-3.0 | [77](#licence-77) |
-| [tinyvec](https://github.com/Lokathor/tinyvec) | 1.13.3 | Zlib OR Apache-2.0 OR MIT | [11](#licence-11) |
-| [tokio](https://github.com/tokio-rs/tokio) | 1.53.3 | MIT | [60](#licence-60) |
-| [tokio-macros](https://github.com/tokio-rs/tokio) | 2.7.2 | MIT | [55](#licence-55) |
-| [tokio-util](https://github.com/tokio-rs/tokio) | 0.7.19 | MIT | [60](#licence-60) |
-| [toml](https://github.com/toml-rs/toml) | 1.1.6+spec-1.1.0 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [toml_datetime](https://github.com/toml-rs/toml) | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [toml_parser](https://github.com/toml-rs/toml) | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [toml_writer](https://github.com/toml-rs/toml) | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | [18](#licence-18) |
-| [tracing](https://github.com/tokio-rs/tracing) | 0.1.44 | MIT | [46](#licence-46) |
-| [tracing-attributes](https://github.com/tokio-rs/tracing) | 0.1.31 | MIT | [46](#licence-46) |
-| [tracing-core](https://github.com/tokio-rs/tracing) | 0.1.36 | MIT | [46](#licence-46), [64](#licence-64) |
-| [tracing-serde](https://github.com/tokio-rs/tracing) | 0.2.0 | MIT | [46](#licence-46) |
-| [tracing-subscriber](https://github.com/tokio-rs/tracing) | 0.3.23 | MIT | [46](#licence-46) |
-| [ts-rs](https://github.com/Aleph-Alpha/ts-rs) | 12.0.1 | MIT | [59](#licence-59) |
-| [ts-rs-macros](https://github.com/Aleph-Alpha/ts-rs) | 12.0.1 | MIT | [59](#licence-59) |
-| [typeid](https://github.com/dtolnay/typeid) | 1.0.3 | MIT OR Apache-2.0 | [34](#licence-34) |
-| [typenum](https://github.com/paholg/typenum) | 1.20.1 | MIT OR Apache-2.0 | [21](#licence-21) |
-| [unicode-ident](https://github.com/dtolnay/unicode-ident) | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | [34](#licence-34), [76](#licence-76) |
-| [unicode-normalization](https://github.com/unicode-rs/unicode-normalization) | 0.1.25 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) | 1.13.3 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [url](https://github.com/servo/rust-url) | 2.5.8 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [urlpattern](https://github.com/denoland/rust-urlpattern) | 0.6.0 | MIT | [56](#licence-56) |
-| [utf8_iter](https://github.com/hsivonen/utf8_iter) | 1.0.4 | Apache-2.0 OR MIT | [11](#licence-11) |
-| [utf8parse](https://github.com/alacritty/vte) | 0.2.2 | Apache-2.0 OR MIT | [34](#licence-34) |
-| [uuid](https://github.com/uuid-rs/uuid) | 1.27.0 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [walkdir](https://github.com/BurntSushi/walkdir) | 2.5.0 | Unlicense OR MIT | [66](#licence-66) |
-| [web_atoms](https://github.com/servo/html5ever) | 0.2.6 | MIT OR Apache-2.0 | [25](#licence-25) |
-| [web-time](https://github.com/daxpedda/web-time) | 1.1.0 | MIT OR Apache-2.0 | [17](#licence-17) |
-| [webview2-com](https://github.com/wravery/webview2-rs) | 0.39.1 | MIT | [59](#licence-59) |
-| [webview2-com-macros](https://github.com/wravery/webview2-rs) | 0.8.1 | MIT | [59](#licence-59) |
-| [webview2-com-sys](https://github.com/wravery/webview2-rs) | 0.39.1 | MIT | [59](#licence-59) |
+| [ppv-lite86](https://github.com/cryptocorrosion/cryptocorrosion) | 0.2.21 | MIT OR Apache-2.0 | [25](#licence-25) |
+| [precomputed-hash](https://github.com/emilio/precomputed-hash) | 0.1.1 | MIT | [50](#licence-50) |
+| [proc-macro2](https://github.com/dtolnay/proc-macro2) | 1.0.107 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [quick-xml](https://github.com/tafia/quick-xml) | 0.42.0 | MIT | [70](#licence-70) |
+| [quote](https://github.com/dtolnay/quote) | 1.0.47 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [rand](https://github.com/rust-random/rand) | 0.9.5 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [rand_chacha](https://github.com/rust-random/rand) | 0.9.0 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [rand_core](https://github.com/rust-random/rand) | 0.9.5 | MIT OR Apache-2.0 | [29](#licence-29) |
+| [raw-window-handle](https://github.com/rust-windowing/raw-window-handle) | 0.6.2 | MIT OR Apache-2.0 OR Zlib | [35](#licence-35) |
+| [regex](https://github.com/rust-lang/regex) | 1.13.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [regex-automata](https://github.com/rust-lang/regex) | 0.4.18 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [regex-syntax](https://github.com/rust-lang/regex) | 0.8.11 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [rfd](https://github.com/PolyMeilex/rfd) | 0.16.0 | MIT | [58](#licence-58) |
+| [rustc-hash](https://github.com/rust-lang/rustc-hash) | 2.1.3 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [safe_arch](https://github.com/Lokathor/safe_arch) | 1.2.0 | Zlib OR Apache-2.0 OR MIT | [34](#licence-34) |
+| [same-file](https://github.com/BurntSushi/same-file) | 1.0.6 | Unlicense OR MIT | [71](#licence-71) |
+| [schemars](https://github.com/GREsau/schemars) | 0.8.22 | MIT | [55](#licence-55) |
+| [schemars_derive](https://github.com/GREsau/schemars) | 0.8.22 | MIT | [40](#licence-40), [55](#licence-55) |
+| [scopeguard](https://github.com/bluss/scopeguard) | 1.2.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [selectors](https://github.com/servo/stylo) | 0.38.0 | MPL-2.0 | [76](#licence-76) |
+| [semver](https://github.com/dtolnay/semver) | 1.0.28 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serde](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serde_core](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serde_derive](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serde_derive_internals](https://github.com/serde-rs/serde) | 0.29.1 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serde_json](https://github.com/serde-rs/json) | 1.0.151 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serde_repr](https://github.com/dtolnay/serde-repr) | 0.1.21 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serde_spanned](https://github.com/toml-rs/toml) | 1.1.1 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [serde_with](https://github.com/jonasbb/serde_with/) | 3.24.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [serde_with_macros](https://github.com/jonasbb/serde_with/) | 3.24.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [serde-untagged](https://github.com/dtolnay/serde-untagged) | 0.1.9 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [serialize-to-javascript](https://github.com/chippers/serialize-to-javascript) | 0.1.2 | MIT OR Apache-2.0 | [15](#licence-15) |
+| [serialize-to-javascript-impl](https://github.com/chippers/serialize-to-javascript) | 0.1.2 | MIT OR Apache-2.0 | [15](#licence-15) |
+| [servo_arc](https://github.com/servo/stylo) | 0.4.3 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [sha2](https://github.com/RustCrypto/hashes) | 0.10.9 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [sha2](https://github.com/RustCrypto/hashes) | 0.11.0 | MIT OR Apache-2.0 | [28](#licence-28) |
+| [sharded-slab](https://github.com/hawkw/sharded-slab) | 0.1.7 | MIT | [83](#licence-83) |
+| [simd-adler32](https://github.com/mcountryman/simd-adler32) | 0.3.10 | MIT | [62](#licence-62) |
+| [siphasher](https://github.com/jedisct1/rust-siphash) | 1.0.4 | MIT OR Apache-2.0 | [15](#licence-15) |
+| [smallvec](https://github.com/servo/rust-smallvec) | 1.16.2 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [socket2](https://github.com/rust-lang/socket2) | 0.6.5 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [softbuffer](https://github.com/rust-windowing/softbuffer) | 0.4.8 | MIT OR Apache-2.0 | [33](#licence-33) |
+| [stable_deref_trait](https://github.com/storyyeller/stable_deref_trait) | 1.2.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [string_cache](https://github.com/servo/string-cache) | 0.9.0 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [strsim](https://github.com/rapidfuzz/strsim-rs) | 0.11.1 | MIT | [68](#licence-68) |
+| [syn](https://github.com/dtolnay/syn) | 2.0.119 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [syn](https://github.com/dtolnay/syn) | 3.0.6 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [synstructure](https://github.com/mystor/synstructure) | 0.14.0 | MIT | [48](#licence-48) |
+| [tao](https://github.com/tauri-apps/tao) | 0.37.1 | Apache-2.0 | [19](#licence-19) |
+| [tauri](https://github.com/tauri-apps/tauri) | 2.12.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-codegen](https://github.com/tauri-apps/tauri) | 2.7.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-macros](https://github.com/tauri-apps/tauri) | 2.7.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) | 2.8.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-fs](https://github.com/tauri-apps/plugins-workspace) | 2.6.0 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-log](https://github.com/tauri-apps/plugins-workspace) | 2.10.0 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-notification](https://github.com/tauri-apps/plugins-workspace) | 2.5.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-opener](https://github.com/tauri-apps/plugins-workspace) | 2.7.0 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-single-instance](https://github.com/tauri-apps/plugins-workspace) | 2.5.2 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-store](https://github.com/tauri-apps/plugins-workspace) | 2.5.0 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-plugin-window-state](https://github.com/tauri-apps/plugins-workspace) | 2.5.0 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-runtime](https://github.com/tauri-apps/tauri) | 2.12.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-runtime-wry](https://github.com/tauri-apps/tauri) | 2.12.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-utils](https://github.com/tauri-apps/tauri) | 2.10.1 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [tauri-winrt-notification](https://github.com/tauri-apps/winrt-notification) | 0.8.1 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [tendril](https://github.com/servo/html5ever) | 0.5.1 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [termcolor](https://github.com/BurntSushi/termcolor) | 1.4.1 | Unlicense OR MIT | [67](#licence-67) |
+| [thiserror](https://github.com/dtolnay/thiserror) | 2.0.21 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [thiserror-impl](https://github.com/dtolnay/thiserror) | 2.0.21 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [thread_local](https://github.com/Amanieu/thread_local-rs) | 1.1.10 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [time](https://github.com/time-rs/time) | 0.3.55 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [time-core](https://github.com/time-rs/time) | 0.1.9 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [time-macros](https://github.com/time-rs/time) | 0.2.32 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [tinystr](https://github.com/unicode-org/icu4x) | 0.8.4 | Unicode-3.0 | [78](#licence-78) |
+| [tinyvec](https://github.com/Lokathor/tinyvec) | 1.13.3 | Zlib OR Apache-2.0 OR MIT | [15](#licence-15) |
+| [tokio](https://github.com/tokio-rs/tokio) | 1.53.3 | MIT | [61](#licence-61) |
+| [tokio-macros](https://github.com/tokio-rs/tokio) | 2.7.2 | MIT | [56](#licence-56) |
+| [tokio-util](https://github.com/tokio-rs/tokio) | 0.7.19 | MIT | [61](#licence-61) |
+| [toml](https://github.com/toml-rs/toml) | 1.1.6+spec-1.1.0 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [toml_datetime](https://github.com/toml-rs/toml) | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [toml_parser](https://github.com/toml-rs/toml) | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [toml_writer](https://github.com/toml-rs/toml) | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | [19](#licence-19) |
+| [tracing](https://github.com/tokio-rs/tracing) | 0.1.44 | MIT | [47](#licence-47) |
+| [tracing-attributes](https://github.com/tokio-rs/tracing) | 0.1.31 | MIT | [47](#licence-47) |
+| [tracing-core](https://github.com/tokio-rs/tracing) | 0.1.36 | MIT | [47](#licence-47), [65](#licence-65) |
+| [tracing-serde](https://github.com/tokio-rs/tracing) | 0.2.0 | MIT | [47](#licence-47) |
+| [tracing-subscriber](https://github.com/tokio-rs/tracing) | 0.3.23 | MIT | [47](#licence-47) |
+| [ts-rs](https://github.com/Aleph-Alpha/ts-rs) | 12.0.1 | MIT | [60](#licence-60) |
+| [ts-rs-macros](https://github.com/Aleph-Alpha/ts-rs) | 12.0.1 | MIT | [60](#licence-60) |
+| [typeid](https://github.com/dtolnay/typeid) | 1.0.3 | MIT OR Apache-2.0 | [35](#licence-35) |
+| [typenum](https://github.com/paholg/typenum) | 1.20.1 | MIT OR Apache-2.0 | [22](#licence-22) |
+| [unicode-ident](https://github.com/dtolnay/unicode-ident) | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | [35](#licence-35), [77](#licence-77) |
+| [unicode-normalization](https://github.com/unicode-rs/unicode-normalization) | 0.1.25 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) | 1.13.3 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [url](https://github.com/servo/rust-url) | 2.5.8 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [urlpattern](https://github.com/denoland/rust-urlpattern) | 0.6.0 | MIT | [57](#licence-57) |
+| [utf8_iter](https://github.com/hsivonen/utf8_iter) | 1.0.4 | Apache-2.0 OR MIT | [15](#licence-15) |
+| [utf8parse](https://github.com/alacritty/vte) | 0.2.2 | Apache-2.0 OR MIT | [35](#licence-35) |
+| [uuid](https://github.com/uuid-rs/uuid) | 1.27.0 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [walkdir](https://github.com/BurntSushi/walkdir) | 2.5.0 | Unlicense OR MIT | [67](#licence-67) |
+| [web_atoms](https://github.com/servo/html5ever) | 0.2.6 | MIT OR Apache-2.0 | [26](#licence-26) |
+| [web-time](https://github.com/daxpedda/web-time) | 1.1.0 | MIT OR Apache-2.0 | [18](#licence-18) |
+| [webview2-com](https://github.com/wravery/webview2-rs) | 0.39.1 | MIT | [60](#licence-60) |
+| [webview2-com-macros](https://github.com/wravery/webview2-rs) | 0.8.1 | MIT | [60](#licence-60) |
+| [webview2-com-sys](https://github.com/wravery/webview2-rs) | 0.39.1 | MIT | [60](#licence-60) |
 | [wide](https://github.com/Lokathor/wide) | 1.7.1 | Zlib OR Apache-2.0 OR MIT | [12](#licence-12) |
-| [winapi-util](https://github.com/BurntSushi/winapi-util) | 0.1.11 | Unlicense OR MIT | [70](#licence-70) |
-| [window-vibrancy](https://github.com/tauri-apps/tauri-plugin-vibrancy) | 0.8.1 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [windows](https://github.com/microsoft/windows-rs) | 0.62.2 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows_x86_64_msvc](https://github.com/microsoft/windows-rs) | 0.53.1 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-collections](https://github.com/microsoft/windows-rs) | 0.3.2 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-core](https://github.com/microsoft/windows-rs) | 0.62.2 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-future](https://github.com/microsoft/windows-rs) | 0.3.2 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-implement](https://github.com/microsoft/windows-rs) | 0.60.2 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-interface](https://github.com/microsoft/windows-rs) | 0.59.3 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-link](https://github.com/microsoft/windows-rs) | 0.2.1 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-numerics](https://github.com/microsoft/windows-rs) | 0.3.1 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-result](https://github.com/microsoft/windows-rs) | 0.4.1 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-strings](https://github.com/microsoft/windows-rs) | 0.5.1 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-sys](https://github.com/microsoft/windows-rs) | 0.60.2 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-sys](https://github.com/microsoft/windows-rs) | 0.61.2 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-targets](https://github.com/microsoft/windows-rs) | 0.53.5 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-threading](https://github.com/microsoft/windows-rs) | 0.2.1 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [windows-version](https://github.com/microsoft/windows-rs) | 0.1.7 | MIT OR Apache-2.0 | [15](#licence-15) |
-| [winnow](https://github.com/winnow-rs/winnow) | 1.0.4 | MIT | [63](#licence-63) |
-| [writeable](https://github.com/unicode-org/icu4x) | 0.6.4 | Unicode-3.0 | [77](#licence-77) |
-| [wry](https://github.com/tauri-apps/wry) | 0.57.0 | Apache-2.0 OR MIT | [25](#licence-25) |
-| [yoke](https://github.com/unicode-org/icu4x) | 0.8.3 | Unicode-3.0 | [77](#licence-77) |
-| [yoke-derive](https://github.com/unicode-org/icu4x) | 0.8.4 | Unicode-3.0 | [77](#licence-77) |
-| [zerocopy](https://github.com/google/zerocopy) | 0.8.61 | BSD-2-Clause OR Apache-2.0 OR MIT | [16](#licence-16) |
-| [zerofrom](https://github.com/unicode-org/icu4x) | 0.1.8 | Unicode-3.0 | [77](#licence-77) |
-| [zerofrom-derive](https://github.com/unicode-org/icu4x) | 0.1.8 | Unicode-3.0 | [77](#licence-77) |
-| [zerotrie](https://github.com/unicode-org/icu4x) | 0.2.5 | Unicode-3.0 | [77](#licence-77) |
-| [zerovec](https://github.com/unicode-org/icu4x) | 0.11.8 | Unicode-3.0 | [77](#licence-77) |
-| [zerovec-derive](https://github.com/unicode-org/icu4x) | 0.11.6 | Unicode-3.0 | [77](#licence-77) |
-| [zmij](https://github.com/dtolnay/zmij) | 1.0.23 | MIT | [62](#licence-62) |
+| [winapi-util](https://github.com/BurntSushi/winapi-util) | 0.1.11 | Unlicense OR MIT | [71](#licence-71) |
+| [window-vibrancy](https://github.com/tauri-apps/tauri-plugin-vibrancy) | 0.8.1 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [windows](https://github.com/microsoft/windows-rs) | 0.62.2 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows_x86_64_msvc](https://github.com/microsoft/windows-rs) | 0.53.1 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-collections](https://github.com/microsoft/windows-rs) | 0.3.2 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-core](https://github.com/microsoft/windows-rs) | 0.62.2 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-future](https://github.com/microsoft/windows-rs) | 0.3.2 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-implement](https://github.com/microsoft/windows-rs) | 0.60.2 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-interface](https://github.com/microsoft/windows-rs) | 0.59.3 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-link](https://github.com/microsoft/windows-rs) | 0.2.1 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-numerics](https://github.com/microsoft/windows-rs) | 0.3.1 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-result](https://github.com/microsoft/windows-rs) | 0.4.1 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-strings](https://github.com/microsoft/windows-rs) | 0.5.1 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-sys](https://github.com/microsoft/windows-rs) | 0.60.2 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-sys](https://github.com/microsoft/windows-rs) | 0.61.2 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-targets](https://github.com/microsoft/windows-rs) | 0.53.5 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-threading](https://github.com/microsoft/windows-rs) | 0.2.1 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [windows-version](https://github.com/microsoft/windows-rs) | 0.1.7 | MIT OR Apache-2.0 | [16](#licence-16) |
+| [winnow](https://github.com/winnow-rs/winnow) | 1.0.4 | MIT | [64](#licence-64) |
+| [writeable](https://github.com/unicode-org/icu4x) | 0.6.4 | Unicode-3.0 | [78](#licence-78) |
+| [wry](https://github.com/tauri-apps/wry) | 0.57.0 | Apache-2.0 OR MIT | [26](#licence-26) |
+| [yoke](https://github.com/unicode-org/icu4x) | 0.8.3 | Unicode-3.0 | [78](#licence-78) |
+| [yoke-derive](https://github.com/unicode-org/icu4x) | 0.8.4 | Unicode-3.0 | [78](#licence-78) |
+| [zerocopy](https://github.com/google/zerocopy) | 0.8.61 | BSD-2-Clause OR Apache-2.0 OR MIT | [17](#licence-17) |
+| [zerofrom](https://github.com/unicode-org/icu4x) | 0.1.8 | Unicode-3.0 | [78](#licence-78) |
+| [zerofrom-derive](https://github.com/unicode-org/icu4x) | 0.1.8 | Unicode-3.0 | [78](#licence-78) |
+| [zerotrie](https://github.com/unicode-org/icu4x) | 0.2.5 | Unicode-3.0 | [78](#licence-78) |
+| [zerovec](https://github.com/unicode-org/icu4x) | 0.11.8 | Unicode-3.0 | [78](#licence-78) |
+| [zerovec-derive](https://github.com/unicode-org/icu4x) | 0.11.6 | Unicode-3.0 | [78](#licence-78) |
+| [zmij](https://github.com/dtolnay/zmij) | 1.0.23 | MIT | [63](#licence-63) |
 
 ## npm packages (73)
 
 | Package | Version | Licence | Licence texts |
 | --- | --- | --- | --- |
-| [@floating-ui/core](https://floating-ui.com) | 1.8.0 | MIT | [85](#licence-85) |
-| [@floating-ui/dom](https://floating-ui.com) | 1.8.0 | MIT | [85](#licence-85) |
-| [@floating-ui/react-dom](https://floating-ui.com/docs/react-dom) | 2.1.9 | MIT | [85](#licence-85) |
-| [@floating-ui/utils](https://floating-ui.com) | 0.2.12 | MIT | [85](#licence-85) |
-| [@radix-ui/number](https://radix-ui.com/primitives) | 1.1.3 | MIT | [86](#licence-86) |
-| [@radix-ui/primitive](https://radix-ui.com/primitives) | 1.1.7 | MIT | [86](#licence-86) |
-| [@radix-ui/react-checkbox](https://radix-ui.com/primitives) | 1.3.12 | MIT | [86](#licence-86) |
-| [@radix-ui/react-collection](https://radix-ui.com/primitives) | 1.1.16 | MIT | [86](#licence-86) |
-| [@radix-ui/react-compose-refs](https://radix-ui.com/primitives) | 1.1.5 | MIT | [86](#licence-86) |
-| [@radix-ui/react-context](https://radix-ui.com/primitives) | 1.2.2 | MIT | [86](#licence-86) |
-| [@radix-ui/react-context-menu](https://radix-ui.com/primitives) | 2.3.8 | MIT | [86](#licence-86) |
-| [@radix-ui/react-dialog](https://radix-ui.com/primitives) | 1.2.0 | MIT | [86](#licence-86) |
-| [@radix-ui/react-direction](https://radix-ui.com/primitives) | 1.1.5 | MIT | [86](#licence-86) |
-| [@radix-ui/react-dismissable-layer](https://radix-ui.com/primitives) | 1.1.20 | MIT | [86](#licence-86) |
-| [@radix-ui/react-dropdown-menu](https://radix-ui.com/primitives) | 2.1.25 | MIT | [86](#licence-86) |
-| [@radix-ui/react-focus-guards](https://radix-ui.com/primitives) | 1.1.6 | MIT | [86](#licence-86) |
-| [@radix-ui/react-focus-scope](https://radix-ui.com/primitives) | 1.2.0 | MIT | [86](#licence-86) |
-| [@radix-ui/react-id](https://radix-ui.com/primitives) | 1.1.4 | MIT | [86](#licence-86) |
-| [@radix-ui/react-menu](https://radix-ui.com/primitives) | 2.1.25 | MIT | [86](#licence-86) |
-| [@radix-ui/react-popper](https://radix-ui.com/primitives) | 1.3.8 | MIT | [86](#licence-86) |
-| [@radix-ui/react-portal](https://radix-ui.com/primitives) | 1.1.18 | MIT | [86](#licence-86) |
-| [@radix-ui/react-presence](https://radix-ui.com/primitives) | 1.1.11 | MIT | [86](#licence-86) |
-| [@radix-ui/react-primitive](https://radix-ui.com/primitives) | 2.1.11 | MIT | [86](#licence-86) |
-| [@radix-ui/react-progress](https://radix-ui.com/primitives) | 1.1.17 | MIT | [86](#licence-86) |
-| [@radix-ui/react-roving-focus](https://radix-ui.com/primitives) | 1.1.20 | MIT | [86](#licence-86) |
-| [@radix-ui/react-select](https://radix-ui.com/primitives) | 2.3.8 | MIT | [86](#licence-86) |
-| [@radix-ui/react-separator](https://radix-ui.com/primitives) | 1.1.16 | MIT | [86](#licence-86) |
-| [@radix-ui/react-slider](https://radix-ui.com/primitives) | 1.5.0 | MIT | [86](#licence-86) |
-| [@radix-ui/react-slot](https://radix-ui.com/primitives) | 1.4.0 | MIT | [86](#licence-86) |
-| [@radix-ui/react-switch](https://radix-ui.com/primitives) | 1.3.8 | MIT | [86](#licence-86) |
-| [@radix-ui/react-tabs](https://radix-ui.com/primitives) | 1.1.22 | MIT | [86](#licence-86) |
-| [@radix-ui/react-toggle](https://radix-ui.com/primitives) | 1.1.19 | MIT | [86](#licence-86) |
-| [@radix-ui/react-toggle-group](https://radix-ui.com/primitives) | 1.1.20 | MIT | [86](#licence-86) |
-| [@radix-ui/react-tooltip](https://radix-ui.com/primitives) | 1.3.0 | MIT | [86](#licence-86) |
-| [@radix-ui/react-use-callback-ref](https://radix-ui.com/primitives) | 1.1.4 | MIT | [86](#licence-86) |
-| [@radix-ui/react-use-controllable-state](https://radix-ui.com/primitives) | 1.2.6 | MIT | [86](#licence-86) |
-| [@radix-ui/react-use-effect-event](https://radix-ui.com/primitives) | 0.0.5 | MIT | [86](#licence-86) |
-| [@radix-ui/react-use-is-hydrated](https://radix-ui.com/primitives) | 0.1.3 | MIT | [86](#licence-86) |
-| [@radix-ui/react-use-layout-effect](https://radix-ui.com/primitives) | 1.1.4 | MIT | [86](#licence-86) |
-| [@radix-ui/react-use-previous](https://radix-ui.com/primitives) | 1.1.4 | MIT | [86](#licence-86) |
-| [@radix-ui/react-use-size](https://radix-ui.com/primitives) | 1.1.5 | MIT | [86](#licence-86) |
-| [@radix-ui/react-visually-hidden](https://radix-ui.com/primitives) | 1.2.12 | MIT | [86](#licence-86) |
-| [@tanstack/query-core](https://tanstack.com/query) | 5.104.1 | MIT | [87](#licence-87) |
-| [@tanstack/react-query](https://tanstack.com/query) | 5.104.1 | MIT | [87](#licence-87) |
-| [@tanstack/react-virtual](https://tanstack.com/virtual) | 3.14.13 | MIT | [87](#licence-87) |
-| [@tanstack/virtual-core](https://tanstack.com/virtual) | 3.17.11 | MIT | [87](#licence-87) |
-| [@tauri-apps/api](https://github.com/tauri-apps/tauri#readme) | 2.12.1 | Apache-2.0 OR MIT | [88](#licence-88) |
-| [@tauri-apps/plugin-dialog](https://github.com/tauri-apps/plugins-workspace#readme) | 2.8.1 | MIT OR Apache-2.0 | [89](#licence-89) |
-| [@tauri-apps/plugin-log](https://github.com/tauri-apps/plugins-workspace#readme) | 2.10.0 | MIT OR Apache-2.0 | [89](#licence-89) |
-| [@tauri-apps/plugin-notification](https://github.com/tauri-apps/plugins-workspace#readme) | 2.5.1 | MIT OR Apache-2.0 | [89](#licence-89) |
-| [@tauri-apps/plugin-opener](https://github.com/tauri-apps/plugins-workspace#readme) | 2.7.0 | MIT OR Apache-2.0 | [89](#licence-89) |
-| [@tauri-apps/plugin-store](https://github.com/tauri-apps/plugins-workspace#readme) | 2.5.0 | MIT OR Apache-2.0 | [89](#licence-89) |
-| [aria-hidden](https://github.com/theKashey/aria-hidden#readme) | 1.2.6 | MIT | [90](#licence-90) |
-| [class-variance-authority](https://github.com/joe-bell/cva#readme) | 0.7.1 | Apache-2.0 | [91](#licence-91) |
-| [clsx](https://github.com/lukeed/clsx#readme) | 2.1.1 | MIT | [92](#licence-92) |
-| [cmdk](https://github.com/pacocoursey/cmdk#readme) | 1.1.1 | MIT | [93](#licence-93) |
-| [get-nonce](https://github.com/theKashey/get-nonce) | 1.0.1 | MIT | [94](#licence-94) |
-| [lucide-react](https://lucide.dev) | 1.52.0 | ISC | [95](#licence-95) |
-| [react](https://react.dev/) | 19.3.0 | MIT | [96](#licence-96) |
-| [react-dom](https://react.dev/) | 19.3.0 | MIT | [96](#licence-96) |
-| [react-remove-scroll](https://github.com/theKashey/react-remove-scroll#readme) | 2.7.2 | MIT | [90](#licence-90) |
-| [react-remove-scroll-bar](https://github.com/theKashey/react-remove-scroll-bar#readme) | 2.3.8 | MIT | [97](#licence-97) |
-| [react-style-singleton](https://github.com/theKashey/react-style-singleton#readme) | 2.2.3 | MIT | [90](#licence-90) |
-| [scheduler](https://react.dev/) | 0.28.0 | MIT | [96](#licence-96) |
-| [sonner](https://sonner.emilkowal.ski/) | 2.0.8 | MIT | [98](#licence-98) |
-| [tailwind-merge](https://github.com/dcastil/tailwind-merge) | 3.7.0 | MIT | [99](#licence-99) |
-| [tailwindcss](https://tailwindcss.com) | 4.3.3 | MIT | [100](#licence-100) |
-| [tslib](https://www.typescriptlang.org/) | 2.8.1 | 0BSD | [101](#licence-101) |
-| [tw-animate-css](https://github.com/Wombosvideo/tw-animate-css#readme) | 1.4.0 | MIT | [102](#licence-102) |
-| [use-callback-ref](https://www.npmjs.com/package/use-callback-ref) | 1.3.3 | MIT | [90](#licence-90) |
-| [use-sidecar](https://github.com/theKashey/use-sidecar) | 1.1.3 | MIT | [90](#licence-90) |
-| [zundo](https://github.com/charkour/zundo) | 2.3.0 | MIT | [103](#licence-103) |
-| [zustand](https://github.com/pmndrs/zustand) | 5.0.15 | MIT | [104](#licence-104) |
+| [@floating-ui/core](https://floating-ui.com) | 1.8.0 | MIT | [86](#licence-86) |
+| [@floating-ui/dom](https://floating-ui.com) | 1.8.0 | MIT | [86](#licence-86) |
+| [@floating-ui/react-dom](https://floating-ui.com/docs/react-dom) | 2.1.9 | MIT | [86](#licence-86) |
+| [@floating-ui/utils](https://floating-ui.com) | 0.2.12 | MIT | [86](#licence-86) |
+| [@radix-ui/number](https://radix-ui.com/primitives) | 1.1.3 | MIT | [87](#licence-87) |
+| [@radix-ui/primitive](https://radix-ui.com/primitives) | 1.1.7 | MIT | [87](#licence-87) |
+| [@radix-ui/react-checkbox](https://radix-ui.com/primitives) | 1.3.12 | MIT | [87](#licence-87) |
+| [@radix-ui/react-collection](https://radix-ui.com/primitives) | 1.1.16 | MIT | [87](#licence-87) |
+| [@radix-ui/react-compose-refs](https://radix-ui.com/primitives) | 1.1.5 | MIT | [87](#licence-87) |
+| [@radix-ui/react-context](https://radix-ui.com/primitives) | 1.2.2 | MIT | [87](#licence-87) |
+| [@radix-ui/react-context-menu](https://radix-ui.com/primitives) | 2.3.8 | MIT | [87](#licence-87) |
+| [@radix-ui/react-dialog](https://radix-ui.com/primitives) | 1.2.0 | MIT | [87](#licence-87) |
+| [@radix-ui/react-direction](https://radix-ui.com/primitives) | 1.1.5 | MIT | [87](#licence-87) |
+| [@radix-ui/react-dismissable-layer](https://radix-ui.com/primitives) | 1.1.20 | MIT | [87](#licence-87) |
+| [@radix-ui/react-dropdown-menu](https://radix-ui.com/primitives) | 2.1.25 | MIT | [87](#licence-87) |
+| [@radix-ui/react-focus-guards](https://radix-ui.com/primitives) | 1.1.6 | MIT | [87](#licence-87) |
+| [@radix-ui/react-focus-scope](https://radix-ui.com/primitives) | 1.2.0 | MIT | [87](#licence-87) |
+| [@radix-ui/react-id](https://radix-ui.com/primitives) | 1.1.4 | MIT | [87](#licence-87) |
+| [@radix-ui/react-menu](https://radix-ui.com/primitives) | 2.1.25 | MIT | [87](#licence-87) |
+| [@radix-ui/react-popper](https://radix-ui.com/primitives) | 1.3.8 | MIT | [87](#licence-87) |
+| [@radix-ui/react-portal](https://radix-ui.com/primitives) | 1.1.18 | MIT | [87](#licence-87) |
+| [@radix-ui/react-presence](https://radix-ui.com/primitives) | 1.1.11 | MIT | [87](#licence-87) |
+| [@radix-ui/react-primitive](https://radix-ui.com/primitives) | 2.1.11 | MIT | [87](#licence-87) |
+| [@radix-ui/react-progress](https://radix-ui.com/primitives) | 1.1.17 | MIT | [87](#licence-87) |
+| [@radix-ui/react-roving-focus](https://radix-ui.com/primitives) | 1.1.20 | MIT | [87](#licence-87) |
+| [@radix-ui/react-select](https://radix-ui.com/primitives) | 2.3.8 | MIT | [87](#licence-87) |
+| [@radix-ui/react-separator](https://radix-ui.com/primitives) | 1.1.16 | MIT | [87](#licence-87) |
+| [@radix-ui/react-slider](https://radix-ui.com/primitives) | 1.5.0 | MIT | [87](#licence-87) |
+| [@radix-ui/react-slot](https://radix-ui.com/primitives) | 1.4.0 | MIT | [87](#licence-87) |
+| [@radix-ui/react-switch](https://radix-ui.com/primitives) | 1.3.8 | MIT | [87](#licence-87) |
+| [@radix-ui/react-tabs](https://radix-ui.com/primitives) | 1.1.22 | MIT | [87](#licence-87) |
+| [@radix-ui/react-toggle](https://radix-ui.com/primitives) | 1.1.19 | MIT | [87](#licence-87) |
+| [@radix-ui/react-toggle-group](https://radix-ui.com/primitives) | 1.1.20 | MIT | [87](#licence-87) |
+| [@radix-ui/react-tooltip](https://radix-ui.com/primitives) | 1.3.0 | MIT | [87](#licence-87) |
+| [@radix-ui/react-use-callback-ref](https://radix-ui.com/primitives) | 1.1.4 | MIT | [87](#licence-87) |
+| [@radix-ui/react-use-controllable-state](https://radix-ui.com/primitives) | 1.2.6 | MIT | [87](#licence-87) |
+| [@radix-ui/react-use-effect-event](https://radix-ui.com/primitives) | 0.0.5 | MIT | [87](#licence-87) |
+| [@radix-ui/react-use-is-hydrated](https://radix-ui.com/primitives) | 0.1.3 | MIT | [87](#licence-87) |
+| [@radix-ui/react-use-layout-effect](https://radix-ui.com/primitives) | 1.1.4 | MIT | [87](#licence-87) |
+| [@radix-ui/react-use-previous](https://radix-ui.com/primitives) | 1.1.4 | MIT | [87](#licence-87) |
+| [@radix-ui/react-use-size](https://radix-ui.com/primitives) | 1.1.5 | MIT | [87](#licence-87) |
+| [@radix-ui/react-visually-hidden](https://radix-ui.com/primitives) | 1.2.12 | MIT | [87](#licence-87) |
+| [@tanstack/query-core](https://tanstack.com/query) | 5.104.1 | MIT | [88](#licence-88) |
+| [@tanstack/react-query](https://tanstack.com/query) | 5.104.1 | MIT | [88](#licence-88) |
+| [@tanstack/react-virtual](https://tanstack.com/virtual) | 3.14.13 | MIT | [88](#licence-88) |
+| [@tanstack/virtual-core](https://tanstack.com/virtual) | 3.17.11 | MIT | [88](#licence-88) |
+| [@tauri-apps/api](https://github.com/tauri-apps/tauri#readme) | 2.12.1 | Apache-2.0 OR MIT | [89](#licence-89) |
+| [@tauri-apps/plugin-dialog](https://github.com/tauri-apps/plugins-workspace#readme) | 2.8.1 | MIT OR Apache-2.0 | [90](#licence-90) |
+| [@tauri-apps/plugin-log](https://github.com/tauri-apps/plugins-workspace#readme) | 2.10.0 | MIT OR Apache-2.0 | [90](#licence-90) |
+| [@tauri-apps/plugin-notification](https://github.com/tauri-apps/plugins-workspace#readme) | 2.5.1 | MIT OR Apache-2.0 | [90](#licence-90) |
+| [@tauri-apps/plugin-opener](https://github.com/tauri-apps/plugins-workspace#readme) | 2.7.0 | MIT OR Apache-2.0 | [90](#licence-90) |
+| [@tauri-apps/plugin-store](https://github.com/tauri-apps/plugins-workspace#readme) | 2.5.0 | MIT OR Apache-2.0 | [90](#licence-90) |
+| [aria-hidden](https://github.com/theKashey/aria-hidden#readme) | 1.2.6 | MIT | [91](#licence-91) |
+| [class-variance-authority](https://github.com/joe-bell/cva#readme) | 0.7.1 | Apache-2.0 | [92](#licence-92) |
+| [clsx](https://github.com/lukeed/clsx#readme) | 2.1.1 | MIT | [93](#licence-93) |
+| [cmdk](https://github.com/pacocoursey/cmdk#readme) | 1.1.1 | MIT | [94](#licence-94) |
+| [get-nonce](https://github.com/theKashey/get-nonce) | 1.0.1 | MIT | [95](#licence-95) |
+| [lucide-react](https://lucide.dev) | 1.52.0 | ISC | [96](#licence-96) |
+| [react](https://react.dev/) | 19.3.0 | MIT | [97](#licence-97) |
+| [react-dom](https://react.dev/) | 19.3.0 | MIT | [97](#licence-97) |
+| [react-remove-scroll](https://github.com/theKashey/react-remove-scroll#readme) | 2.7.2 | MIT | [91](#licence-91) |
+| [react-remove-scroll-bar](https://github.com/theKashey/react-remove-scroll-bar#readme) | 2.3.8 | MIT | [98](#licence-98) |
+| [react-style-singleton](https://github.com/theKashey/react-style-singleton#readme) | 2.2.3 | MIT | [91](#licence-91) |
+| [scheduler](https://react.dev/) | 0.28.0 | MIT | [97](#licence-97) |
+| [sonner](https://sonner.emilkowal.ski/) | 2.0.8 | MIT | [99](#licence-99) |
+| [tailwind-merge](https://github.com/dcastil/tailwind-merge) | 3.7.0 | MIT | [100](#licence-100) |
+| [tailwindcss](https://tailwindcss.com) | 4.3.3 | MIT | [101](#licence-101) |
+| [tslib](https://www.typescriptlang.org/) | 2.8.1 | 0BSD | [102](#licence-102) |
+| [tw-animate-css](https://github.com/Wombosvideo/tw-animate-css#readme) | 1.4.0 | MIT | [103](#licence-103) |
+| [use-callback-ref](https://www.npmjs.com/package/use-callback-ref) | 1.3.3 | MIT | [91](#licence-91) |
+| [use-sidecar](https://github.com/theKashey/use-sidecar) | 1.1.3 | MIT | [91](#licence-91) |
+| [zundo](https://github.com/charkour/zundo) | 2.3.0 | MIT | [104](#licence-104) |
+| [zustand](https://github.com/pmndrs/zustand) | 5.0.15 | MIT | [105](#licence-105) |
 
 **react-remove-scroll-bar 2.3.8:** The package ships no licence file; this is the standard MIT text it declares.
 
@@ -10102,210 +10102,696 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### 11. Apache-2.0
 
-Used by: ch_PP-OCRv5_det_mobile.onnx v3.10.0, ch_PP-OCRv5_rec_mobile.onnx v3.10.0, ppocrv5_dict.txt v3.10.0, ort 2.0.0-rc.13, ort-sys 2.0.0-rc.13, serialize-to-javascript 0.1.2, serialize-to-javascript-impl 0.1.2, siphasher 1.0.4, tinyvec 1.13.3, utf8_iter 1.0.4
+Used by: ch_PP-OCRv5_det_mobile.onnx v3.10.0, ch_PP-OCRv5_rec_mobile.onnx v3.10.0, ppocrv5_dict.txt v3.10.0
 
 ```text
-Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
+blurrd - Copyright 2026 Konrad (KonBuku)
+https://github.com/KonBuku/blurrd
 
-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+blurrd is licensed under the GNU General Public License, version 3 only
+(GPL-3.0-only), whose full text follows below, together with additional
+terms under section 7 of that licence: an author attribution requirement
+(section 7(b) and 7(c)) and an additional permission to link with
+certain non-GPL system libraries. The additional terms are in the NOTICE
+file and apply to every copy and modified version of blurrd. A separate
+commercial licence is available from the author (see README.md).
 
-   1. Definitions.
+------------------------------------------------------------------------
 
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
 
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
 
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
+                            Preamble
 
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
+  The GNU General Public License is a free, copyleft license for
+software and other kinds of works.
 
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
+  The licenses for most software and other practical works are designed
+to take away your freedom to share and change the works.  By contrast,
+the GNU General Public License is intended to guarantee your freedom to
+share and change all versions of a program--to make sure it remains free
+software for all its users.  We, the Free Software Foundation, use the
+GNU General Public License for most of our software; it applies also to
+any other work released this way by its authors.  You can apply it to
+your programs, too.
 
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
+  When we speak of free software, we are referring to freedom, not
+price.  Our General Public Licenses are designed to make sure that you
+have the freedom to distribute copies of free software (and charge for
+them if you wish), that you receive source code or can get it if you
+want it, that you can change the software or use pieces of it in new
+free programs, and that you know you can do these things.
 
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
+  To protect your rights, we need to prevent others from denying you
+these rights or asking you to surrender the rights.  Therefore, you have
+certain responsibilities if you distribute copies of the software, or if
+you modify it: responsibilities to respect the freedom of others.
 
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
+  For example, if you distribute copies of such a program, whether
+gratis or for a fee, you must pass on to the recipients the same
+freedoms that you received.  You must make sure that they, too, receive
+or can get the source code.  And you must show them these terms so they
+know their rights.
 
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
+  Developers that use the GNU GPL protect your rights with two steps:
+(1) assert copyright on the software, and (2) offer you this License
+giving you legal permission to copy, distribute and/or modify it.
 
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
+  For the developers' and authors' protection, the GPL clearly explains
+that there is no warranty for this free software.  For both users' and
+authors' sake, the GPL requires that modified versions be marked as
+changed, so that their problems will not be attributed erroneously to
+authors of previous versions.
 
-   2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
+  Some devices are designed to deny users access to install or run
+modified versions of the software inside them, although the manufacturer
+can do so.  This is fundamentally incompatible with the aim of
+protecting users' freedom to change the software.  The systematic
+pattern of such abuse occurs in the area of products for individuals to
+use, which is precisely where it is most unacceptable.  Therefore, we
+have designed this version of the GPL to prohibit the practice for those
+products.  If such problems arise substantially in other domains, we
+stand ready to extend this provision to those domains in future versions
+of the GPL, as needed to protect the freedom of users.
 
-   3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
+  Finally, every program is threatened constantly by software patents.
+States should not allow patents to restrict development and use of
+software on general-purpose computers, but in those that do, we wish to
+avoid the special danger that patents applied to a free program could
+make it effectively proprietary.  To prevent this, the GPL assures that
+patents cannot be used to render the program non-free.
 
-   4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
+  The precise terms and conditions for copying, distribution and
+modification follow.
 
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
+                       TERMS AND CONDITIONS
 
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
+  0. Definitions.
 
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
+  "This License" refers to version 3 of the GNU General Public License.
 
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
+  "Copyright" also means copyright-like laws that apply to other kinds of
+works, such as semiconductor masks.
 
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
+  "The Program" refers to any copyrightable work licensed under this
+License.  Each licensee is addressed as "you".  "Licensees" and
+"recipients" may be individuals or organizations.
 
-   5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
+  To "modify" a work means to copy from or adapt all or part of the work
+in a fashion requiring copyright permission, other than the making of an
+exact copy.  The resulting work is called a "modified version" of the
+earlier work or a work "based on" the earlier work.
 
-   6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
+  A "covered work" means either the unmodified Program or a work based
+on the Program.
 
-   7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
+  To "propagate" a work means to do anything with it that, without
+permission, would make you directly or secondarily liable for
+infringement under applicable copyright law, except executing it on a
+computer or modifying a private copy.  Propagation includes copying,
+distribution (with or without modification), making available to the
+public, and in some countries other activities as well.
 
-   8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
+  To "convey" a work means any kind of propagation that enables other
+parties to make or receive copies.  Mere interaction with a user through
+a computer network, with no transfer of a copy, is not conveying.
 
-   9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
+  An interactive user interface displays "Appropriate Legal Notices"
+to the extent that it includes a convenient and prominently visible
+feature that (1) displays an appropriate copyright notice, and (2)
+tells the user that there is no warranty for the work (except to the
+extent that warranties are provided), that licensees may convey the
+work under this License, and how to view a copy of this License.  If
+the interface presents a list of user commands or options, such as a
+menu, a prominent item in the list meets this criterion.
 
-   END OF TERMS AND CONDITIONS
+  1. Source Code.
 
-   APPENDIX: How to apply the Apache License to your work.
+  The "source code" for a work means the preferred form of the work
+for making modifications to it.  "Object code" means any non-source
+form of a work.
 
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
+  A "Standard Interface" means an interface that either is an official
+standard defined by a recognized standards body, or, in the case of
+interfaces specified for a particular programming language, one that
+is widely used among developers working in that language.
 
-   Copyright [yyyy] [name of copyright owner]
+  The "System Libraries" of an executable work include anything, other
+than the work as a whole, that (a) is included in the normal form of
+packaging a Major Component, but which is not part of that Major
+Component, and (b) serves only to enable use of the work with that
+Major Component, or to implement a Standard Interface for which an
+implementation is available to the public in source code form.  A
+"Major Component", in this context, means a major essential component
+(kernel, window system, and so on) of the specific operating system
+(if any) on which the executable work runs, or a compiler used to
+produce the work, or an object code interpreter used to run it.
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
+  The "Corresponding Source" for a work in object code form means all
+the source code needed to generate, install, and (for an executable
+work) run the object code and to modify the work, including scripts to
+control those activities.  However, it does not include the work's
+System Libraries, or general-purpose tools or generally available free
+programs which are used unmodified in performing those activities but
+which are not part of the work.  For example, Corresponding Source
+includes interface definition files associated with source files for
+the work, and the source code for shared libraries and dynamically
+linked subprograms that the work is specifically designed to require,
+such as by intimate data communication or control flow between those
+subprograms and other parts of the work.
 
-       http://www.apache.org/licenses/LICENSE-2.0
+  The Corresponding Source need not include anything that users
+can regenerate automatically from other parts of the Corresponding
+Source.
 
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+  The Corresponding Source for a work in source code form is that
+same work.
+
+  2. Basic Permissions.
+
+  All rights granted under this License are granted for the term of
+copyright on the Program, and are irrevocable provided the stated
+conditions are met.  This License explicitly affirms your unlimited
+permission to run the unmodified Program.  The output from running a
+covered work is covered by this License only if the output, given its
+content, constitutes a covered work.  This License acknowledges your
+rights of fair use or other equivalent, as provided by copyright law.
+
+  You may make, run and propagate covered works that you do not
+convey, without conditions so long as your license otherwise remains
+in force.  You may convey covered works to others for the sole purpose
+of having them make modifications exclusively for you, or provide you
+with facilities for running those works, provided that you comply with
+the terms of this License in conveying all material for which you do
+not control copyright.  Those thus making or running the covered works
+for you must do so exclusively on your behalf, under your direction
+and control, on terms that prohibit them from making any copies of
+your copyrighted material outside their relationship with you.
+
+  Conveying under any other circumstances is permitted solely under
+the conditions stated below.  Sublicensing is not allowed; section 10
+makes it unnecessary.
+
+  3. Protecting Users' Legal Rights From Anti-Circumvention Law.
+
+  No covered work shall be deemed part of an effective technological
+measure under any applicable law fulfilling obligations under article
+11 of the WIPO copyright treaty adopted on 20 December 1996, or
+similar laws prohibiting or restricting circumvention of such
+measures.
+
+  When you convey a covered work, you waive any legal power to forbid
+circumvention of technological measures to the extent such circumvention
+is effected by exercising rights under this License with respect to
+the covered work, and you disclaim any intention to limit operation or
+modification of the work as a means of enforcing, against the work's
+users, your or third parties' legal rights to forbid circumvention of
+technological measures.
+
+  4. Conveying Verbatim Copies.
+
+  You may convey verbatim copies of the Program's source code as you
+receive it, in any medium, provided that you conspicuously and
+appropriately publish on each copy an appropriate copyright notice;
+keep intact all notices stating that this License and any
+non-permissive terms added in accord with section 7 apply to the code;
+keep intact all notices of the absence of any warranty; and give all
+recipients a copy of this License along with the Program.
+
+  You may charge any price or no price for each copy that you convey,
+and you may offer support or warranty protection for a fee.
+
+  5. Conveying Modified Source Versions.
+
+  You may convey a work based on the Program, or the modifications to
+produce it from the Program, in the form of source code under the
+terms of section 4, provided that you also meet all of these conditions:
+
+    a) The work must carry prominent notices stating that you modified
+    it, and giving a relevant date.
+
+    b) The work must carry prominent notices stating that it is
+    released under this License and any conditions added under section
+    7.  This requirement modifies the requirement in section 4 to
+    "keep intact all notices".
+
+    c) You must license the entire work, as a whole, under this
+    License to anyone who comes into possession of a copy.  This
+    License will therefore apply, along with any applicable section 7
+    additional terms, to the whole of the work, and all its parts,
+    regardless of how they are packaged.  This License gives no
+    permission to license the work in any other way, but it does not
+    invalidate such permission if you have separately received it.
+
+    d) If the work has interactive user interfaces, each must display
+    Appropriate Legal Notices; however, if the Program has interactive
+    interfaces that do not display Appropriate Legal Notices, your
+    work need not make them do so.
+
+  A compilation of a covered work with other separate and independent
+works, which are not by their nature extensions of the covered work,
+and which are not combined with it such as to form a larger program,
+in or on a volume of a storage or distribution medium, is called an
+"aggregate" if the compilation and its resulting copyright are not
+used to limit the access or legal rights of the compilation's users
+beyond what the individual works permit.  Inclusion of a covered work
+in an aggregate does not cause this License to apply to the other
+parts of the aggregate.
+
+  6. Conveying Non-Source Forms.
+
+  You may convey a covered work in object code form under the terms
+of sections 4 and 5, provided that you also convey the
+machine-readable Corresponding Source under the terms of this License,
+in one of these ways:
+
+    a) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by the
+    Corresponding Source fixed on a durable physical medium
+    customarily used for software interchange.
+
+    b) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by a
+    written offer, valid for at least three years and valid for as
+    long as you offer spare parts or customer support for that product
+    model, to give anyone who possesses the object code either (1) a
+    copy of the Corresponding Source for all the software in the
+    product that is covered by this License, on a durable physical
+    medium customarily used for software interchange, for a price no
+    more than your reasonable cost of physically performing this
+    conveying of source, or (2) access to copy the
+    Corresponding Source from a network server at no charge.
+
+    c) Convey individual copies of the object code with a copy of the
+    written offer to provide the Corresponding Source.  This
+    alternative is allowed only occasionally and noncommercially, and
+    only if you received the object code with such an offer, in accord
+    with subsection 6b.
+
+    d) Convey the object code by offering access from a designated
+    place (gratis or for a charge), and offer equivalent access to the
+    Corresponding Source in the same way through the same place at no
+    further charge.  You need not require recipients to copy the
+    Corresponding Source along with the object code.  If the place to
+    copy the object code is a network server, the Corresponding Source
+    may be on a different server (operated by you or a third party)
+    that supports equivalent copying facilities, provided you maintain
+    clear directions next to the object code saying where to find the
+    Corresponding Source.  Regardless of what server hosts the
+    Corresponding Source, you remain obligated to ensure that it is
+    available for as long as needed to satisfy these requirements.
+
+    e) Convey the object code using peer-to-peer transmission, provided
+    you inform other peers where the object code and Corresponding
+    Source of the work are being offered to the general public at no
+    charge under subsection 6d.
+
+  A separable portion of the object code, whose source code is excluded
+from the Corresponding Source as a System Library, need not be
+included in conveying the object code work.
+
+  A "User Product" is either (1) a "consumer product", which means any
+tangible personal property which is normally used for personal, family,
+or household purposes, or (2) anything designed or sold for incorporation
+into a dwelling.  In determining whether a product is a consumer product,
+doubtful cases shall be resolved in favor of coverage.  For a particular
+product received by a particular user, "normally used" refers to a
+typical or common use of that class of product, regardless of the status
+of the particular user or of the way in which the particular user
+actually uses, or expects or is expected to use, the product.  A product
+is a consumer product regardless of whether the product has substantial
+commercial, industrial or non-consumer uses, unless such uses represent
+the only significant mode of use of the product.
+
+  "Installation Information" for a User Product means any methods,
+procedures, authorization keys, or other information required to install
+and execute modified versions of a covered work in that User Product from
+a modified version of its Corresponding Source.  The information must
+suffice to ensure that the continued functioning of the modified object
+code is in no case prevented or interfered with solely because
+modification has been made.
+
+  If you convey an object code work under this section in, or with, or
+specifically for use in, a User Product, and the conveying occurs as
+part of a transaction in which the right of possession and use of the
+User Product is transferred to the recipient in perpetuity or for a
+fixed term (regardless of how the transaction is characterized), the
+Corresponding Source conveyed under this section must be accompanied
+by the Installation Information.  But this requirement does not apply
+if neither you nor any third party retains the ability to install
+modified object code on the User Product (for example, the work has
+been installed in ROM).
+
+  The requirement to provide Installation Information does not include a
+requirement to continue to provide support service, warranty, or updates
+for a work that has been modified or installed by the recipient, or for
+the User Product in which it has been modified or installed.  Access to a
+network may be denied when the modification itself materially and
+adversely affects the operation of the network or violates the rules and
+protocols for communication across the network.
+
+  Corresponding Source conveyed, and Installation Information provided,
+in accord with this section must be in a format that is publicly
+documented (and with an implementation available to the public in
+source code form), and must require no special password or key for
+unpacking, reading or copying.
+
+  7. Additional Terms.
+
+  "Additional permissions" are terms that supplement the terms of this
+License by making exceptions from one or more of its conditions.
+Additional permissions that are applicable to the entire Program shall
+be treated as though they were included in this License, to the extent
+that they are valid under applicable law.  If additional permissions
+apply only to part of the Program, that part may be used separately
+under those permissions, but the entire Program remains governed by
+this License without regard to the additional permissions.
+
+  When you convey a copy of a covered work, you may at your option
+remove any additional permissions from that copy, or from any part of
+it.  (Additional permissions may be written to require their own
+removal in certain cases when you modify the work.)  You may place
+additional permissions on material, added by you to a covered work,
+for which you have or can give appropriate copyright permission.
+
+  Notwithstanding any other provision of this License, for material you
+add to a covered work, you may (if authorized by the copyright holders of
+that material) supplement the terms of this License with terms:
+
+    a) Disclaiming warranty or limiting liability differently from the
+    terms of sections 15 and 16 of this License; or
+
+    b) Requiring preservation of specified reasonable legal notices or
+    author attributions in that material or in the Appropriate Legal
+    Notices displayed by works containing it; or
+
+    c) Prohibiting misrepresentation of the origin of that material, or
+    requiring that modified versions of such material be marked in
+    reasonable ways as different from the original version; or
+
+    d) Limiting the use for publicity purposes of names of licensors or
+    authors of the material; or
+
+    e) Declining to grant rights under trademark law for use of some
+    trade names, trademarks, or service marks; or
+
+    f) Requiring indemnification of licensors and authors of that
+    material by anyone who conveys the material (or modified versions of
+    it) with contractual assumptions of liability to the recipient, for
+    any liability that these contractual assumptions directly impose on
+    those licensors and authors.
+
+  All other non-permissive additional terms are considered "further
+restrictions" within the meaning of section 10.  If the Program as you
+received it, or any part of it, contains a notice stating that it is
+governed by this License along with a term that is a further
+restriction, you may remove that term.  If a license document contains
+a further restriction but permits relicensing or conveying under this
+License, you may add to a covered work material governed by the terms
+of that license document, provided that the further restriction does
+not survive such relicensing or conveying.
+
+  If you add terms to a covered work in accord with this section, you
+must place, in the relevant source files, a statement of the
+additional terms that apply to those files, or a notice indicating
+where to find the applicable terms.
+
+  Additional terms, permissive or non-permissive, may be stated in the
+form of a separately written license, or stated as exceptions;
+the above requirements apply either way.
+
+  8. Termination.
+
+  You may not propagate or modify a covered work except as expressly
+provided under this License.  Any attempt otherwise to propagate or
+modify it is void, and will automatically terminate your rights under
+this License (including any patent licenses granted under the third
+paragraph of section 11).
+
+  However, if you cease all violation of this License, then your
+license from a particular copyright holder is reinstated (a)
+provisionally, unless and until the copyright holder explicitly and
+finally terminates your license, and (b) permanently, if the copyright
+holder fails to notify you of the violation by some reasonable means
+prior to 60 days after the cessation.
+
+  Moreover, your license from a particular copyright holder is
+reinstated permanently if the copyright holder notifies you of the
+violation by some reasonable means, this is the first time you have
+received notice of violation of this License (for any work) from that
+copyright holder, and you cure the violation prior to 30 days after
+your receipt of the notice.
+
+  Termination of your rights under this section does not terminate the
+licenses of parties who have received copies or rights from you under
+this License.  If your rights have been terminated and not permanently
+reinstated, you do not qualify to receive new licenses for the same
+material under section 10.
+
+  9. Acceptance Not Required for Having Copies.
+
+  You are not required to accept this License in order to receive or
+run a copy of the Program.  Ancillary propagation of a covered work
+occurring solely as a consequence of using peer-to-peer transmission
+to receive a copy likewise does not require acceptance.  However,
+nothing other than this License grants you permission to propagate or
+modify any covered work.  These actions infringe copyright if you do
+not accept this License.  Therefore, by modifying or propagating a
+covered work, you indicate your acceptance of this License to do so.
+
+  10. Automatic Licensing of Downstream Recipients.
+
+  Each time you convey a covered work, the recipient automatically
+receives a license from the original licensors, to run, modify and
+propagate that work, subject to this License.  You are not responsible
+for enforcing compliance by third parties with this License.
+
+  An "entity transaction" is a transaction transferring control of an
+organization, or substantially all assets of one, or subdividing an
+organization, or merging organizations.  If propagation of a covered
+work results from an entity transaction, each party to that
+transaction who receives a copy of the work also receives whatever
+licenses to the work the party's predecessor in interest had or could
+give under the previous paragraph, plus a right to possession of the
+Corresponding Source of the work from the predecessor in interest, if
+the predecessor has it or can get it with reasonable efforts.
+
+  You may not impose any further restrictions on the exercise of the
+rights granted or affirmed under this License.  For example, you may
+not impose a license fee, royalty, or other charge for exercise of
+rights granted under this License, and you may not initiate litigation
+(including a cross-claim or counterclaim in a lawsuit) alleging that
+any patent claim is infringed by making, using, selling, offering for
+sale, or importing the Program or any portion of it.
+
+  11. Patents.
+
+  A "contributor" is a copyright holder who authorizes use under this
+License of the Program or a work on which the Program is based.  The
+work thus licensed is called the contributor's "contributor version".
+
+  A contributor's "essential patent claims" are all patent claims
+owned or controlled by the contributor, whether already acquired or
+hereafter acquired, that would be infringed by some manner, permitted
+by this License, of making, using, or selling its contributor version,
+but do not include claims that would be infringed only as a
+consequence of further modification of the contributor version.  For
+purposes of this definition, "control" includes the right to grant
+patent sublicenses in a manner consistent with the requirements of
+this License.
+
+  Each contributor grants you a non-exclusive, worldwide, royalty-free
+patent license under the contributor's essential patent claims, to
+make, use, sell, offer for sale, import and otherwise run, modify and
+propagate the contents of its contributor version.
+
+  In the following three paragraphs, a "patent license" is any express
+agreement or commitment, however denominated, not to enforce a patent
+(such as an express permission to practice a patent or covenant not to
+sue for patent infringement).  To "grant" such a patent license to a
+party means to make such an agreement or commitment not to enforce a
+patent against the party.
+
+  If you convey a covered work, knowingly relying on a patent license,
+and the Corresponding Source of the work is not available for anyone
+to copy, free of charge and under the terms of this License, through a
+publicly available network server or other readily accessible means,
+then you must either (1) cause the Corresponding Source to be so
+available, or (2) arrange to deprive yourself of the benefit of the
+patent license for this particular work, or (3) arrange, in a manner
+consistent with the requirements of this License, to extend the patent
+license to downstream recipients.  "Knowingly relying" means you have
+actual knowledge that, but for the patent license, your conveying the
+covered work in a country, or your recipient's use of the covered work
+in a country, would infringe one or more identifiable patents in that
+country that you have reason to believe are valid.
+
+  If, pursuant to or in connection with a single transaction or
+arrangement, you convey, or propagate by procuring conveyance of, a
+covered work, and grant a patent license to some of the parties
+receiving the covered work authorizing them to use, propagate, modify
+or convey a specific copy of the covered work, then the patent license
+you grant is automatically extended to all recipients of the covered
+work and works based on it.
+
+  A patent license is "discriminatory" if it does not include within
+the scope of its coverage, prohibits the exercise of, or is
+conditioned on the non-exercise of one or more of the rights that are
+specifically granted under this License.  You may not convey a covered
+work if you are a party to an arrangement with a third party that is
+in the business of distributing software, under which you make payment
+to the third party based on the extent of your activity of conveying
+the work, and under which the third party grants, to any of the
+parties who would receive the covered work from you, a discriminatory
+patent license (a) in connection with copies of the covered work
+conveyed by you (or copies made from those copies), or (b) primarily
+for and in connection with specific products or compilations that
+contain the covered work, unless you entered into that arrangement,
+or that patent license was granted, prior to 28 March 2007.
+
+  Nothing in this License shall be construed as excluding or limiting
+any implied license or other defenses to infringement that may
+otherwise be available to you under applicable patent law.
+
+  12. No Surrender of Others' Freedom.
+
+  If conditions are imposed on you (whether by court order, agreement or
+otherwise) that contradict the conditions of this License, they do not
+excuse you from the conditions of this License.  If you cannot convey a
+covered work so as to satisfy simultaneously your obligations under this
+License and any other pertinent obligations, then as a consequence you may
+not convey it at all.  For example, if you agree to terms that obligate you
+to collect a royalty for further conveying from those to whom you convey
+the Program, the only way you could satisfy both those terms and this
+License would be to refrain entirely from conveying the Program.
+
+  13. Use with the GNU Affero General Public License.
+
+  Notwithstanding any other provision of this License, you have
+permission to link or combine any covered work with a work licensed
+under version 3 of the GNU Affero General Public License into a single
+combined work, and to convey the resulting work.  The terms of this
+License will continue to apply to the part which is the covered work,
+but the special requirements of the GNU Affero General Public License,
+section 13, concerning interaction through a network will apply to the
+combination as such.
+
+  14. Revised Versions of this License.
+
+  The Free Software Foundation may publish revised and/or new versions of
+the GNU General Public License from time to time.  Such new versions will
+be similar in spirit to the present version, but may differ in detail to
+address new problems or concerns.
+
+  Each version is given a distinguishing version number.  If the
+Program specifies that a certain numbered version of the GNU General
+Public License "or any later version" applies to it, you have the
+option of following the terms and conditions either of that numbered
+version or of any later version published by the Free Software
+Foundation.  If the Program does not specify a version number of the
+GNU General Public License, you may choose any version ever published
+by the Free Software Foundation.
+
+  If the Program specifies that a proxy can decide which future
+versions of the GNU General Public License can be used, that proxy's
+public statement of acceptance of a version permanently authorizes you
+to choose that version for the Program.
+
+  Later license versions may give you additional or different
+permissions.  However, no additional obligations are imposed on any
+author or copyright holder as a result of your choosing to follow a
+later version.
+
+  15. Disclaimer of Warranty.
+
+  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
+APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
+HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
+OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
+IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
+ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+
+  16. Limitation of Liability.
+
+  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
+GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
+USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
+DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
+PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
+EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+
+  17. Interpretation of Sections 15 and 16.
+
+  If the disclaimer of warranty and limitation of liability provided
+above cannot be given local legal effect according to their terms,
+reviewing courts shall apply local law that most closely approximates
+an absolute waiver of all civil liability in connection with the
+Program, unless a warranty or assumption of liability accompanies a
+copy of the Program in return for a fee.
+
+                     END OF TERMS AND CONDITIONS
+
+            How to Apply These Terms to Your New Programs
+
+  If you develop a new program, and you want it to be of the greatest
+possible use to the public, the best way to achieve this is to make it
+free software which everyone can redistribute and change under these terms.
+
+  To do so, attach the following notices to the program.  It is safest
+to attach them to the start of each source file to most effectively
+state the exclusion of warranty; and each file should have at least
+the "copyright" line and a pointer to where the full notice is found.
+
+    <one line to give the program's name and a brief idea of what it does.>
+    Copyright (C) <year>  <name of author>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+Also add information on how to contact you by electronic and paper mail.
+
+  If the program does terminal interaction, make it output a short
+notice like this when it starts in an interactive mode:
+
+    <program>  Copyright (C) <year>  <name of author>
+    This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.
+    This is free software, and you are welcome to redistribute it
+    under certain conditions; type `show c' for details.
+
+The hypothetical commands `show w' and `show c' should show the appropriate
+parts of the General Public License.  Of course, your program's commands
+might be different; for a GUI interface, you would use an "about box".
+
+  You should also get your employer (if you work as a programmer) or school,
+if any, to sign a "copyright disclaimer" for the program, if necessary.
+For more information on this, and how to apply and follow the GNU GPL, see
+<https://www.gnu.org/licenses/>.
+
+  The GNU General Public License does not permit incorporating your program
+into proprietary programs.  If your program is a subroutine library, you
+may consider it more useful to permit linking proprietary applications with
+the library.  If this is what you want to do, use the GNU Lesser General
+Public License instead of this License.  But first, please read
+<https://www.gnu.org/licenses/why-not-lgpl.html>.
 ```
 
 <a id="licence-12"></a>
@@ -10942,6 +11428,216 @@ Apache License
 
 ### 15. Apache-2.0
 
+Used by: ort 2.0.0-rc.13, ort-sys 2.0.0-rc.13, serialize-to-javascript 0.1.2, serialize-to-javascript-impl 0.1.2, siphasher 1.0.4, tinyvec 1.13.3, utf8_iter 1.0.4
+
+```text
+Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+```
+
+<a id="licence-16"></a>
+
+### 16. Apache-2.0
+
 Used by: windows 0.62.2, windows_x86_64_msvc 0.53.1, windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1, windows-numerics 0.3.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.60.2, windows-sys 0.61.2, windows-targets 0.53.5, windows-threading 0.2.1, windows-version 0.1.7
 
 ```text
@@ -11148,9 +11844,9 @@ Apache License
    limitations under the License.
 ```
 
-<a id="licence-16"></a>
+<a id="licence-17"></a>
 
-### 16. Apache-2.0
+### 17. Apache-2.0
 
 Used by: zerocopy 0.8.61
 
@@ -11358,9 +12054,9 @@ Apache License
    limitations under the License.
 ```
 
-<a id="licence-17"></a>
+<a id="licence-18"></a>
 
-### 17. Apache-2.0
+### 18. Apache-2.0
 
 Used by: web-time 1.1.0
 
@@ -11568,9 +12264,9 @@ Apache License
    limitations under the License.
 ```
 
-<a id="licence-18"></a>
+<a id="licence-19"></a>
 
-### 18. Apache-2.0
+### 19. Apache-2.0
 
 Used by: anstream 1.0.0, anstyle 1.0.14, anstyle-parse 1.0.0, anstyle-query 1.1.5, anstyle-wincon 3.0.11, colorchoice 1.0.5, crc32fast 1.5.2, ctor 1.0.13, dpi 0.1.2, is_terminal_polyfill 1.70.2, json-patch 4.2.0, notify-rust 4.18.2, once_cell_polyfill 1.70.2, serde_spanned 1.1.1, tao 0.37.1, toml 1.1.6+spec-1.1.0, toml_datetime 1.1.1+spec-1.1.0, toml_parser 1.1.3+spec-1.1.0, toml_writer 1.1.2+spec-1.1.0
 
@@ -11778,9 +12474,9 @@ Apache License
    limitations under the License.
 ```
 
-<a id="licence-19"></a>
+<a id="licence-20"></a>
 
-### 19. Apache-2.0
+### 20. Apache-2.0
 
 Used by: jsonptr 0.7.1
 
@@ -11988,9 +12684,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-20"></a>
+<a id="licence-21"></a>
 
-### 20. Apache-2.0
+### 21. Apache-2.0
 
 Used by: futures-core 0.3.34, futures-sink 0.3.34
 
@@ -12199,9 +12895,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-21"></a>
+<a id="licence-22"></a>
 
-### 21. Apache-2.0
+### 22. Apache-2.0
 
 Used by: typenum 1.20.1
 
@@ -12409,9 +13105,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-22"></a>
+<a id="licence-23"></a>
 
-### 22. Apache-2.0
+### 23. Apache-2.0
 
 Used by: cookie 0.18.2
 
@@ -12620,9 +13316,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-23"></a>
+<a id="licence-24"></a>
 
-### 23. Apache-2.0
+### 24. Apache-2.0
 
 Used by: http 1.5.0
 
@@ -12830,9 +13526,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-24"></a>
+<a id="licence-25"></a>
 
-### 24. Apache-2.0
+### 25. Apache-2.0
 
 Used by: ppv-lite86 0.2.21
 
@@ -13040,9 +13736,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-25"></a>
+<a id="licence-26"></a>
 
-### 25. Apache-2.0
+### 26. Apache-2.0
 
 Used by: arrayvec 0.7.8, base64 0.22.1, base64 0.23.1, bitflags 1.3.2, bitflags 2.13.2, camino 1.2.6, cfg-if 1.0.5, crossbeam-channel 0.5.17, crossbeam-utils 0.8.23, displaydoc 0.2.7, equivalent 1.0.2, fastrand 2.5.0, flate2 1.1.10, fnv 1.0.7, form_urlencoded 1.2.2, glob 0.3.4, hashbrown 0.17.1, heck 0.5.0, html5ever 0.39.0, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, keyboard-types 0.8.3, lazy_static 1.5.1, lock_api 0.4.14, log 0.4.34, markup5ever 0.39.0, mime 0.3.17, muda 0.20.0, once_cell 1.21.4, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, png 0.17.16, png 0.18.1, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11, scopeguard 1.2.0, serde_with 3.24.0, serde_with_macros 3.24.0, servo_arc 0.4.3, smallvec 1.16.2, socket2 0.6.5, stable_deref_trait 1.2.1, string_cache 0.9.0, tendril 0.5.1, thread_local 1.1.10, unicode-normalization 0.1.25, unicode-segmentation 1.13.3, url 2.5.8, uuid 1.27.0, web_atoms 0.2.6, window-vibrancy 0.8.1, wry 0.57.0
 
@@ -13250,9 +13946,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-26"></a>
+<a id="licence-27"></a>
 
-### 26. Apache-2.0
+### 27. Apache-2.0
 
 Used by: bit-set 0.8.0, bit-vec 0.8.0
 
@@ -13460,9 +14156,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-27"></a>
+<a id="licence-28"></a>
 
-### 27. Apache-2.0
+### 28. Apache-2.0
 
 Used by: block-buffer 0.10.4, block-buffer 0.12.1, const-oid 0.10.2, cpufeatures 0.2.17, cpufeatures 0.3.1, crypto-common 0.1.7, crypto-common 0.2.2, digest 0.10.7, digest 0.11.3, hybrid-array 0.4.15, sha2 0.10.9, sha2 0.11.0
 
@@ -13670,9 +14366,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-28"></a>
+<a id="licence-29"></a>
 
-### 28. Apache-2.0
+### 29. Apache-2.0
 
 Used by: rand_core 0.9.5
 
@@ -13866,9 +14562,9 @@ APPENDIX: How to apply the Apache License to your work.
    identification within third-party archives.
 ```
 
-<a id="licence-29"></a>
+<a id="licence-30"></a>
 
-### 29. Apache-2.0
+### 30. Apache-2.0
 
 Used by: getrandom 0.3.4, getrandom 0.4.3
 
@@ -14076,9 +14772,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-30"></a>
+<a id="licence-31"></a>
 
-### 30. Apache-2.0
+### 31. Apache-2.0
 
 Used by: adler2 2.0.1, cargo-platform 0.1.9
 
@@ -14286,9 +14982,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-31"></a>
+<a id="licence-32"></a>
 
-### 31. Apache-2.0
+### 32. Apache-2.0
 
 Used by: jpeg-encoder 0.7.1
 
@@ -14496,9 +15192,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-32"></a>
+<a id="licence-33"></a>
 
-### 32. Apache-2.0
+### 33. Apache-2.0
 
 Used by: softbuffer 0.4.8
 
@@ -14706,9 +15402,9 @@ Apache License
    limitations under the License.
 ```
 
-<a id="licence-33"></a>
+<a id="licence-34"></a>
 
-### 33. Apache-2.0
+### 34. Apache-2.0
 
 Used by: bytemuck 1.25.2, safe_arch 1.2.0
 
@@ -14776,9 +15472,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-34"></a>
+<a id="licence-35"></a>
 
-### 34. Apache-2.0
+### 35. Apache-2.0
 
 Used by: anyhow 1.0.104, blake3 1.8.7, constant_time_eq 0.4.2, dirs 7.0.0, dirs-sys 0.5.0, dtoa 1.0.11, dunce 1.0.5, dyn-clone 1.0.20, erased-serde 0.4.10, fdeflate 0.3.7, ident_case 1.0.1, itoa 1.0.18, libc 0.2.190, miniz_oxide 0.8.9, miniz_oxide 0.9.1, num-conv 0.2.2, pin-project-lite 0.2.17, proc-macro2 1.0.107, quote 1.0.47, rand 0.9.5, rand_chacha 0.9.0, raw-window-handle 0.6.2, rustc-hash 2.1.3, semver 1.0.28, serde 1.0.229, serde_core 1.0.229, serde_derive 1.0.229, serde_derive_internals 0.29.1, serde_json 1.0.151, serde_repr 0.1.21, serde-untagged 0.1.9, syn 2.0.119, syn 3.0.6, tauri 2.12.1, tauri-codegen 2.7.1, tauri-macros 2.7.1, tauri-plugin-dialog 2.8.1, tauri-plugin-fs 2.6.0, tauri-plugin-log 2.10.0, tauri-plugin-notification 2.5.1, tauri-plugin-opener 2.7.0, tauri-plugin-single-instance 2.5.2, tauri-plugin-store 2.5.0, tauri-plugin-window-state 2.5.0, tauri-runtime 2.12.1, tauri-runtime-wry 2.12.1, tauri-utils 2.10.1, tauri-winrt-notification 0.8.1, thiserror 2.0.21, thiserror-impl 2.0.21, time 0.3.55, time-core 0.1.9, time-macros 0.2.32, typeid 1.0.3, unicode-ident 1.0.26, utf8parse 0.2.2
 
@@ -14858,9 +15554,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-35"></a>
+<a id="licence-36"></a>
 
-### 35. BSD-3-Clause
+### 36. BSD-3-Clause
 
 Used by: alloc-no-stdlib 3.0.0, brotli 9.0.0, brotli-decompressor 6.0.1
 
@@ -14879,9 +15575,9 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-<a id="licence-36"></a>
+<a id="licence-37"></a>
 
-### 36. BSD-3-Clause
+### 37. BSD-3-Clause
 
 Used by: alloc-stdlib 0.3.0
 
@@ -14899,9 +15595,9 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-<a id="licence-37"></a>
+<a id="licence-38"></a>
 
-### 37. IJG
+### 38. IJG
 
 Used by: jpeg-encoder 0.7.1
 
@@ -14946,9 +15642,9 @@ We are required to state that
      "The Graphics Interchange Format(c) is the Copyright property of CompuServe Incorporated. GIF(sm) is a Service Mark property of CompuServe Incorporated."
 ```
 
-<a id="licence-38"></a>
+<a id="licence-39"></a>
 
-### 38. ISC
+### 39. ISC
 
 Used by: libloading 0.9.0
 
@@ -14967,9 +15663,9 @@ NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE US
 THIS SOFTWARE.
 ```
 
-<a id="licence-39"></a>
+<a id="licence-40"></a>
 
-### 39. MIT
+### 40. MIT
 
 Used by: schemars_derive 0.8.22
 
@@ -15029,9 +15725,9 @@ fn is_meta_character(c: char) -> bool {
 }
 ```
 
-<a id="licence-40"></a>
+<a id="licence-41"></a>
 
-### 40. MIT
+### 41. MIT
 
 Used by: brotli 9.0.0
 
@@ -15057,9 +15753,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="licence-41"></a>
+<a id="licence-42"></a>
 
-### 41. MIT
+### 42. MIT
 
 Used by: mio 1.2.4
 
@@ -15085,9 +15781,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="licence-42"></a>
+<a id="licence-43"></a>
 
-### 42. MIT
+### 43. MIT
 
 Used by: fern 0.7.1
 
@@ -15101,9 +15797,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-43"></a>
+<a id="licence-44"></a>
 
-### 43. MIT
+### 44. MIT
 
 Used by: plist 1.10.1
 
@@ -15129,9 +15825,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-44"></a>
+<a id="licence-45"></a>
 
-### 44. MIT
+### 45. MIT
 
 Used by: new_debug_unreachable 1.0.6
 
@@ -15163,9 +15859,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-45"></a>
+<a id="licence-46"></a>
 
-### 45. MIT
+### 46. MIT
 
 Used by: bytes 1.12.1
 
@@ -15197,9 +15893,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-46"></a>
+<a id="licence-47"></a>
 
-### 46. MIT
+### 47. MIT
 
 Used by: tracing 0.1.44, tracing-attributes 0.1.31, tracing-core 0.1.36, tracing-serde 0.2.0, tracing-subscriber 0.3.23
 
@@ -15231,9 +15927,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-47"></a>
+<a id="licence-48"></a>
 
-### 47. MIT
+### 48. MIT
 
 Used by: synstructure 0.14.0
 
@@ -15247,9 +15943,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-48"></a>
+<a id="licence-49"></a>
 
-### 48. MIT
+### 49. MIT
 
 Used by: http-range 0.1.5
 
@@ -15277,9 +15973,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-49"></a>
+<a id="licence-50"></a>
 
-### 49. MIT
+### 50. MIT
 
 Used by: precomputed-hash 0.1.1
 
@@ -15307,9 +16003,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-50"></a>
+<a id="licence-51"></a>
 
-### 50. MIT
+### 51. MIT
 
 Used by: cfb 0.14.0
 
@@ -15337,9 +16033,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-51"></a>
+<a id="licence-52"></a>
 
-### 51. MIT
+### 52. MIT
 
 Used by: darling 0.24.1, darling_core 0.24.1, darling_macro 0.24.1
 
@@ -15367,9 +16063,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-52"></a>
+<a id="licence-53"></a>
 
-### 52. MIT
+### 53. MIT
 
 Used by: ico 0.5.0
 
@@ -15397,9 +16093,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-53"></a>
+<a id="licence-54"></a>
 
-### 53. MIT
+### 54. MIT
 
 Used by: infer 0.22.0
 
@@ -15427,9 +16123,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-54"></a>
+<a id="licence-55"></a>
 
-### 54. MIT
+### 55. MIT
 
 Used by: schemars 0.8.22, schemars_derive 0.8.22
 
@@ -15457,9 +16153,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-55"></a>
+<a id="licence-56"></a>
 
-### 55. MIT
+### 56. MIT
 
 Used by: tokio-macros 2.7.2
 
@@ -15488,9 +16184,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-56"></a>
+<a id="licence-57"></a>
 
-### 56. MIT
+### 57. MIT
 
 Used by: urlpattern 0.6.0
 
@@ -15518,9 +16214,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-57"></a>
+<a id="licence-58"></a>
 
-### 57. MIT
+### 58. MIT
 
 Used by: rfd 0.16.0
 
@@ -15548,9 +16244,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-58"></a>
+<a id="licence-59"></a>
 
-### 58. MIT
+### 59. MIT
 
 Used by: dom_query 0.28.0
 
@@ -15584,9 +16280,9 @@ derived from the "nipper" project (https://github.com/importcjj/nipper),
 developed by Chen Jiaju, licensed under the MIT License and the Apache License 2.0 (dual licensed).
 ```
 
-<a id="licence-59"></a>
+<a id="licence-60"></a>
 
-### 59. MIT
+### 60. MIT
 
 Used by: dpi 0.1.2, ts-rs 12.0.1, ts-rs-macros 12.0.1, webview2-com 0.39.1, webview2-com-macros 0.8.1, webview2-com-sys 0.39.1
 
@@ -15611,9 +16307,9 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTI
 USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-60"></a>
+<a id="licence-61"></a>
 
-### 60. MIT
+### 61. MIT
 
 Used by: tokio 1.53.3, tokio-util 0.7.19
 
@@ -15641,9 +16337,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-61"></a>
+<a id="licence-62"></a>
 
-### 61. MIT
+### 62. MIT
 
 Used by: simd-adler32 0.3.10
 
@@ -15671,9 +16367,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-62"></a>
+<a id="licence-63"></a>
 
-### 62. MIT
+### 63. MIT
 
 Used by: cargo_metadata 0.19.2, zmij 1.0.23
 
@@ -15703,9 +16399,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-63"></a>
+<a id="licence-64"></a>
 
-### 63. MIT
+### 64. MIT
 
 Used by: winnow 1.0.4
 
@@ -15730,9 +16426,9 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-64"></a>
+<a id="licence-65"></a>
 
-### 64. MIT
+### 65. MIT
 
 Used by: tracing-core 0.1.36
 
@@ -15760,9 +16456,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-65"></a>
+<a id="licence-66"></a>
 
-### 65. MIT
+### 66. MIT
 
 Used by: phf 0.13.1, phf_generator 0.13.1, phf_macros 0.13.1, phf_shared 0.13.1
 
@@ -15789,9 +16485,9 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-66"></a>
+<a id="licence-67"></a>
 
-### 66. MIT
+### 67. MIT
 
 Used by: aho-corasick 1.1.5, byteorder 1.5.0, memchr 2.8.3, termcolor 1.4.1, walkdir 2.5.0
 
@@ -15819,9 +16515,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="licence-67"></a>
+<a id="licence-68"></a>
 
-### 67. MIT
+### 68. MIT
 
 Used by: strsim 0.11.1
 
@@ -15851,9 +16547,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-68"></a>
+<a id="licence-69"></a>
 
-### 68. MIT
+### 69. MIT
 
 Used by: derive_more 2.1.1, derive_more-impl 2.1.1
 
@@ -15881,9 +16577,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-69"></a>
+<a id="licence-70"></a>
 
-### 69. MIT
+### 70. MIT
 
 Used by: quick-xml 0.42.0
 
@@ -15913,9 +16609,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="licence-70"></a>
+<a id="licence-71"></a>
 
-### 70. MIT
+### 71. MIT
 
 Used by: same-file 1.0.6, winapi-util 0.1.11
 
@@ -15943,9 +16639,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="licence-71"></a>
+<a id="licence-72"></a>
 
-### 71. MIT
+### 72. MIT
 
 Used by: open 5.4.4
 
@@ -15977,9 +16673,9 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-72"></a>
+<a id="licence-73"></a>
 
-### 72. MIT
+### 73. MIT
 
 Used by: generic-array 0.14.7
 
@@ -16007,9 +16703,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-73"></a>
+<a id="licence-74"></a>
 
-### 73. MPL-2.0
+### 74. MPL-2.0
 
 Used by: dtoa-short 0.3.5
 
@@ -16389,9 +17085,9 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-<a id="licence-74"></a>
+<a id="licence-75"></a>
 
-### 74. MPL-2.0
+### 75. MPL-2.0
 
 Used by: cssparser 0.37.0, cssparser-macros 0.7.1
 
@@ -16771,9 +17467,9 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-<a id="licence-75"></a>
+<a id="licence-76"></a>
 
-### 75. MPL-2.0
+### 76. MPL-2.0
 
 Used by: option-ext 0.2.0, selectors 0.38.0
 
@@ -17153,9 +17849,9 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-<a id="licence-76"></a>
+<a id="licence-77"></a>
 
-### 76. Unicode-3.0
+### 77. Unicode-3.0
 
 Used by: unicode-ident 1.0.26
 
@@ -17201,9 +17897,9 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-<a id="licence-77"></a>
+<a id="licence-78"></a>
 
-### 77. Unicode-3.0
+### 78. Unicode-3.0
 
 Used by: icu_collections 2.3.0, icu_locale_core 2.3.0, icu_normalizer 2.3.0, icu_normalizer_data 2.3.0, icu_properties 2.3.0, icu_properties_data 2.3.0, icu_provider 2.3.1, litemap 0.8.3, potential_utf 0.1.6, tinystr 0.8.4, writeable 0.6.4, yoke 0.8.3, yoke-derive 0.8.4, zerofrom 0.1.8, zerofrom-derive 0.1.8, zerotrie 0.2.5, zerovec 0.11.8, zerovec-derive 0.11.6
 
@@ -17256,9 +17952,9 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 ```
 
-<a id="licence-78"></a>
+<a id="licence-79"></a>
 
-### 78. WTFPL
+### 79. WTFPL
 
 Used by: ffmpeg-sys-the-third 6.0.0+ffmpeg-9.0, ffmpeg-the-third 6.0.0+ffmpeg-9.0
 
@@ -17276,9 +17972,9 @@ DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
   0. You just DO WHAT THE FUCK YOU WANT TO.
 ```
 
-<a id="licence-79"></a>
+<a id="licence-80"></a>
 
-### 79. Zlib
+### 80. Zlib
 
 Used by: foldhash 0.2.0
 
@@ -17304,9 +18000,9 @@ the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-<a id="licence-80"></a>
+<a id="licence-81"></a>
 
-### 80. Apache-2.0
+### 81. Apache-2.0
 
 Used by: clap 4.6.7, clap_builder 4.6.7, clap_derive 4.6.7, clap_lex 1.1.1
 
@@ -17514,9 +18210,9 @@ Apache License
    limitations under the License.
 ```
 
-<a id="licence-81"></a>
+<a id="licence-82"></a>
 
-### 81. Apache-2.0
+### 82. Apache-2.0
 
 Used by: ctrlc 3.5.2
 
@@ -17724,9 +18420,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-<a id="licence-82"></a>
+<a id="licence-83"></a>
 
-### 82. MIT
+### 83. MIT
 
 Used by: sharded-slab 0.1.7
 
@@ -17752,9 +18448,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="licence-83"></a>
+<a id="licence-84"></a>
 
-### 83. MIT
+### 84. MIT
 
 Used by: matchers 0.2.0
 
@@ -17780,9 +18476,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-84"></a>
+<a id="licence-85"></a>
 
-### 84. MIT
+### 85. MIT
 
 Used by: nu-ansi-term 0.50.3
 
@@ -17811,9 +18507,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-85"></a>
+<a id="licence-86"></a>
 
-### 85. MIT
+### 86. MIT
 
 Used by: @floating-ui/core 1.8.0, @floating-ui/dom 1.8.0, @floating-ui/react-dom 2.1.9, @floating-ui/utils 0.2.12
 
@@ -17840,9 +18536,9 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-86"></a>
+<a id="licence-87"></a>
 
-### 86. MIT
+### 87. MIT
 
 Used by: @radix-ui/number 1.1.3, @radix-ui/primitive 1.1.7, @radix-ui/react-checkbox 1.3.12, @radix-ui/react-collection 1.1.16, @radix-ui/react-compose-refs 1.1.5, @radix-ui/react-context 1.2.2, @radix-ui/react-context-menu 2.3.8, @radix-ui/react-dialog 1.2.0, @radix-ui/react-direction 1.1.5, @radix-ui/react-dismissable-layer 1.1.20, @radix-ui/react-dropdown-menu 2.1.25, @radix-ui/react-focus-guards 1.1.6, @radix-ui/react-focus-scope 1.2.0, @radix-ui/react-id 1.1.4, @radix-ui/react-menu 2.1.25, @radix-ui/react-popper 1.3.8, @radix-ui/react-portal 1.1.18, @radix-ui/react-presence 1.1.11, @radix-ui/react-primitive 2.1.11, @radix-ui/react-progress 1.1.17, @radix-ui/react-roving-focus 1.1.20, @radix-ui/react-select 2.3.8, @radix-ui/react-separator 1.1.16, @radix-ui/react-slider 1.5.0, @radix-ui/react-slot 1.4.0, @radix-ui/react-switch 1.3.8, @radix-ui/react-tabs 1.1.22, @radix-ui/react-toggle 1.1.19, @radix-ui/react-toggle-group 1.1.20, @radix-ui/react-tooltip 1.3.0, @radix-ui/react-use-callback-ref 1.1.4, @radix-ui/react-use-controllable-state 1.2.6, @radix-ui/react-use-effect-event 0.0.5, @radix-ui/react-use-is-hydrated 0.1.3, @radix-ui/react-use-layout-effect 1.1.4, @radix-ui/react-use-previous 1.1.4, @radix-ui/react-use-size 1.1.5, @radix-ui/react-visually-hidden 1.2.12
 
@@ -17870,9 +18566,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-87"></a>
+<a id="licence-88"></a>
 
-### 87. MIT
+### 88. MIT
 
 Used by: @tanstack/query-core 5.104.1, @tanstack/react-query 5.104.1, @tanstack/react-virtual 3.14.13, @tanstack/virtual-core 3.17.11
 
@@ -17900,9 +18596,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-88"></a>
+<a id="licence-89"></a>
 
-### 88. Apache-2.0 OR MIT
+### 89. Apache-2.0 OR MIT
 
 Used by: @tauri-apps/api 2.12.1
 
@@ -18085,9 +18781,9 @@ Apache License
    END OF TERMS AND CONDITIONS
 ```
 
-<a id="licence-89"></a>
+<a id="licence-90"></a>
 
-### 89. MIT OR Apache-2.0
+### 90. MIT OR Apache-2.0
 
 Used by: @tauri-apps/plugin-dialog 2.8.1, @tauri-apps/plugin-log 2.10.0, @tauri-apps/plugin-notification 2.5.1, @tauri-apps/plugin-opener 2.7.0, @tauri-apps/plugin-store 2.5.0
 
@@ -18114,9 +18810,9 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/tauri.git
 Creator: Person: Daniel Thompson-Yvetot
 ```
 
-<a id="licence-90"></a>
+<a id="licence-91"></a>
 
-### 90. MIT
+### 91. MIT
 
 Used by: aria-hidden 1.2.6, react-remove-scroll 2.7.2, react-style-singleton 2.2.3, use-callback-ref 1.3.3, use-sidecar 1.1.3
 
@@ -18144,9 +18840,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-91"></a>
+<a id="licence-92"></a>
 
-### 91. Apache-2.0
+### 92. Apache-2.0
 
 Used by: class-variance-authority 0.7.1
 
@@ -18343,9 +19039,9 @@ Apache License
    limitations under the License.
 ```
 
-<a id="licence-92"></a>
+<a id="licence-93"></a>
 
-### 92. MIT
+### 93. MIT
 
 Used by: clsx 2.1.1
 
@@ -18361,9 +19057,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="licence-93"></a>
+<a id="licence-94"></a>
 
-### 93. MIT
+### 94. MIT
 
 Used by: cmdk 1.1.1
 
@@ -18391,9 +19087,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-94"></a>
+<a id="licence-95"></a>
 
-### 94. MIT
+### 95. MIT
 
 Used by: get-nonce 1.0.1
 
@@ -18421,9 +19117,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-95"></a>
+<a id="licence-96"></a>
 
-### 95. ISC
+### 96. ISC
 
 Used by: lucide-react 1.52.0
 
@@ -18473,9 +19169,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-96"></a>
+<a id="licence-97"></a>
 
-### 96. MIT
+### 97. MIT
 
 Used by: react 19.3.0, react-dom 19.3.0, scheduler 0.28.0
 
@@ -18503,9 +19199,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-97"></a>
+<a id="licence-98"></a>
 
-### 97. MIT
+### 98. MIT
 
 Used by: react-remove-scroll-bar 2.3.8
 
@@ -18533,9 +19229,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-98"></a>
+<a id="licence-99"></a>
 
-### 98. MIT
+### 99. MIT
 
 Used by: sonner 2.0.8
 
@@ -18563,9 +19259,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-99"></a>
+<a id="licence-100"></a>
 
-### 99. MIT
+### 100. MIT
 
 Used by: tailwind-merge 3.7.0
 
@@ -18593,9 +19289,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-100"></a>
+<a id="licence-101"></a>
 
-### 100. MIT
+### 101. MIT
 
 Used by: tailwindcss 4.3.3
 
@@ -18623,9 +19319,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-101"></a>
+<a id="licence-102"></a>
 
-### 101. 0BSD
+### 102. 0BSD
 
 Used by: tslib 2.8.1
 
@@ -18644,9 +19340,9 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 ```
 
-<a id="licence-102"></a>
+<a id="licence-103"></a>
 
-### 102. MIT
+### 103. MIT
 
 Used by: tw-animate-css 1.4.0
 
@@ -18674,9 +19370,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-103"></a>
+<a id="licence-104"></a>
 
-### 103. MIT
+### 104. MIT
 
 Used by: zundo 2.3.0
 
@@ -18704,9 +19400,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="licence-104"></a>
+<a id="licence-105"></a>
 
-### 104. MIT
+### 105. MIT
 
 Used by: zustand 5.0.15
 
