@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use blurrd_core::{AppError, ErrorKind, OcrCapability};
+use blurrd_core::{AppError, ErrorKind, OcrCapability, Processing};
 use blurrd_engine::{Engine, EngineConfig, OcrSetup, default_cache_dir};
 
 use crate::capabilities::CapabilityProbe;
@@ -42,6 +42,10 @@ pub(crate) struct AppState {
     /// The origin of the window's page, the only one allowed to read the
     /// scheme's and the media server's answers.
     pub(crate) origin: Arc<str>,
+    /// The processing settings the engine was created with.
+    pub(crate) processing: Arc<Processing>,
+    /// The log folder.
+    pub(crate) log_dir: Arc<Path>,
 }
 
 impl AppState {
@@ -54,9 +58,17 @@ impl AppState {
     ///
     /// [`ErrorKind::Internal`] when the job queue or the scheme's threads
     /// cannot start.
-    pub(crate) fn new(config_dir: &Path, paths: UserPaths, origin: &str) -> Result<Self, AppError> {
+    pub(crate) fn new(
+        config_dir: &Path,
+        log_dir: &Path,
+        paths: UserPaths,
+        origin: &str,
+        processing: Processing,
+    ) -> Result<Self, AppError> {
         let mut config = EngineConfig::new(default_cache_dir());
         config.ocr = ocr_setup();
+        config.gpu = processing.uses_gpu();
+        config.adapter = processing.gpu_luid;
         let ocr = match &config.ocr {
             Some(_) => OcrCapability::NotProbed,
             None => OcrCapability::Unavailable {
@@ -98,6 +110,8 @@ impl AppState {
             media,
             scheme: Arc::new(workers),
             origin: Arc::from(origin),
+            processing: Arc::new(processing),
+            log_dir: Arc::from(log_dir),
         })
     }
 
@@ -110,13 +124,23 @@ impl AppState {
         self.engine.clone()
     }
 
+    /// The engine's cache folder.
+    pub(crate) fn cache_dir(&self) -> PathBuf {
+        match &self.engine {
+            Ok(engine) => engine.config().cache_dir.clone(),
+            Err(_) => default_cache_dir(),
+        }
+    }
+
     /// Starts the background capability probe.
     pub(crate) fn probe_capabilities(&self) {
-        let caps = match &self.engine {
-            Ok(engine) => engine.config().cache_dir.join(CAPS_FOLDER),
-            Err(_) => default_cache_dir().join(CAPS_FOLDER),
-        };
-        self.capabilities.start(caps);
+        self.capabilities.start(self.cache_dir().join(CAPS_FOLDER));
+    }
+
+    /// Clears the cached capability probes and probes again.
+    pub(crate) fn reprobe_capabilities(&self) {
+        self.capabilities
+            .restart(self.cache_dir().join(CAPS_FOLDER));
     }
 }
 

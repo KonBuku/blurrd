@@ -225,6 +225,11 @@ impl Default for Appearance {
 }
 
 /// Hardware decoding preference.
+///
+/// The desktop app maps it to the engine's GPU switch when it starts:
+/// `Software` decodes on the CPU and encodes with Media Foundation,
+/// anything else lets blurrd pick the GPU decoder from its cached
+/// benchmark (`Nvdec` cannot be forced yet and behaves like `Auto`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum HwDecodeSetting {
@@ -269,6 +274,19 @@ pub struct Processing {
     pub preview_quality: PreviewQuality,
 }
 
+impl Processing {
+    /// Why these processing settings cannot be used, or `None`.
+    pub fn problem(&self) -> Option<String> {
+        (!(1..=2).contains(&self.parallel_jobs))
+            .then(|| format!("parallel jobs {} must be 1 or 2", self.parallel_jobs))
+    }
+
+    /// Whether the GPU may decode and encode (everything but `Software`).
+    pub fn uses_gpu(&self) -> bool {
+        self.hw_decode != HwDecodeSetting::Software
+    }
+}
+
 impl Default for Processing {
     fn default() -> Self {
         Self {
@@ -295,6 +313,19 @@ pub struct Defaults {
     pub export: ExportSettings,
     /// Verification settings.
     pub verify: VerifySettings,
+}
+
+impl Defaults {
+    /// Why these defaults cannot be used, or `None`: invalid blur, export
+    /// or verification values.
+    pub fn problem(&self) -> Option<String> {
+        validate_defaults(&self.blur, &self.export, &self.verify)
+            .err()
+            .map(|error| match error {
+                SchemaError::Invalid(problem) => problem,
+                other => other.to_string(),
+            })
+    }
 }
 
 /// General behaviour.
@@ -411,11 +442,8 @@ impl Document for Settings {
                 self.appearance.ui_font_size
             )));
         }
-        if !(1..=2).contains(&self.processing.parallel_jobs) {
-            return Err(SchemaError::Invalid(format!(
-                "parallel jobs {} must be 1 or 2",
-                self.processing.parallel_jobs
-            )));
+        if let Some(problem) = self.processing.problem() {
+            return Err(SchemaError::Invalid(problem));
         }
         validate_defaults(
             &self.defaults.blur,
@@ -567,7 +595,7 @@ fn validate_defaults(
 
 #[cfg(test)]
 mod tests {
-    use super::{Mode, Preset, PresetFile, Settings};
+    use super::{Defaults, HwDecodeSetting, Mode, Preset, PresetFile, Processing, Settings};
     use crate::region::Region;
     use crate::schema::{self, SchemaError};
 
@@ -600,6 +628,30 @@ mod tests {
             schema::from_json::<Settings>(settings),
             Err(SchemaError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn sections_report_their_problems() {
+        assert_eq!(Processing::default().problem(), None);
+        let processing = Processing {
+            parallel_jobs: 0,
+            ..Processing::default()
+        };
+        assert!(processing.problem().is_some());
+        assert!(Processing::default().uses_gpu());
+        let software = Processing {
+            hw_decode: HwDecodeSetting::Software,
+            ..Processing::default()
+        };
+        assert!(!software.uses_gpu());
+
+        assert_eq!(Defaults::default().problem(), None);
+        let mut defaults = Defaults::default();
+        defaults.verify.min_conf = 2.0;
+        assert!(defaults.problem().unwrap().contains("confidence"));
+        let mut defaults = Defaults::default();
+        defaults.export.output.template = " ".to_owned();
+        assert!(defaults.problem().is_some());
     }
 
     #[test]

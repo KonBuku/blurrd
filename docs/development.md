@@ -346,6 +346,24 @@ reloads, interface size, reduce motion, focus handling and an axe scan of
 each page in both themes; tests that check both themes pick one with
 `chooseTheme` (`e2e/fixtures.ts`).
 
+The pages are General, Appearance, Processing, Output defaults,
+Detection, Verification, Shortcuts, Logs & privacy and About. The
+frontend writes `appearance` and `general` itself; `processing`,
+`defaults` and `privacy` go through commands (`get_settings`,
+`save_processing`, `save_defaults`, `save_privacy`), so Rust checks every
+value (`src-tauri/src/settings.rs`) before the store writes it. Processing
+offers only what the engine reads at start (GPU on or off, the OCR GPU)
+and "Measure again" (`refresh_capabilities` clears `caps\`). The stored
+defaults are the settings of files added later; changing them on a page
+keeps the values of files already queued, and the inspector still
+overrides them per file. The output folder of the defaults is allowed
+again at start (the user chose it in an earlier session). Logs & privacy
+sets the log level (applied at once), opens the log folder
+(`open_log_dir`) and clears cached analyses of recordings that are not
+queued (`get_cache_info`, `clear_cache`). `e2e/settings-pages.spec.ts`
+covers navigation, axe in both themes, the 1024x680 window, keyboard
+use, persistence across reloads and the export folder in the inspector.
+
 The command palette (`src/features/command`, Ctrl+K or the search button
 in the title bar) lists the actions of the mounted features. A feature
 offers its commands with `useCommandSource(source, commands)` while it is

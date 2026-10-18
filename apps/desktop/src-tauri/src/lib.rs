@@ -22,6 +22,7 @@ mod presets;
 mod projects;
 mod scheme;
 mod session;
+mod settings;
 mod state;
 mod tasks;
 
@@ -34,15 +35,11 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewWindowBuilder};
 use tauri_plugin_store::StoreBuilder;
 
 use crate::paths::UserPaths;
+use crate::settings::{SETTINGS_FILE, Startup};
 use crate::state::AppState;
 
 /// Label of the main window in `tauri.conf.json`.
 const MAIN_WINDOW: &str = "main";
-
-/// The settings file (schema `blurrd-settings/1`), relative to the app
-/// data directory (`%APPDATA%\io.github.konbuku.blurrd`). The frontend
-/// opens it with `getStore` under the same name.
-const SETTINGS_FILE: &str = "settings.json";
 
 /// Window shell colours of the dark and the light theme
 /// (`--color-background-win-alt` in `apps/desktop/src/styles/globals.css`).
@@ -93,9 +90,10 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             tauri_plugin_log::log::info!("blurrd {} started", env!("CARGO_PKG_VERSION"));
-            let theme = open_settings(app.handle());
-            create_main_window(app.handle(), theme)?;
-            let state = app_state(app.handle())?;
+            let startup = open_settings(app.handle());
+            settings::apply_log_level(startup.privacy.log_level);
+            create_main_window(app.handle(), startup.theme)?;
+            let state = app_state(app.handle(), &startup)?;
             state.probe_capabilities();
             app.manage(state);
             Ok(())
@@ -140,6 +138,14 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::delete_preset,
             commands::import_preset,
             commands::export_preset,
+            commands::get_settings,
+            commands::save_processing,
+            commands::save_defaults,
+            commands::save_privacy,
+            commands::get_cache_info,
+            commands::clear_cache,
+            commands::open_log_dir,
+            commands::refresh_capabilities,
         ])
         .build(tauri::generate_context!())?
         .run(|app, event| {
@@ -153,15 +159,29 @@ pub fn run() -> Result<(), tauri::Error> {
     Ok(())
 }
 
-/// The commands' state: the engine, the project registry, the job queue
-/// and the stores, with paths checked against the asset protocol scope
-/// that the dialogs and the drop handler fill.
-fn app_state(app: &AppHandle) -> Result<AppState, Box<dyn std::error::Error>> {
+/// The commands' state: the engine (with the stored processing settings),
+/// the project registry, the job queue and the stores, with paths checked
+/// against the asset protocol scope that the dialogs and the drop handler
+/// fill. The stored output folder of the defaults was chosen by the user
+/// in an earlier session and is allowed again.
+fn app_state(app: &AppHandle, startup: &Startup) -> Result<AppState, Box<dyn std::error::Error>> {
     let config_dir = app.path().app_config_dir()?;
+    let log_dir = app.path().app_log_dir()?;
     let paths = UserPaths::new(Box::new(app.asset_protocol_scope()));
+    if let Some(folder) = &startup.output_folder
+        && !paths.add_chosen_folder(folder)
+    {
+        tauri_plugin_log::log::warn!("the stored output folder does not exist any more");
+    }
     let origin = page_origin(app);
     tauri_plugin_log::log::info!("page origin {origin}");
-    Ok(AppState::new(&config_dir, paths, &origin)?)
+    Ok(AppState::new(
+        &config_dir,
+        &log_dir,
+        paths,
+        &origin,
+        startup.processing.clone(),
+    )?)
 }
 
 /// The origin the main window's page will have, from the configuration:
@@ -220,28 +240,21 @@ fn window_origin(url: &tauri::Url) -> String {
 /// it with `getStore`; the frontend may not open store files itself. A
 /// missing file is created on the first save. An unreadable file is
 /// logged and left untouched: the frontend then runs on defaults and does
-/// not save. Answers the stored theme (the default when there is none),
-/// which the window paints before the page loads.
-fn open_settings(app: &AppHandle) -> Theme {
+/// not save. Answers the settings needed before the window and the engine
+/// exist: the stored theme (the window paints it before the page loads),
+/// processing, privacy and the output folder of the defaults. Like the
+/// frontend, the theme is read from a file of any schema.
+fn open_settings(app: &AppHandle) -> Startup {
     match StoreBuilder::new(app, SETTINGS_FILE)
         .disable_auto_save()
         .build()
     {
-        Ok(store) => stored_theme(store.get("appearance").as_ref()),
+        Ok(store) => Startup::read(|key| store.get(key)),
         Err(error) => {
             tauri_plugin_log::log::warn!("could not open {SETTINGS_FILE}: {error}");
-            Theme::default()
+            Startup::default()
         }
     }
-}
-
-/// The theme of the settings file's `appearance` section; a missing or
-/// invalid value is the default, as in the frontend's `parseAppearance`.
-fn stored_theme(appearance: Option<&serde_json::Value>) -> Theme {
-    appearance
-        .and_then(|appearance| appearance.get("theme"))
-        .and_then(|theme| serde_json::from_value(theme.clone()).ok())
-        .unwrap_or_default()
 }
 
 /// Script that runs before the page's own scripts: it hands the window's
@@ -362,8 +375,22 @@ mod tests {
 
     use super::{
         DARK_SHELL, LIGHT_SHELL, boot_theme_script, configured_origin, file_arguments, shell_color,
-        stored_theme, window_origin,
+        window_origin,
     };
+    use crate::settings::Startup;
+
+    /// The stored theme of a file whose `appearance` section is `value`.
+    fn stored_theme(value: Option<&serde_json::Value>) -> Theme {
+        let value = value.cloned();
+        Startup::read(move |key| {
+            if key == "appearance" {
+                value.clone()
+            } else {
+                None
+            }
+        })
+        .theme
+    }
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()

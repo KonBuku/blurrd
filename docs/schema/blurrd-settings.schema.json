@@ -648,7 +648,7 @@
       }
     },
     "HwDecodeSetting": {
-      "description": "Hardware decoding preference.",
+      "description": "Hardware decoding preference.\n\nThe desktop app maps it to the engine's GPU switch when it starts:\n`Software` decodes on the CPU and encodes with Media Foundation,\nanything else lets blurrd pick the GPU decoder from its cached\nbenchmark (`Nvdec` cannot be forced yet and behaves like `Auto`).",
       "oneOf": [
         {
           "description": "Choose per codec from a cached benchmark.",

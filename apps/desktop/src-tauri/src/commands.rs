@@ -15,14 +15,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use blurrd_core::{
-    AppError, BlurParams, Capabilities, DensityLanes, DetectorOptions, ErrorKind, ExportSettings,
-    FramePts, JobEvent, JobId, OutputFolder, OutputPreview, Override, OverridesSaved, Preset,
-    ProbeOutcome, ProjectSummary, RegionSet, RegionSettings, RunFile, TrackSet, VerifyReport,
-    VerifySettings,
+    AppError, BlurParams, CacheInfo, Capabilities, Defaults, DensityLanes, DetectorOptions,
+    ErrorKind, ExportSettings, FramePts, JobEvent, JobId, OutputFolder, OutputPreview, Override,
+    OverridesSaved, Preset, Privacy, ProbeOutcome, Processing, ProjectSummary, RegionSet,
+    RegionSettings, RunFile, StoredSettings, TrackSet, VerifyReport, VerifySettings,
 };
 use blurrd_engine::is_verified;
-use tauri::State;
 use tauri::ipc::Channel;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
 use crate::jobs::EventOut;
@@ -32,6 +33,7 @@ use crate::output;
 use crate::paths::UserPaths;
 use crate::projects::OpenProject;
 use crate::session::SessionEntry;
+use crate::settings;
 use crate::state::AppState;
 use crate::tasks::{self, ExportRequest};
 
@@ -516,6 +518,122 @@ pub(crate) async fn export_preset(
         state.presets.export(&id, &file, include_kept_names)
     })
     .await
+}
+
+/// The backend's settings sections (processing, defaults for new files,
+/// privacy) as saved, with the processing the running engine uses.
+#[tauri::command]
+pub(crate) fn get_settings(app: AppHandle, state: State<'_, AppState>) -> StoredSettings {
+    settings::get(&app, &state.processing)
+}
+
+/// Saves the processing settings; the engine uses them from the next
+/// start.
+#[tauri::command]
+pub(crate) fn save_processing(app: AppHandle, processing: Processing) -> Result<(), AppError> {
+    let processing = settings::checked_processing(processing)?;
+    settings::save_processing(&app, &processing)
+}
+
+/// Saves the defaults for new files; answers them as stored (a chosen
+/// output folder in its canonical form).
+#[tauri::command]
+pub(crate) async fn save_defaults(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    defaults: Defaults,
+) -> Result<Defaults, AppError> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let defaults = settings::checked_defaults(&state.paths, defaults)?;
+        settings::save_defaults(&app, &defaults)?;
+        Ok(defaults)
+    })
+    .await
+}
+
+/// Saves the privacy settings and applies the log level at once.
+#[tauri::command]
+pub(crate) fn save_privacy(app: AppHandle, privacy: Privacy) -> Result<(), AppError> {
+    settings::save_privacy(&app, privacy)?;
+    settings::apply_log_level(privacy.log_level);
+    Ok(())
+}
+
+/// The cache and log folders and how much the cached analyses take.
+#[tauri::command]
+pub(crate) async fn get_cache_info(state: State<'_, AppState>) -> Result<CacheInfo, AppError> {
+    let state = state.inner().clone();
+    blocking(move || Ok(cache_info(&state))).await
+}
+
+/// Deletes the cached analyses (their edits and verification reports go
+/// with them) except those of the open projects and of `keep` (the queued
+/// files); answers what is left.
+#[tauri::command]
+pub(crate) async fn clear_cache(
+    state: State<'_, AppState>,
+    keep: Vec<PathBuf>,
+) -> Result<CacheInfo, AppError> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let mut ids = state.projects.open_ids();
+        ids.extend(keep.iter().filter_map(|path| {
+            let path = state.paths.existing(path).ok()?;
+            Some(
+                blurrd_engine::cache::fingerprint(&path)
+                    .ok()?
+                    .blake3_head_tail,
+            )
+        }));
+        let failed = settings::clear_projects(&state.cache_dir(), &ids);
+        if failed > 0 {
+            tauri_plugin_log::log::warn!("{failed} cached analyses could not be deleted");
+        }
+        Ok(cache_info(&state))
+    })
+    .await
+}
+
+/// What `get_cache_info` answers.
+fn cache_info(state: &AppState) -> CacheInfo {
+    let cache_dir = state.cache_dir();
+    let (projects, project_bytes) = settings::project_usage(&cache_dir);
+    CacheInfo {
+        cache_dir,
+        projects,
+        project_bytes,
+        log_dir: state.log_dir.to_path_buf(),
+    }
+}
+
+/// Opens the log folder in Explorer (created first when no log exists
+/// yet).
+#[tauri::command]
+pub(crate) fn open_log_dir(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
+    let folder = state.log_dir.to_path_buf();
+    let failed = |detail: String| {
+        AppError::new(ErrorKind::Io, "The log folder could not be opened.").with_detail(detail)
+    };
+    std::fs::create_dir_all(&folder).map_err(|e| failed(format!("{}: {e}", folder.display())))?;
+    app.opener()
+        .open_path(folder.to_string_lossy(), None::<&str>)
+        .map_err(|e| failed(e.to_string()))
+}
+
+/// Forgets the cached decoder benchmark and encoder probe and probes this
+/// PC again; refused while a job runs or waits (the probe encodes on the
+/// GPU).
+#[tauri::command]
+pub(crate) fn refresh_capabilities(state: State<'_, AppState>) -> Result<(), AppError> {
+    if !state.jobs.is_idle() {
+        return Err(AppError::new(
+            ErrorKind::Internal,
+            "Wait until the running jobs are done.",
+        ));
+    }
+    state.reprobe_capabilities();
+    Ok(())
 }
 
 #[cfg(test)]

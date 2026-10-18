@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions of the main window: the app's engine commands (probing and opening videos, tracks, edits, timestamps, density, reports, output preview, jobs and the job queue, presets, the saved queue), the custom title bar's window controls, forwarding frontend log records, reading and writing the settings store that the Rust side opens (no permission to open other store files), the open dialog for adding recordings, choosing the output folder and importing presets, the save dialog for exporting presets, the taskbar button's progress and the focus check for job notifications, system notifications, showing exported files in Explorer, and opening the project's GitHub pages (About: repository, issues, FFmpeg source archive) in the browser. Grants nothing beyond the commands and plugins listed in the architecture plan (section 9.1).",
+  "description": "Permissions of the main window: the app's engine commands (probing and opening videos, tracks, edits, timestamps, density, reports, output preview, jobs and the job queue, presets, the saved queue, the settings sections the backend checks, the cache and log folders, probing the PC again), the custom title bar's window controls, forwarding frontend log records, reading and writing the settings store that the Rust side opens (no permission to open other store files), the open dialog for adding recordings, choosing the output folder and importing presets, the save dialog for exporting presets, the taskbar button's progress and the focus check for job notifications, system notifications, showing exported files in Explorer, and opening the project's GitHub pages (About: repository, issues, FFmpeg source archive) in the browser. Grants nothing beyond the commands and plugins listed in the architecture plan (section 9.1).",
   "windows": ["main"],
   "permissions": [
     "allow-probe-media",
@@ -29,6 +29,14 @@
     "allow-delete-preset",
     "allow-import-preset",
     "allow-export-preset",
+    "allow-get-settings",
+    "allow-save-processing",
+    "allow-save-defaults",
+    "allow-save-privacy",
+    "allow-get-cache-info",
+    "allow-clear-cache",
+    "allow-open-log-dir",
+    "allow-refresh-capabilities",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",

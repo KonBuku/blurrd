@@ -19,10 +19,26 @@ const LOG_FILE_NAME: &str = "blurrd";
 const MAX_FILE_BYTES: u128 = 5 * 1024 * 1024;
 /// Rotated log files kept next to the current one.
 const KEPT_FILES: usize = 4;
+/// Log targets of blurrd itself: this crate, the engine crates (their
+/// tracing events arrive as `log` records named by module) and the
+/// frontend's records through the log plugin.
+const OWN_TARGETS: &[&str] = &[
+    env!("CARGO_CRATE_NAME"),
+    "blurrd_engine",
+    "blurrd_video",
+    "blurrd_ocr",
+    "blurrd_detect",
+    "blurrd_blur",
+    "blurrd_core",
+    "webview",
+];
 
 /// Builds the log plugin: JSON lines in `%LOCALAPPDATA%\<identifier>\logs`,
-/// rotated at 5 MiB and kept four times, and stdout in debug builds. The
-/// level is `info`, plus `debug` for this crate in debug builds.
+/// rotated at 5 MiB and kept four times, and stdout in debug builds.
+/// blurrd's own records (the app, the engine crates and the frontend) pass
+/// at every level and dependencies at `info` and above; the log level of
+/// Settings › Logs & privacy then caps all of them (`log::set_max_level`,
+/// see [`crate::settings::apply_log_level`]).
 pub(crate) fn plugin<R: Runtime>() -> TauriPlugin<R> {
     let file = Target::new(TargetKind::LogDir {
         file_name: Some(LOG_FILE_NAME.to_owned()),
@@ -38,20 +54,20 @@ pub(crate) fn plugin<R: Runtime>() -> TauriPlugin<R> {
         .level(LevelFilter::Info)
         .max_file_size(MAX_FILE_BYTES)
         .rotation_strategy(RotationStrategy::KeepSome(KEPT_FILES));
+    for target in OWN_TARGETS {
+        builder = builder.level_for(*target, LevelFilter::Trace);
+    }
     if cfg!(debug_assertions) {
-        // Debug records of blurrd only; dependencies such as the window
-        // event loop are noisy below `info`.
-        builder = builder
-            .target(
-                Target::new(TargetKind::Stdout).format(|out, message, record| {
-                    out.finish(format_args!(
-                        "[{} {}] {message}",
-                        record.level(),
-                        record.target()
-                    ));
-                }),
-            )
-            .level_for(env!("CARGO_CRATE_NAME"), LevelFilter::Debug);
+        // The same records as readable lines.
+        builder = builder.target(
+            Target::new(TargetKind::Stdout).format(|out, message, record| {
+                out.finish(format_args!(
+                    "[{} {}] {message}",
+                    record.level(),
+                    record.target()
+                ));
+            }),
+        );
     }
     builder.build()
 }

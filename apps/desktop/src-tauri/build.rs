@@ -30,6 +30,14 @@ const COMMANDS: &[&str] = &[
     "delete_preset",
     "import_preset",
     "export_preset",
+    "get_settings",
+    "save_processing",
+    "save_defaults",
+    "save_privacy",
+    "get_cache_info",
+    "clear_cache",
+    "open_log_dir",
+    "refresh_capabilities",
 ];
 
 fn main() {

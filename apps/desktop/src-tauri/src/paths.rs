@@ -21,6 +21,9 @@ pub(crate) trait PathScope: Send + Sync {
     fn allows(&self, path: &Path) -> bool;
     /// Adds a file the backend hands to the frontend.
     fn add_file(&self, path: &Path);
+    /// Adds a folder (with everything inside it) the user chose in an
+    /// earlier session: the stored output folder of the defaults.
+    fn add_folder(&self, path: &Path);
 }
 
 impl PathScope for tauri::scope::fs::Scope {
@@ -33,6 +36,12 @@ impl PathScope for tauri::scope::fs::Scope {
     fn add_file(&self, path: &Path) {
         if let Err(error) = self.allow_file(path) {
             tauri_plugin_log::log::warn!("could not allow a file for the preview: {error}");
+        }
+    }
+
+    fn add_folder(&self, path: &Path) {
+        if let Err(error) = self.allow_directory(path, true) {
+            tauri_plugin_log::log::warn!("could not allow the stored output folder: {error}");
         }
     }
 }
@@ -105,6 +114,21 @@ impl UserPaths {
     /// queue entry, a preview proxy).
     pub(crate) fn add_file(&self, path: &Path) {
         self.scope.add_file(path);
+    }
+
+    /// Lets the commands use the folder at `path` again, a folder the user
+    /// chose in an earlier session (the stored output folder). Only an
+    /// existing absolute folder is added, in its canonical form; answers
+    /// whether it was.
+    pub(crate) fn add_chosen_folder(&self, path: &Path) -> bool {
+        let Ok(folder) = absolute(path).and_then(|path| canonical(&path)) else {
+            return false;
+        };
+        if !folder.is_dir() || has_dot_segments(&folder) {
+            return false;
+        }
+        self.scope.add_folder(&folder);
+        true
     }
 
     fn check(&self, path: PathBuf) -> Result<PathBuf, AppError> {
@@ -279,6 +303,10 @@ pub(crate) mod tests {
         }
 
         fn add_file(&self, path: &Path) {
+            self.allowed.lock().unwrap().push(path.to_path_buf());
+        }
+
+        fn add_folder(&self, path: &Path) {
             self.allowed.lock().unwrap().push(path.to_path_buf());
         }
     }

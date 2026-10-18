@@ -2,5 +2,10 @@
 
 /**
  * Hardware decoding preference.
+ *
+ * The desktop app maps it to the engine's GPU switch when it starts:
+ * `Software` decodes on the CPU and encodes with Media Foundation,
+ * anything else lets blurrd pick the GPU decoder from its cached
+ * benchmark (`Nvdec` cannot be forced yet and behaves like `Auto`).
  */
 export type HwDecodeSetting = "Auto" | "Nvdec" | "Software";

@@ -268,6 +268,12 @@ impl Jobs {
         }
     }
 
+    /// Whether no job runs or waits.
+    pub(crate) fn is_idle(&self) -> bool {
+        let state = lock(&self.shared.state);
+        state.running.is_none() && state.waiting.is_empty()
+    }
+
     /// Pauses the queue: no job starts, the running job waits at its next
     /// progress report.
     pub(crate) fn pause(&self) {

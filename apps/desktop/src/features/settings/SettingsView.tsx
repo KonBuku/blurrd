@@ -1,4 +1,16 @@
-import { ChevronRight, Info, Keyboard, Palette, SlidersHorizontal, X } from "lucide-react";
+import {
+  ChevronRight,
+  Cpu,
+  FileOutput,
+  Info,
+  Keyboard,
+  Palette,
+  ScanSearch,
+  ShieldCheck,
+  SlidersHorizontal,
+  X,
+  ScrollText,
+} from "lucide-react";
 import { useEffect, useRef, type ComponentType, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -11,8 +23,13 @@ import { useUiStore, type SettingsSection } from "@/store/ui";
 
 import { AboutSettings } from "./AboutSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { DetectionSettings } from "./DetectionSettings";
 import { GeneralSettings } from "./GeneralSettings";
+import { OutputSettings } from "./OutputSettings";
+import { PrivacySettings } from "./PrivacySettings";
+import { ProcessingSettings } from "./ProcessingSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
+import { VerificationSettings } from "./VerificationSettings";
 
 /** Id of the title bar button that opens the settings. */
 export const SETTINGS_BUTTON_ID = "settings-button";
@@ -36,7 +53,32 @@ const SECTIONS: readonly {
     icon: <Palette aria-hidden />,
     page: AppearanceSettings,
   },
+  { id: "processing", label: "Processing", icon: <Cpu aria-hidden />, page: ProcessingSettings },
+  {
+    id: "output",
+    label: "Output defaults",
+    icon: <FileOutput aria-hidden />,
+    page: OutputSettings,
+  },
+  {
+    id: "detection",
+    label: "Detection",
+    icon: <ScanSearch aria-hidden />,
+    page: DetectionSettings,
+  },
+  {
+    id: "verification",
+    label: "Verification",
+    icon: <ShieldCheck aria-hidden />,
+    page: VerificationSettings,
+  },
   { id: "shortcuts", label: "Shortcuts", icon: <Keyboard aria-hidden />, page: ShortcutSettings },
+  {
+    id: "privacy",
+    label: "Logs & privacy",
+    icon: <ScrollText aria-hidden />,
+    page: PrivacySettings,
+  },
   { id: "about", label: "About", icon: <Info aria-hidden />, page: AboutSettings },
 ];
 
@@ -124,7 +166,9 @@ export function SettingsView() {
           </ul>
         </nav>
         {/* Focusable, so that a page without controls (Shortcuts) still scrolls by keyboard. */}
+        {/* Keyed by page, so every page opens at its top. */}
         <div
+          key={current.id}
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
           tabIndex={0}
           className="min-w-0 flex-1 overflow-y-auto outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"

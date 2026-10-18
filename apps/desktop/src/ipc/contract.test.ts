@@ -21,7 +21,9 @@ function matches(text: string, pattern: RegExp): string[] {
 
 /** Engine commands the wrappers invoke. */
 function wrapperCommands(): string[] {
-  const sources = ["commands.ts", "jobs.ts", "presets.ts"].map((file) => read("src", "ipc", file));
+  const sources = ["commands.ts", "jobs.ts", "presets.ts", "settings.ts"].map((file) =>
+    read("src", "ipc", file),
+  );
   // Plugin commands ("plugin:…") do not match the pattern.
   return [
     ...new Set(sources.flatMap((text) => matches(text, /invoke<[^>]*>\(\s*"([a-z_]+)"/g))),
@@ -57,7 +59,9 @@ describe("ipc contract", () => {
   });
 
   it("is answered by the mock backend", () => {
-    const mock = read("src", "ipc", "mock", "index.ts");
+    const mock = ["index.ts", "settings.ts"]
+      .map((file) => read("src", "ipc", "mock", file))
+      .join("\n");
     const answered = new Set(matches(mock, /case "([a-z_]+)":/g));
     expect(wrappers.filter((command) => !answered.has(command))).toEqual([]);
   });

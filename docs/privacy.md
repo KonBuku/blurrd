@@ -237,8 +237,11 @@ blurrd reads only the files you choose and writes:
 
 The thumbnails and the preview proxy are unblurred pictures of the
 recording, like the recording itself. The small poster frame a queue row
-shows is decoded on request and kept in memory only for the session. Delete `%LOCALAPPDATA%\blurrd` to
-remove every cached project; blurrd creates the folder again when needed.
+shows is decoded on request and kept in memory only for the session.
+Settings › Logs & privacy shows these folders, opens the log folder and
+clears the cached analyses of recordings that are not open. Delete
+`%LOCALAPPDATA%\blurrd` to remove every cached project; blurrd creates
+the folder again when needed.
 Names that you keep readable on purpose are stored in your settings and
 presets; an exported preset file leaves them out unless you tick the box.
 The report dialog builds leak crops from the recording when you open it

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/store/settings";
 
 export interface SettingsPageProps {
   /** Page title, also the accessible name of the page region. */
@@ -28,7 +29,7 @@ export function SettingsGroup({ children }: { readonly children: ReactNode }) {
   return (
     <div
       data-slot="settings-group"
-      className="overflow-hidden rounded-xl border border-card-border bg-card"
+      className="@container/settings overflow-hidden rounded-xl border border-card-border bg-card"
     >
       {children}
     </div>
@@ -51,7 +52,8 @@ export interface SettingsRowProps {
 /**
  * One setting: label and description on the left, the control in a fixed
  * right-aligned column, 12 x 16 px padding, a hairline above every row but
- * the first.
+ * the first. In a narrow group (small window, large interface size) the
+ * control moves below the label instead of squeezing it.
  */
 export function SettingsRow({
   label,
@@ -64,10 +66,10 @@ export function SettingsRow({
     <div
       data-slot="settings-row"
       className={cn(
-        "grid items-center gap-4 border-t border-border px-4 py-3 first:border-t-0",
+        "grid grid-cols-1 items-center gap-x-4 gap-y-2 border-t border-border px-4 py-3 first:border-t-0",
         controlWidth === "wide"
-          ? "grid-cols-[minmax(0,1fr)_280px]"
-          : "grid-cols-[minmax(0,1fr)_192px]",
+          ? "@[36rem]/settings:grid-cols-[minmax(0,1fr)_280px]"
+          : "@[30rem]/settings:grid-cols-[minmax(0,1fr)_192px]",
       )}
     >
       <div className="min-w-0">
@@ -78,7 +80,27 @@ export function SettingsRow({
           <div className="mt-1 text-ui-base leading-6 text-foreground-subtle">{description}</div>
         )}
       </div>
-      <div className="flex min-w-0 items-center justify-end gap-2">{control}</div>
+      <div
+        className={cn(
+          "flex min-w-0 flex-wrap items-center justify-start gap-2",
+          controlWidth === "wide"
+            ? "@[36rem]/settings:justify-end"
+            : "@[30rem]/settings:justify-end",
+        )}
+      >
+        {control}
+      </div>
     </div>
+  );
+}
+
+/** The notice a page shows while the settings file cannot be written. */
+export function ReadOnlyNotice() {
+  const status = useSettingsStore((state) => state.status);
+  if (status !== "read-only") return null;
+  return (
+    <p className="text-ui-base text-warning">
+      The settings file cannot be written. Changes apply until blurrd closes.
+    </p>
   );
 }

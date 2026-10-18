@@ -27,6 +27,7 @@ import { MockPresets } from "./presets";
 import { DEFAULT_FOLDERS, DEFAULT_PICK, probeMedia } from "./media";
 import { frameCount, mockDensity, mockProject, mockPts, projectId } from "./project";
 import { installSchemeFetch, type SchemeRequest } from "./scheme";
+import { MockSettings } from "./settings";
 
 /** One IPC call received by the mock backend. */
 export interface MockCall {
@@ -103,6 +104,11 @@ export interface MockBackend {
   readonly revealed: string[];
   /** URLs opened in the browser (opener plugin), in order. */
   readonly opened: string[];
+  /**
+   * The backend's settings sections (processing, defaults, privacy), the
+   * cache figures and how often the log folder was opened.
+   */
+  readonly backendSettings: MockSettings;
 }
 
 /** The value of one `set_progress_bar` call. */
@@ -111,10 +117,6 @@ export interface TaskbarCall {
   readonly progress?: number;
 }
 
-/** Name of the settings file, as opened by the real shell. */
-const SETTINGS_FILE = "settings.json";
-/** Resource id of the settings store. */
-const SETTINGS_RID = 1;
 /**
  * Session storage key of the mocked settings file: it survives reloads of
  * the same tab, like the real file survives restarts.
@@ -129,14 +131,6 @@ const SESSION_KEY = "blurrd.mock.session";
 const PROBE_DURATION_KEY = "blurrd.mock.capabilitiesDelayMs";
 /** Default duration of the mocked background probe, in milliseconds. */
 const PROBE_DURATION_MS = 800;
-
-/** The object members of a store command's arguments. */
-interface StoreArgs {
-  readonly rid?: number;
-  readonly path?: string;
-  readonly key?: string;
-  readonly value?: unknown;
-}
 
 /** A file of the project cache of `path` (`%LOCALAPPDATA%\blurrd\projects`). */
 function cacheFile(path: string, name: string): string {
@@ -172,6 +166,8 @@ export function installMockBackend(): MockBackend {
   const settings = new Map<string, unknown>(
     Object.entries(saved === null ? {} : (JSON.parse(saved) as Record<string, unknown>)),
   );
+  const saveSettingsFile = () =>
+    sessionStorage.setItem(DISK_KEY, JSON.stringify(Object.fromEntries(settings)));
   const backend: MockBackend = {
     calls: [],
     maximized: false,
@@ -210,26 +206,10 @@ export function installMockBackend(): MockBackend {
     notifications: [],
     revealed: [],
     opened: [],
+    backendSettings: new MockSettings(settings, saveSettingsFile),
   };
   installNotificationShim();
-  const installedAt = performance.now();
-  const store = (cmd: string, args: StoreArgs) => {
-    if (cmd === "plugin:store|get_store") return args.path === SETTINGS_FILE ? SETTINGS_RID : null;
-    if (args.rid !== SETTINGS_RID) throw new Error(`mock backend: unknown store ${args.rid}`);
-    switch (cmd) {
-      case "plugin:store|get":
-        return [settings.get(args.key ?? ""), settings.has(args.key ?? "")];
-      case "plugin:store|set":
-        settings.set(args.key ?? "", args.value);
-        return null;
-      case "plugin:store|save":
-        sessionStorage.setItem(DISK_KEY, JSON.stringify(Object.fromEntries(settings)));
-        return null;
-      default:
-        throw new Error(`mock backend: unknown command ${cmd}`);
-    }
-  };
-
+  let installedAt = performance.now();
   const resized = () => emit("tauri://resize", backend.maximized ? MAXIMIZED_SIZE : RESTORED_SIZE);
 
   const events = createEventBus();
@@ -273,6 +253,15 @@ export function installMockBackend(): MockBackend {
   mockIPC(async (cmd, args) => {
     if (events.handles(cmd)) return events.invoke(cmd, args as Parameters<typeof events.invoke>[1]);
     backend.calls.push({ cmd, args });
+    if (backend.backendSettings.handles(cmd)) {
+      return backend.backendSettings.invoke(cmd, args, {
+        openPaths: [...projects.values()],
+        idle: backend.jobs.isIdle(),
+        reprobe: () => {
+          installedAt = performance.now();
+        },
+      });
+    }
     switch (cmd) {
       case "plugin:window|is_maximized":
         return backend.maximized;
@@ -476,7 +465,7 @@ export function installMockBackend(): MockBackend {
       case "plugin:log|log":
         return null;
       default:
-        if (cmd.startsWith("plugin:store|")) return store(cmd, args as StoreArgs);
+        if (cmd.startsWith("plugin:store|")) return backend.backendSettings.store(cmd, args);
         throw new Error(`mock backend: unknown command ${cmd}`);
     }
   });

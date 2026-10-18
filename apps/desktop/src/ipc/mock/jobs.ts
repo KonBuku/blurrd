@@ -86,6 +86,11 @@ export class MockJobs {
    */
   private readonly timer = globalThis.setTimeout.bind(globalThis);
 
+  /** Whether no job runs or waits. */
+  isIdle(): boolean {
+    return this.jobs.size === 0;
+  }
+
   /**
    * Starts a job of `kind` over `totalFrames` frames that reports to
    * `channel`; `finish` runs when it completes and returns its summary.

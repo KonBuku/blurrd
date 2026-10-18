@@ -43,6 +43,24 @@ impl CapabilityProbe {
         lock(&self.current).clone()
     }
 
+    /// Forgets the cached decoder benchmark and encoder probe in
+    /// `caps_dir` and probes again (Settings › Processing "Measure
+    /// again"); `probe_state` is `Pending` until the new probe is done.
+    /// The decoder benchmark runs again per video on the next job.
+    pub(crate) fn restart(self: &Arc<Self>, caps_dir: PathBuf) {
+        if let Err(error) = std::fs::remove_dir_all(&caps_dir)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tauri_plugin_log::log::warn!("could not clear the capability cache: {error}");
+        }
+        {
+            let mut current = lock(&self.current);
+            current.probe_state = ProbeState::Pending;
+            current.encoders.clear();
+        }
+        self.start(caps_dir);
+    }
+
     /// Starts the probe on its own thread: the GPUs from DXGI, the
     /// decoders they offer and the encoder chain (cached in `caps_dir`).
     pub(crate) fn start(self: &Arc<Self>, caps_dir: PathBuf) {

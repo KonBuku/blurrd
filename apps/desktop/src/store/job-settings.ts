@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
+import type { Defaults } from "@/bindings/Defaults";
 import type { Preset } from "@/bindings/Preset";
+import { withDefaults } from "@/lib/app-defaults";
 import { DEFAULT_JOB_SETTINGS, type JobSettings, type SettingsSection } from "@/lib/job-settings";
 import { DEFAULT_PRESET_ID, withPreset } from "@/lib/presets";
 
@@ -47,6 +49,18 @@ export interface JobSettingsState {
   ) => void;
   /** Applies a preset to the targets (their detector options stay). */
   readonly applyPreset: (targets: SettingsTargets, preset: Preset) => void;
+  /**
+   * Changes one section of the defaults for new files (Settings › Output
+   * defaults, Detection, Verification). Queued files that used the
+   * defaults keep their current values: the change applies to files added
+   * from now on.
+   */
+  readonly updateDefaults: <K extends SettingsSection>(
+    key: K,
+    change: (section: JobSettings[K]) => JobSettings[K],
+  ) => void;
+  /** Replaces the defaults with the stored ones (at start). */
+  readonly loadDefaults: (defaults: Defaults) => void;
 }
 
 /** The settings entry of a queue item, or the defaults for `null` (no file). */
@@ -95,6 +109,20 @@ export const useJobSettingsStore = create<JobSettingsState>()((set) => ({
         values: withPreset(entry.values, preset),
       })),
     ),
+  updateDefaults: (key, change) =>
+    set((state) => {
+      const files = { ...state.files };
+      for (const item of useQueueStore.getState().items) files[item.id] ??= state.defaults;
+      const { values } = state.defaults;
+      return {
+        files,
+        defaults: { ...state.defaults, values: { ...values, [key]: change(values[key]) } },
+      };
+    }),
+  loadDefaults: (defaults) =>
+    set((state) => ({
+      defaults: { ...state.defaults, values: withDefaults(state.defaults.values, defaults) },
+    })),
 }));
 
 useQueueStore.subscribe((queue, previous) => {

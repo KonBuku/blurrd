@@ -80,6 +80,11 @@ impl Projects {
             .is_some_and(|project| cache::same_file(&project.media.fingerprint, &fingerprint))
     }
 
+    /// The fingerprint hashes (cache folder names) of the open projects.
+    pub(crate) fn open_ids(&self) -> Vec<String> {
+        lock(&self.open).keys().cloned().collect()
+    }
+
     /// The open project `id`.
     ///
     /// # Errors
@@ -504,6 +509,7 @@ mod tests {
         let projects = Projects::new(dir.join("cache"));
         assert!(!projects.is_analysed(&clip));
         assert!(!projects.is_analysed(&dir.join("missing.mp4")));
+        assert_eq!(projects.open_ids(), Vec::<String>::new());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

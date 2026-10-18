@@ -12,7 +12,7 @@ import { REGIONS } from "@/lib/regions";
 import { InspectorRow, InspectorSection, WordListInput } from "./parts";
 
 /** What each region blurs (design 8.1 REGIONS). */
-const DESCRIPTIONS: Readonly<Record<DetectedRegion, string>> = {
+export const REGION_DESCRIPTIONS: Readonly<Record<DetectedRegion, string>> = {
   KillFeed: "Killer and victim names in each kill feed row",
   Banner: "Player name in the round and ACE banners",
   VoiceChat: "Speaker name in the voice indicator, not the location",
@@ -58,7 +58,7 @@ export function RegionsSection({ regions, tracks, onChange }: RegionsSectionProp
     <RegionRow
       key={region}
       region={region}
-      description={DESCRIPTIONS[region]}
+      description={REGION_DESCRIPTIONS[region]}
       on={enabled.has(region)}
       count={tracks ? tracks.tracks.filter((track) => track.region === region).length : null}
       onToggle={(on) => setRegion(region, on)}

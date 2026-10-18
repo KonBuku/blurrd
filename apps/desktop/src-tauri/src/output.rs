@@ -62,7 +62,7 @@ pub(crate) fn output_target(
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let base = export.output.template.replace("{name}", &stem);
-    if base.trim().is_empty() || base.contains(FORBIDDEN) || base.chars().any(char::is_control) {
+    if !is_file_name(&base) {
         return Err(
             invalid("The file name template does not name a valid file.").with_detail(base),
         );
@@ -105,6 +105,17 @@ pub(crate) fn output_target(
             Ok(OutputTarget::Write(free))
         }
     }
+}
+
+/// Whether `base` can be a Windows file name (before the extension).
+fn is_file_name(base: &str) -> bool {
+    !(base.trim().is_empty() || base.contains(FORBIDDEN) || base.chars().any(char::is_control))
+}
+
+/// Whether the file name template `template` names a valid file for any
+/// source name (`{name}` stands for the source's file stem).
+pub(crate) fn is_valid_template(template: &str) -> bool {
+    is_file_name(&template.replace("{name}", "clip"))
 }
 
 /// What `get_output_preview` answers: the file an export would write (with

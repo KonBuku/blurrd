@@ -9,10 +9,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use blurrd_core::{
-    AppError, BlurParams, Capabilities, DensityLanes, DetectorOptions, Document, ExactFrame,
-    ExactSettings, ExportSettings, FramePts, JobEvent, MediaInfo, OutputPreview, OverrideBinding,
-    OverridesSaved, PresetFile, ProbeOutcome, Project, ProjectSummary, RegionSettings, RunFile,
-    Settings, StartAnalysis, StartRender, TrackSet, VerifyReport, VerifySettings,
+    AppError, BlurParams, CacheInfo, Capabilities, DensityLanes, DetectorOptions, Document,
+    ExactFrame, ExactSettings, ExportSettings, FramePts, JobEvent, MediaInfo, OutputPreview,
+    OverrideBinding, OverridesSaved, PresetFile, ProbeOutcome, Project, ProjectSummary,
+    RegionSettings, RunFile, Settings, StartAnalysis, StartRender, StoredSettings, TrackSet,
+    VerifyReport, VerifySettings,
 };
 use schemars::JsonSchema;
 use ts_rs::{Config, TS};
@@ -35,7 +36,7 @@ pub(crate) fn bindings(dir: &Path) -> Result<usize> {
     let cfg = Config::from_env()
         .with_out_dir(dir)
         .with_large_int("number");
-    let exports: [ExportFn; 26] = [
+    let exports: [ExportFn; 28] = [
         Project::export_all,
         Settings::export_all,
         PresetFile::export_all,
@@ -62,6 +63,8 @@ pub(crate) fn bindings(dir: &Path) -> Result<usize> {
         StartAnalysis::export_all,
         StartRender::export_all,
         RunFile::export_all,
+        StoredSettings::export_all,
+        CacheInfo::export_all,
     ];
     for export in exports {
         export(&cfg).with_context(|| format!("exporting bindings to {}", dir.display()))?;

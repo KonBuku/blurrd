@@ -20,7 +20,9 @@ use crate::overrides::{Override, OverrideBinding};
 use crate::plan::Track;
 use crate::project::ProjectVerify;
 use crate::region::{Region, RegionSet};
-use crate::settings::{RegionSettings, Sensitivity, TemporalParams, VerifySettings};
+use crate::settings::{
+    Defaults, Privacy, Processing, RegionSettings, Sensitivity, TemporalParams, VerifySettings,
+};
 use crate::time::{FrameRange, Rational};
 
 /// What `probe_media` answers for one file: its media facts, or why it
@@ -163,6 +165,41 @@ pub struct DetectorOptions {
     pub sensitivity: Sensitivity,
     /// Temporal parameters.
     pub temporal: TemporalParams,
+}
+
+/// The settings sections the backend owns (`get_settings`): processing,
+/// the defaults for new files and privacy, read leniently from
+/// `settings.json` (a missing or invalid section is its default).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct StoredSettings {
+    /// Processing, as saved.
+    pub processing: Processing,
+    /// Processing as the running engine uses it (read at start; GPU
+    /// changes apply after a restart).
+    pub active_processing: Processing,
+    /// Defaults for new files.
+    pub defaults: Defaults,
+    /// Privacy.
+    pub privacy: Privacy,
+    /// Whether the file may be written (not when another blurrd major
+    /// wrote it, or when it could not be opened).
+    pub writable: bool,
+}
+
+/// What Settings › Logs & privacy shows about the local data
+/// (`get_cache_info`, `clear_cache`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CacheInfo {
+    /// The cache folder (`%LOCALAPPDATA%lurrd`).
+    pub cache_dir: PathBuf,
+    /// Analysed recordings in the cache.
+    pub projects: u32,
+    /// Bytes the cached analyses take.
+    pub project_bytes: u64,
+    /// The log folder.
+    pub log_dir: PathBuf,
 }
 
 /// One Exact patch of a frame: a region of interest blurred exactly like

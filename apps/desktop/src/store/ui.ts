@@ -7,7 +7,16 @@ import { INSPECTOR, SIDEBAR, type LayoutPreferences } from "@/lib/layout";
 export type InspectorTab = "blur" | "export" | "verify";
 
 /** Pages of the settings view. */
-export type SettingsSection = "general" | "appearance" | "shortcuts" | "about";
+export type SettingsSection =
+  | "general"
+  | "appearance"
+  | "processing"
+  | "output"
+  | "detection"
+  | "verification"
+  | "shortcuts"
+  | "privacy"
+  | "about";
 
 /** What the content area shows: the workspace frames or the settings. */
 export type View = "workspace" | "settings";
