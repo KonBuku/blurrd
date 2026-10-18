@@ -171,7 +171,9 @@ jobs:
   rust:
     name: rust (windows)
     runs-on: windows-latest
-    timeout-minutes: 45
+    # A cold build takes about 25 minutes and the OCR engine tests run on
+    # the runner's CPU in a debug build (the audit test alone takes over 5).
+    timeout-minutes: 90
     env:
       # bindgen (ffmpeg-sys-the-third) needs libclang; the runner image
       # ships LLVM in this folder.
@@ -188,6 +190,9 @@ jobs:
         with:
           # Native dependencies are pinned outside Cargo.lock.
           key: ${{ hashFiles('third_party/*.toml') }}
+          # Keep the build cache when a test fails, so the next run does
+          # not start cold.
+          cache-on-failure: true
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
