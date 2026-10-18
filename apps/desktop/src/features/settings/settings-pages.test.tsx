@@ -157,6 +157,9 @@ describe("settings pages", () => {
     backend = installMockBackend();
     await useSettingsStore.getState().load();
     expect(useJobSettingsStore.getState().defaults.values.verify.enabled).toBe(false);
+    // The loaded defaults are the starting values: nothing shows as modified.
+    const { defaults } = useJobSettingsStore.getState();
+    expect(defaults.base).toEqual(defaults.values);
 
     renderPage(<VerificationSettings />);
     expect(

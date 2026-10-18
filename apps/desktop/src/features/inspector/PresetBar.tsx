@@ -45,6 +45,12 @@ function apply(preset: Preset) {
   store.applyPreset(targetsOf(useQueueStore.getState(), store.scope), preset);
 }
 
+/** Puts the inspector's targets back to the values they started from. */
+function reset() {
+  const store = useJobSettingsStore.getState();
+  store.resetToBase(targetsOf(useQueueStore.getState(), store.scope));
+}
+
 /** Shows an IPC failure as a toast. */
 function failed(title: string, reason: unknown) {
   toast.error(title, { description: toAppError(reason).message });
@@ -53,8 +59,10 @@ function failed(title: string, reason: unknown) {
 /**
  * The inspector's preset row (design 8.1 "Preset ▾ ⋯"): the preset of the
  * shown file (or of new files) with a "modified" mark when its values
- * differ, and a menu to reset, save, update, import, export and delete
- * presets. Choosing a preset applies it to the inspector's targets.
+ * differ from the values it started from (the chosen preset, or the app
+ * defaults for files nobody changed), and a menu to reset, save, update,
+ * import, export and delete presets. Choosing a preset applies it to the
+ * inspector's targets.
  */
 export function PresetBar() {
   const queryClient = useQueryClient();
@@ -62,7 +70,10 @@ export function PresetBar() {
   const leadId = useQueueStore(shownItemId);
   const entry = useJobSettingsStore((state) => fileSettingsOf(state, leadId));
   const preset = presets.find((candidate) => candidate.id === entry.presetId) ?? null;
-  const modified = preset !== null && differsFromPreset(entry.values, preset);
+  const modified = preset !== null && differsFromPreset(entry.values, entry.base);
+  // Files nobody changed start from the app defaults, which may differ from
+  // the preset they are named after.
+  const fromPreset = preset !== null && !differsFromPreset(entry.base, preset);
   const [dialog, setDialog] = useState<"save" | "export" | null>(null);
   const labelId = useId();
 
@@ -141,8 +152,8 @@ export function PresetBar() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {preset && modified && (
-            <DropdownMenuItem onSelect={() => apply(preset)}>
-              Reset to {preset.name}
+            <DropdownMenuItem onSelect={reset}>
+              {fromPreset ? `Reset to ${preset.name}` : "Reset to the app defaults"}
             </DropdownMenuItem>
           )}
           {preset && modified && !preset.builtin && (

@@ -22,11 +22,17 @@ export interface SettingsTargets {
   readonly defaults: boolean;
 }
 
-/** The settings of one file and the preset they started from. */
+/** The settings of one file, the preset they are named after and where they started. */
 export interface FileSettings {
-  /** Id of the preset applied last; changes since then show as "modified". */
+  /** Id of the preset applied last (the *Default* preset for the app defaults). */
   readonly presetId: string;
   readonly values: JobSettings;
+  /**
+   * The values the file started from: the preset applied last, or the app
+   * defaults (Settings) for files nobody changed. Values that differ from
+   * them show as "modified".
+   */
+  readonly base: JobSettings;
 }
 
 /** Job settings per queued file (plan 5.9 `project` settings, inspector). */
@@ -49,11 +55,13 @@ export interface JobSettingsState {
   ) => void;
   /** Applies a preset to the targets. */
   readonly applyPreset: (targets: SettingsTargets, preset: Preset) => void;
+  /** Puts each target back to the values it started from. */
+  readonly resetToBase: (targets: SettingsTargets) => void;
   /**
    * Changes one section of the defaults for new files (Settings › Output
-   * defaults, Detection, Verification). Queued files that used the
-   * defaults keep their current values: the change applies to files added
-   * from now on.
+   * defaults, Detection, Verification): they are the starting values of
+   * files added from now on. Queued files that used the defaults keep
+   * their current values.
    */
   readonly updateDefaults: <K extends SettingsSection>(
     key: K,
@@ -91,7 +99,11 @@ function applyTo(
  * files that leave the queue are dropped.
  */
 export const useJobSettingsStore = create<JobSettingsState>()((set) => ({
-  defaults: { presetId: DEFAULT_PRESET_ID, values: DEFAULT_JOB_SETTINGS },
+  defaults: {
+    presetId: DEFAULT_PRESET_ID,
+    values: DEFAULT_JOB_SETTINGS,
+    base: DEFAULT_JOB_SETTINGS,
+  },
   files: {},
   scope: "selected",
   setScope: (scope) => set({ scope }),
@@ -104,25 +116,26 @@ export const useJobSettingsStore = create<JobSettingsState>()((set) => ({
     ),
   applyPreset: (targets, preset) =>
     set((state) =>
-      applyTo(state, targets, (entry) => ({
-        presetId: preset.id,
-        values: withPreset(entry.values, preset),
-      })),
+      applyTo(state, targets, (entry) => {
+        const values = withPreset(entry.values, preset);
+        return { presetId: preset.id, values, base: values };
+      }),
     ),
+  resetToBase: (targets) =>
+    set((state) => applyTo(state, targets, (entry) => ({ ...entry, values: entry.base }))),
   updateDefaults: (key, change) =>
     set((state) => {
       const files = { ...state.files };
       for (const item of useQueueStore.getState().items) files[item.id] ??= state.defaults;
       const { values } = state.defaults;
-      return {
-        files,
-        defaults: { ...state.defaults, values: { ...values, [key]: change(values[key]) } },
-      };
+      const next = { ...values, [key]: change(values[key]) };
+      return { files, defaults: { ...state.defaults, values: next, base: next } };
     }),
   loadDefaults: (defaults) =>
-    set((state) => ({
-      defaults: { ...state.defaults, values: withDefaults(state.defaults.values, defaults) },
-    })),
+    set((state) => {
+      const values = withDefaults(state.defaults.values, defaults);
+      return { defaults: { ...state.defaults, values, base: values } };
+    }),
 }));
 
 useQueueStore.subscribe((queue, previous) => {

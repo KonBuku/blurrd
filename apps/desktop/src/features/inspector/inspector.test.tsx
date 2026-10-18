@@ -9,6 +9,7 @@ import { MOCK_CAPABILITIES } from "@/ipc/mock/capabilities";
 import { installMockBackend, type MockBackend } from "@/ipc/mock";
 import { fakeMedia } from "@/ipc/mock/media";
 import { projectId } from "@/ipc/mock/project";
+import { defaultsOf } from "@/lib/app-defaults";
 import { analysisRequest, renderRequest } from "@/lib/job-request";
 import { DEFAULT_JOB_SETTINGS, type JobSettings } from "@/lib/job-settings";
 import { pathKey } from "@/lib/media";
@@ -440,6 +441,27 @@ describe("inspector", () => {
     expect(screen.getByTestId("preset-modified")).toBeDefined();
     await menu("Reset to Max privacy");
     expect(settingsFor(PATH)).toEqual(withPreset(DEFAULT_JOB_SETTINGS, maxPrivacy));
+    expect(screen.queryByTestId("preset-modified")).toBeNull();
+  });
+
+  it("compares files nobody changed with the app defaults", async () => {
+    // The stored defaults differ from the factory *Default* preset.
+    act(() =>
+      useJobSettingsStore.getState().loadDefaults({
+        ...defaultsOf(DEFAULT_JOB_SETTINGS),
+        blur: { ...DEFAULT_JOB_SETTINGS.blur, strength: "High" },
+      }),
+    );
+    queue(PATH);
+    renderInspector();
+    await screen.findByText("Manual boxes");
+    expect(screen.getByRole("combobox", { name: "Preset" }).textContent).toBe("Default");
+    expect(screen.queryByTestId("preset-modified")).toBeNull();
+
+    toggle("Noise");
+    expect(screen.getByTestId("preset-modified")).toBeDefined();
+    await menu("Reset to the app defaults");
+    expect(settingsFor(PATH).blur).toEqual({ ...DEFAULT_JOB_SETTINGS.blur, strength: "High" });
     expect(screen.queryByTestId("preset-modified")).toBeNull();
   });
 

@@ -636,9 +636,11 @@ every file; a change writes only the field that changed, so files with
 different values keep theirs. The preview takes its blur and its enabled
 regions from the shown file's settings.
 
-- **Preset row:** the preset the shown values started from, "Modified"
-  when they differ, and a menu to reset, update a user preset, save as a
-  new preset, import, export and delete. Built-ins (_Default_, _Max privacy_, _Kill feed
+- **Preset row:** the preset the shown values are named after,
+  "Modified" when they differ from the values the file started from (the
+  preset applied last, or the app defaults for files nobody changed), and
+  a menu to reset, update a user preset, save as a new preset, import,
+  export and delete. Built-ins (_Default_, _Max privacy_, _Kill feed
   only_) mirror `Preset::builtins`. Preset files of older revisions load;
   fields the engine never read (kept names, chat options, more
   verification options) are dropped.
