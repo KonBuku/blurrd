@@ -1,6 +1,6 @@
 /**
  * Binary paths of the backend (plan 9.2): the `blurrd://` scheme serves
- * timeline thumbnails and the Exact patches (the export's own blur of the
+ * timeline thumbnails, the queue's poster frames and the Exact patches (the export's own blur of the
  * two ROI regions around the current frame, JPEG from YCbCr). Both are
  * read with `fetch` and decoded to `ImageBitmap`s, so stale requests can
  * be aborted and images are ready for WebGL.
@@ -97,6 +97,14 @@ export async function fetchExact(
 /** Loads the image at `url` into an object URL. */
 export async function loadObjectUrl(url: string, signal: AbortSignal): Promise<string> {
   return URL.createObjectURL(await (await fetchOk(url, signal)).blob());
+}
+
+/**
+ * URL of the poster frame of a queued video (a small JPEG of a frame a
+ * tenth into it), available before any project is open.
+ */
+export function posterUrl(path: string): string {
+  return `${schemeUrl("poster.jpg")}?path=${encodeURIComponent(path)}`;
 }
 
 /** URL of timeline thumbnail `index` of a project. */

@@ -236,7 +236,8 @@ blurrd reads only the files you choose and writes:
 | `%LOCALAPPDATA%\io.github.konbuku.blurrd\logs\` | the app's log: file names, frame numbers, timings and errors, never OCR text                                                                                                                                                                                                                                                                                                                           |
 
 The thumbnails and the preview proxy are unblurred pictures of the
-recording, like the recording itself. Delete `%LOCALAPPDATA%\blurrd` to
+recording, like the recording itself. The small poster frame a queue row
+shows is decoded on request and kept in memory only for the session. Delete `%LOCALAPPDATA%\blurrd` to
 remove every cached project; blurrd creates the folder again when needed.
 Names that you keep readable on purpose are stored in your settings and
 presets; an exported preset file leaves them out unless you tick the box.

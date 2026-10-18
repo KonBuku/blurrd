@@ -541,7 +541,8 @@ fn bounding(a: RectI, b: RectI) -> RectI {
 }
 
 /// The JPEG of `rgb`.
-fn jpeg(rgb: &RgbImage) -> Result<Vec<u8>, AppError> {
+/// `rgb` as a JPEG of the preview quality.
+pub(crate) fn jpeg(rgb: &RgbImage) -> Result<Vec<u8>, AppError> {
     let (Ok(width), Ok(height)) = (u16::try_from(rgb.width), u16::try_from(rgb.height)) else {
         return Err(internal("the image is too large for a JPEG"));
     };
@@ -557,7 +558,7 @@ fn internal(detail: impl Into<String>) -> AppError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use blurrd_core::RectI;
 
     use super::merged_rects;
@@ -582,7 +583,7 @@ mod tests {
 
     /// Writes `frames` frames of deterministic noise (FFV1 in Matroska,
     /// 60 fps, BT.709 limited range, as the engine's synthetic clips).
-    fn write_noise_clip(path: &std::path::Path, width: u32, height: u32, frames: u32) {
+    pub(crate) fn write_noise_clip(path: &std::path::Path, width: u32, height: u32, frames: u32) {
         use ffmpeg_the_third::util::color;
         use ffmpeg_the_third::{Rational, codec, encoder, format, frame};
 

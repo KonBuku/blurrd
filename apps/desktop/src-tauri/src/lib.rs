@@ -5,8 +5,8 @@
 //! engine through its commands (module `commands`): probing and opening
 //! videos, reading and editing projects, presets and the saved queue, and
 //! jobs that report over per-job channels (module `jobs`). The
-//! `blurrd://` scheme serves thumbnails, Exact patches and leak crops
-//! (module `scheme`).
+//! `blurrd://` scheme serves thumbnails, poster frames, Exact patches and
+//! leak crops (module `scheme`).
 
 mod capabilities;
 mod commands;
@@ -17,6 +17,7 @@ mod media;
 mod media_server;
 mod output;
 mod paths;
+mod poster;
 mod presets;
 mod projects;
 mod scheme;

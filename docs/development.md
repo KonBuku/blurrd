@@ -283,8 +283,10 @@ every job, so no partial output is left behind. The engine's `tracing`
 events go to the app log through the `log` facade.
 
 The `blurrd://` scheme (`src-tauri/src/scheme.rs`, `http://blurrd.localhost/`
-on Windows) serves the timeline thumbnails of an analysis, the Exact
-patches of a frame (`exact/<project>/<frame>.json` lists them,
+on Windows) serves the timeline thumbnails of an analysis, the queue's
+poster frames (`poster.jpg?path=<file>`, one frame a tenth into a chosen
+video, decoded on request before any analysis; `src-tauri/src/poster.rs`),
+the Exact patches of a frame (`exact/<project>/<frame>.json` lists them,
 `exact/<project>/<frame>/<roi>.jpg` is one) and the crops of a report's
 leaks. An Exact patch is the frame blurred by the export's own blur
 (`src-tauri/src/exact.rs`): the request carries the inspector's blur and

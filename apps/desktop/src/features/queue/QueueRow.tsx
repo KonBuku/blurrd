@@ -2,6 +2,8 @@ import { Film, X } from "lucide-react";
 import { memo, type ComponentProps, type MouseEvent } from "react";
 
 import { Progress } from "@/components/ui/progress";
+import { useSchemeImage } from "@/hooks/useSchemeImage";
+import { posterUrl } from "@/ipc/media";
 import { mediaSummary } from "@/lib/media";
 import { statusProgress, statusText } from "@/lib/queue-status";
 import { cn } from "@/lib/utils";
@@ -26,6 +28,29 @@ export type QueueRowProps = Omit<
   /** Removes the item; offered as a hover action (keyboard: Delete). */
   readonly onRemove: (id: string) => void;
 };
+
+/**
+ * The row's thumbnail tile: the poster frame of the video once its media
+ * facts are known, a film glyph while it is read or when no frame can be
+ * decoded.
+ */
+function RowThumb({ path, probed }: { readonly path: string; readonly probed: boolean }) {
+  const poster = useSchemeImage(probed ? posterUrl(path) : null);
+  return (
+    <div className="relative grid h-9 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-surface text-foreground-subtlest">
+      {poster.data ? (
+        <img
+          src={poster.data}
+          alt=""
+          draggable={false}
+          className="size-full object-cover duration-150 animate-in fade-in-0"
+        />
+      ) : (
+        <Film aria-hidden className="size-4" />
+      )}
+    </div>
+  );
+}
 
 /**
  * One file in the queue (design 8.1): thumbnail tile, file name, media
@@ -70,9 +95,7 @@ export const QueueRow = memo(function QueueRow({
       onContextMenu={() => onContext(item.id)}
       {...props}
     >
-      <div className="grid h-9 w-16 shrink-0 place-items-center rounded-md bg-surface text-foreground-subtlest">
-        <Film aria-hidden className="size-4" />
-      </div>
+      <RowThumb path={item.path} probed={item.media !== null} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate pr-5 text-ui-base/5">{item.name}</span>
         <span className="truncate text-ui-xs/4 text-foreground-subtle tabular-nums">

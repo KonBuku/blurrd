@@ -1,7 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
+import { clearMocks, mockConvertFileSrc } from "@tauri-apps/api/mocks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { busyRetryDelay, HttpError, loadObjectUrl, retryWhenBusy } from "./media";
+import { busyRetryDelay, HttpError, loadObjectUrl, posterUrl, retryWhenBusy } from "./media";
 
 /** Loads `url` the way the timeline loads a thumbnail. */
 function loadThumbnail(url: string): Promise<string> {
@@ -51,5 +52,17 @@ describe("scheme request retries", () => {
     const missing = answer(404, 200);
     await expect(loadThumbnail("thumb/c")).rejects.toMatchObject({ status: 404 });
     expect(missing).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("poster URLs", () => {
+  afterEach(() => clearMocks());
+
+  // The backend route (`scheme::Route::Poster`) decodes the query value.
+  it("carry the encoded file path", () => {
+    mockConvertFileSrc("windows");
+    expect(posterUrl(String.raw`C:\clips\a b#1&2.mp4`)).toBe(
+      "http://blurrd.localhost/poster.jpg?path=C%3A%5Cclips%5Ca%20b%231%262.mp4",
+    );
   });
 });

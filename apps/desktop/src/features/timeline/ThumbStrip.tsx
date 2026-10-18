@@ -1,27 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
 import { memo } from "react";
 
-import { busyRetryDelay, loadObjectUrl, retryWhenBusy, thumbnailUrl } from "@/ipc/media";
+import { useSchemeImage } from "@/hooks/useSchemeImage";
+import { thumbnailUrl } from "@/ipc/media";
 
 /** Width of one thumbnail slot in pixels (16:9 at the strip height). */
 const SLOT = 64;
 
-/**
- * Loads a thumbnail into an object URL, cached for the session. A 503
- * (the backend's request queue was full) is retried shortly, so a burst
- * of thumbnails does not leave blank slots.
- */
-function useThumbnail(url: string) {
-  return useQuery({
-    queryKey: ["thumbnail", url],
-    queryFn: ({ signal }) => loadObjectUrl(url, signal),
-    retry: retryWhenBusy,
-    retryDelay: busyRetryDelay,
-  });
-}
-
 function Thumb({ url, left }: { readonly url: string; readonly left: number }) {
-  const image = useThumbnail(url);
+  const image = useSchemeImage(url);
   return image.data ? (
     <img
       src={image.data}
@@ -43,7 +29,7 @@ export function HoverThumb({
   readonly projectId: string;
   readonly index: number;
 }) {
-  const image = useThumbnail(thumbnailUrl(projectId, index));
+  const image = useSchemeImage(thumbnailUrl(projectId, index));
   return (
     <div className="mb-1 h-[72px] w-32 overflow-hidden rounded-sm bg-video-stage">
       {image.data && <img src={image.data} alt="" className="size-full object-cover" />}

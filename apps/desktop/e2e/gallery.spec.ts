@@ -11,6 +11,16 @@ async function openGallery(page: Page, theme: (typeof THEMES)[number]) {
   await page.goto("/?gallery");
   await expect(page.getByRole("heading", { name: "Component gallery" })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
+  // Every probed queue row shows its poster before a screenshot.
+  const posters = page.getByRole("listbox", { name: "Queue statuses" }).locator("img");
+  await expect(posters).toHaveCount(12);
+  await expect
+    .poll(() =>
+      posters.evaluateAll((images) =>
+        images.every((image) => (image as HTMLImageElement).complete),
+      ),
+    )
+    .toBe(true);
 }
 
 // Baselines are rendered on Windows (the only target, where the system UI

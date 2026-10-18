@@ -11,7 +11,9 @@
 //!   in a `settings=` query ([`ExactSettings`], percent-encoded), and use
 //!   the project's own without it;
 //! - `crop/<project>/<leak>.jpg?view=blurred|clear`: the crop of a leak
-//!   of the verification report, blurred unless `clear` is asked for.
+//!   of the verification report, blurred unless `clear` is asked for;
+//! - `poster.jpg?path=<file>`: the queue's poster frame of a video the
+//!   user chose (percent-encoded path), before any project is open.
 //!
 //! Requests are answered by a few worker threads ([`Workers`]) off the
 //! webview's thread; when [`QUEUED`] requests already wait, more answer
@@ -22,13 +24,14 @@
 //! [`ExactFrame`]: blurrd_core::ExactFrame
 //! [`ExactSettings`]: blurrd_core::ExactSettings
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 
 use blurrd_core::{AppError, ErrorKind, ExactSettings};
 use tauri::http::{Request, Response, StatusCode, header};
 
+use crate::poster::poster;
 use crate::projects::lock;
 use crate::state::AppState;
 
@@ -152,6 +155,9 @@ enum Route {
         index: usize,
         clear: bool,
     },
+    Poster {
+        path: PathBuf,
+    },
 }
 
 impl Route {
@@ -196,6 +202,11 @@ impl Route {
                 index: file.strip_suffix(".jpg")?.parse().ok()?,
                 clear: pairs().any(|pair| pair == "view=clear"),
             }),
+            ["poster.jpg"] => {
+                let value = pairs().find_map(|pair| pair.strip_prefix("path="))?;
+                let path = String::from_utf8(percent_decoded(value)?).ok()?;
+                (!path.is_empty()).then(|| Self::Poster { path: path.into() })
+            }
             _ => None,
         }
     }
@@ -260,6 +271,12 @@ fn answer(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
             .projects
             .get(&project)
             .and_then(|project| state.exact.leak_crop(&project, index, clear))
+            .map(|jpeg| ("image/jpeg", jpeg)),
+        // Only files the user chose (the asset scope), like every command.
+        Route::Poster { path } => state
+            .paths
+            .existing(&path)
+            .and_then(|path| poster(&path))
             .map(|jpeg| ("image/jpeg", jpeg)),
     };
     match answer {
@@ -464,6 +481,23 @@ mod tests {
             route("http://blurrd.localhost/thumb%2Fab12%2F7.jpg")
         );
         assert_eq!(route("http://blurrd.localhost/thumb%2Fab12%2"), None);
+    }
+
+    /// The poster URL as the frontend writes it (`posterUrl`).
+    #[test]
+    fn poster_routes_carry_the_file_path() {
+        let path = r"C:\Users\me\Videos\clip one #2 & 50%.mp4";
+        let uri = format!(
+            "http://blurrd.localhost/poster.jpg?path={}",
+            encode_component(path)
+        );
+        assert_eq!(
+            Route::of(&uri.parse().unwrap()),
+            Some(Route::Poster { path: path.into() })
+        );
+        assert_eq!(Route::parse("poster.jpg", None), None);
+        assert_eq!(Route::parse("poster.jpg", Some("path=")), None);
+        assert_eq!(Route::parse("poster.jpg", Some("path=%zz")), None);
     }
 
     /// The settings query as the frontend writes it.

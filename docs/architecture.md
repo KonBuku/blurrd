@@ -219,7 +219,8 @@ throttle it (EcoQoS off) and not to sleep.
   or a drop; everything else is refused.
 - **Media:** recordings and preview proxies play from a loopback server
   (127.0.0.1, random port, per-start token, HTTP range requests). The
-  `blurrd://` scheme serves thumbnails, the "Exact" patches (frames
+  `blurrd://` scheme serves thumbnails, the queue's poster frames, the
+  "Exact" patches (frames
   blurred by the engine itself, for a pixel-exact check of the preview)
   and leak crops.
 - **Preview:** a WebGL 2 port of `CpuBlur` blurs each presented video

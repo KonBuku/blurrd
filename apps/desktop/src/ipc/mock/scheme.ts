@@ -4,8 +4,9 @@
  * are answered here: Exact patches carry the frame index code of the
  * requested frame, drawn inverted exactly where the fixture video has it
  * (so a test sees both that the patch is drawn and where), thumbnails
- * are scaled fixture frames, and leak crops are the leak's box of its
- * first frame, block-averaged unless the clear view is asked for.
+ * and the queue's posters are scaled fixture frames, and leak crops are
+ * the leak's box of its first frame, block-averaged unless the clear view
+ * is asked for.
  */
 import type { ExactFrame } from "@/bindings/ExactFrame";
 import type { RectI } from "@/bindings/RectI";
@@ -19,6 +20,9 @@ const realFetch = window.fetch.bind(window);
 
 /** Thumbnail size (16:9). */
 const THUMB = { width: 160, height: 90 } as const;
+
+/** The queue's poster, the same frame for every file. */
+let posterJpeg: Promise<Blob> | null = null;
 
 /** Margin around a leak's box in its crop, in source pixels. */
 const CROP_MARGIN = 6;
@@ -103,6 +107,18 @@ async function answer(
     return new Response(
       await jpeg(rgb, FIXTURE.width, FIXTURE.height, THUMB.width / FIXTURE.width),
     );
+  }
+  if (path === "poster.jpg") {
+    // Like the backend: a frame a tenth into the video, for any file path.
+    // Encoded once: the mock encodes on the page's thread, the backend
+    // does not, so a scrolled queue of hundreds of rows stays smooth.
+    if (!new URLSearchParams(query).get("path")) return null;
+    posterJpeg ??= (async () => {
+      const rgb = new Uint8Array(FIXTURE.width * FIXTURE.height * 3);
+      drawFrame(rgb, Math.floor(FIXTURE.frames / 10));
+      return jpeg(rgb, FIXTURE.width, FIXTURE.height, THUMB.width / FIXTURE.width);
+    })();
+    return new Response(await posterJpeg);
   }
   const crop = /^crop\/([^/]+)\/(\d+)\.jpg$/.exec(path);
   const leak = crop ? projects.leak(crop[1] ?? "", Number(crop[2])) : null;
