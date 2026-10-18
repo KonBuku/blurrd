@@ -155,6 +155,13 @@ enum Route {
 }
 
 impl Route {
+    /// The route of a request URI. `convertFileSrc` encodes the whole
+    /// path, its `/` included, so the path is decoded first.
+    fn of(uri: &tauri::http::Uri) -> Option<Self> {
+        let path = String::from_utf8(percent_decoded(uri.path())?).ok()?;
+        Self::parse(path.trim_start_matches('/'), uri.query())
+    }
+
     /// The route of a request path (without the leading `/`) and query;
     /// `None` for unknown paths and invalid settings.
     fn parse(path: &str, query: Option<&str>) -> Option<Self> {
@@ -211,9 +218,7 @@ fn for_window(mut response: Response<Vec<u8>>, origin: &str) -> Response<Vec<u8>
 
 /// The answer to one request, without CORS headers.
 fn answer(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let uri = request.uri();
-    let path = uri.path().trim_start_matches('/');
-    let Some(route) = Route::parse(path, uri.query()) else {
+    let Some(route) = Route::of(request.uri()) else {
         return status(StatusCode::NOT_FOUND, "unknown path");
     };
     let answer = match route {
@@ -434,6 +439,31 @@ mod tests {
         ] {
             assert_eq!(Route::parse(bad, None), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn encoded_uris_map_to_routes() {
+        let route = |uri: &str| Route::of(&uri.parse().unwrap());
+        assert_eq!(
+            route("http://blurrd.localhost/thumb%2Fab12%2F7.jpg"),
+            Some(Route::Thumbnail {
+                project: "ab12".to_owned(),
+                index: 7
+            })
+        );
+        assert_eq!(
+            route("http://blurrd.localhost/crop%2Fab12%2F3.jpg?view=clear"),
+            Some(Route::LeakCrop {
+                project: "ab12".to_owned(),
+                index: 3,
+                clear: true
+            })
+        );
+        assert_eq!(
+            route("http://blurrd.localhost/thumb/ab12/7.jpg"),
+            route("http://blurrd.localhost/thumb%2Fab12%2F7.jpg")
+        );
+        assert_eq!(route("http://blurrd.localhost/thumb%2Fab12%2"), None);
     }
 
     /// The settings query as the frontend writes it.
