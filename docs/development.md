@@ -353,12 +353,18 @@ frontend writes `appearance` and `general` itself; `processing`,
 `save_processing`, `save_defaults`, `save_privacy`), so Rust checks every
 value (`src-tauri/src/settings.rs`) before the store writes it. Processing
 offers only what the engine reads at start (GPU on or off, the OCR GPU)
-and "Measure again" (`refresh_capabilities` clears `caps\`). The stored
+and "Measure again" (`refresh_capabilities` clears `caps\`; refused
+while a probe runs or a job runs or waits, and jobs that come up during
+a probe, also the one at start, wait until it is done). The stored
 defaults are the settings of files added later; changing them on a page
 keeps the values of files already queued, and the inspector still
 overrides them per file. The output folder of the defaults is allowed
-again at start (the user chose it in an earlier session). Logs & privacy
-sets the log level (applied at once), opens the log folder
+again at start only when `save_defaults` recorded it after its check, in
+`chosen-output-folder.json` beside the settings file (the page can write
+the settings file through the store plugin, not that record). "Export N
+files" analyses a file again when its cached analysis lacks a region, a
+Safe box fit or an Every frame verification that was asked for. Logs &
+privacy sets the log level (applied at once), opens the log folder
 (`open_log_dir`) and clears cached analyses of recordings that are not
 queued (`get_cache_info`, `clear_cache`). `e2e/settings-pages.spec.ts`
 covers navigation, axe in both themes, the 1024x680 window, keyboard

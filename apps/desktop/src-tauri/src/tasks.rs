@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use blurrd_core::{
-    AppError, BlurParams, DetectorInfo, ExportSettings, FrameRange, JobEvent, JobKind, JobSummary,
-    Mode, Project, RegionSet, RegionSettings, VerifySettings, VerifyState, WarningCode,
+    AppError, BlurParams, Coverage, DetectorInfo, ExportSettings, FrameRange, JobEvent, JobKind,
+    JobSummary, Mode, Project, RegionSet, RegionSettings, VerifySettings, VerifyState, WarningCode,
 };
 use blurrd_engine::{
     AnalyzeRequest, Engine, ProgressSink, RenderRequest, ReverifyRequest, RunRequest, is_verified,
@@ -75,12 +75,33 @@ pub(crate) fn render(
 }
 
 /// Whether the cached analysis `existing` can be rendered as it is for
-/// `regions`: it covers every enabled region, no edit waits for
-/// verification, and it has Safe boxes when Safe is asked for (a Tight
+/// `regions` and `verify`: it covers every enabled region, no edit waits
+/// for verification, it has Safe boxes when Safe is asked for (a Tight
 /// request accepts Safe boxes, which the analysis picks itself when the
-/// HUD calibration is unsure).
-fn analysis_is_current(existing: &Project, regions: RegionSettings) -> bool {
-    existing.verify.unverified_ranges.is_empty() && detector_covers(&existing.detector, regions)
+/// HUD calibration is unsure), and its verification read every frame
+/// when that is asked for (`coverage` answers the coverage of its last
+/// report; asked only then).
+fn analysis_is_current(
+    existing: &Project,
+    regions: RegionSettings,
+    verify: VerifySettings,
+    coverage: impl FnOnce() -> Option<Coverage>,
+) -> bool {
+    existing.verify.unverified_ranges.is_empty()
+        && detector_covers(&existing.detector, regions)
+        && verification_covers(verify, coverage)
+}
+
+/// Whether a verification whose report read `coverage` serves `verify`:
+/// Every frame needs a report that read every frame; HUD activity is
+/// served by both (Every frame fix boxes cover the HUD activity ones).
+fn verification_covers(
+    verify: VerifySettings,
+    coverage: impl FnOnce() -> Option<Coverage>,
+) -> bool {
+    !verify.enabled
+        || verify.coverage == Coverage::Structure
+        || coverage() == Some(Coverage::EveryFrame)
 }
 
 /// Whether an analysis made by `detector` serves `regions`: every enabled
@@ -94,7 +115,8 @@ fn detector_covers(detector: &DetectorInfo, regions: RegionSettings) -> bool {
 }
 
 /// Exports `project` as one file of a run: renders it when its analysis
-/// is current for `regions` ([`analysis_is_current`]), otherwise analyses
+/// is current for `regions` and `verify` ([`analysis_is_current`]),
+/// otherwise analyses
 /// and renders it in one streaming pass.
 pub(crate) fn run(
     engine: Arc<Engine>,
@@ -104,9 +126,12 @@ pub(crate) fn run(
     verify: VerifySettings,
 ) -> Work {
     Box::new(move |sink| {
-        let current = project
-            .project()
-            .is_some_and(|existing| analysis_is_current(&existing, regions));
+        let current = project.project().is_some_and(|existing| {
+            analysis_is_current(&existing, regions, verify, || {
+                let report = project.report_of(&existing).ok().flatten();
+                report.map(|report| report.coverage)
+            })
+        });
         if current {
             return render(engine, project, request)(sink);
         }
@@ -245,9 +270,9 @@ pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use blurrd_core::{
-        BlurParams, Container, DetectorInfo, EncoderSetting, ExportSettings, JobEvent, JobId, Mode,
-        Override, RectI, Region, RegionSet, RegionSettings, Sensitivity, TemporalParams,
-        VerifySettings,
+        BlurParams, Container, Coverage, DetectorInfo, EncoderSetting, ExportSettings, JobEvent,
+        JobId, Mode, Override, RectI, Region, RegionSet, RegionSettings, Sensitivity,
+        TemporalParams, VerifySettings,
     };
     use blurrd_engine::{Engine, EngineConfig};
     use uuid::Uuid;
@@ -324,6 +349,37 @@ pub(crate) mod tests {
         assert!(super::detector_covers(
             &safe,
             asked(RegionSet::all(), Mode::Tight)
+        ));
+    }
+
+    #[test]
+    fn every_frame_needs_a_verification_that_read_every_frame() {
+        let asked = |enabled: bool, coverage: Coverage| VerifySettings { enabled, coverage };
+        let every = || Some(Coverage::EveryFrame);
+        let structure = || Some(Coverage::Structure);
+        assert!(super::verification_covers(
+            asked(true, Coverage::Structure),
+            structure
+        ));
+        assert!(super::verification_covers(
+            asked(true, Coverage::Structure),
+            every
+        ));
+        assert!(super::verification_covers(
+            asked(true, Coverage::EveryFrame),
+            every
+        ));
+        assert!(!super::verification_covers(
+            asked(true, Coverage::EveryFrame),
+            structure
+        ));
+        assert!(!super::verification_covers(
+            asked(true, Coverage::EveryFrame),
+            || None
+        ));
+        assert!(super::verification_covers(
+            asked(false, Coverage::EveryFrame),
+            || None
         ));
     }
 
