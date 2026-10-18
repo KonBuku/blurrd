@@ -13,7 +13,8 @@ import type { RateControl } from "./RateControl";
 import type { Toggle } from "./Toggle";
 
 /**
- * Export settings.
+ * Export settings. Missing fields read as their defaults, so a stored
+ * section of an older revision keeps the other values.
  */
 export type ExportSettings = { 
 /**

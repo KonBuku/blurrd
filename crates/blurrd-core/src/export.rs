@@ -191,6 +191,7 @@ pub enum ConflictPolicy {
 /// Output file naming.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(default)]
 pub struct OutputSettings {
     /// Output folder.
     pub folder: OutputFolder,
@@ -211,9 +212,11 @@ impl Default for OutputSettings {
     }
 }
 
-/// Export settings.
+/// Export settings. Missing fields read as their defaults, so a stored
+/// section of an older revision keeps the other values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(default)]
 pub struct ExportSettings {
     /// Output codec.
     pub codec: Codec,

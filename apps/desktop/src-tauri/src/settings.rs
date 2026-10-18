@@ -456,6 +456,24 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_export_section_keeps_the_other_defaults() {
+        let get = file(json!({
+            "defaults": { "export": { "container": "Mkv", "output": { "template": "{name}_x" } } }
+        }));
+        let read = stored(Some(&get), &Processing::default()).defaults.export;
+        let defaults = ExportSettings::default();
+        let expected = ExportSettings {
+            container: blurrd_core::Container::Mkv,
+            output: blurrd_core::OutputSettings {
+                template: "{name}_x".to_owned(),
+                ..defaults.output.clone()
+            },
+            ..defaults
+        };
+        assert_eq!(read, expected);
+    }
+
+    #[test]
     fn invalid_sections_read_as_defaults() {
         let get = file(json!({
             "processing": { "parallel_jobs": 9 },

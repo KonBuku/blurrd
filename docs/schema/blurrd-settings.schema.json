@@ -472,71 +472,94 @@
       ]
     },
     "ExportSettings": {
-      "description": "Export settings.",
+      "description": "Export settings. Missing fields read as their defaults, so a stored\nsection of an older revision keeps the other values.",
       "type": "object",
       "properties": {
         "audio": {
           "description": "Audio handling.",
-          "$ref": "#/$defs/AudioMode"
+          "$ref": "#/$defs/AudioMode",
+          "default": "Copy"
         },
         "codec": {
           "description": "Output codec.",
-          "$ref": "#/$defs/Codec"
+          "$ref": "#/$defs/Codec",
+          "default": "Source"
         },
         "container": {
           "description": "Output container.",
-          "$ref": "#/$defs/Container"
+          "$ref": "#/$defs/Container",
+          "default": "Source"
         },
         "copy_subtitles": {
           "description": "Copy subtitle streams.",
-          "type": "boolean"
+          "type": "boolean",
+          "default": true
         },
         "encoder": {
           "description": "Encoder choice.",
-          "$ref": "#/$defs/EncoderSetting"
+          "$ref": "#/$defs/EncoderSetting",
+          "default": "Auto"
         },
         "keyframes": {
           "description": "Keyframe placement.",
-          "$ref": "#/$defs/KeyframePolicy"
+          "$ref": "#/$defs/KeyframePolicy",
+          "default": "MatchSource"
         },
         "metadata": {
           "description": "Container metadata.",
-          "$ref": "#/$defs/MetadataMode"
+          "$ref": "#/$defs/MetadataMode",
+          "default": "Technical"
         },
         "moov": {
           "description": "Index placement for MP4/MOV.",
-          "$ref": "#/$defs/MoovMode"
+          "$ref": "#/$defs/MoovMode",
+          "default": "Reserve"
         },
         "nvenc_sessions": {
           "description": "Parallel NVENC sessions.",
-          "$ref": "#/$defs/NvencSessions"
+          "$ref": "#/$defs/NvencSessions",
+          "default": "Auto"
         },
         "output": {
           "description": "Output file naming.",
-          "$ref": "#/$defs/OutputSettings"
+          "$ref": "#/$defs/OutputSettings",
+          "default": {
+            "folder": "NextToSource",
+            "on_conflict": "AddNumber",
+            "template": "{name}_blurrd"
+          }
         },
         "preset": {
           "description": "Encoder preset, 1 (fastest) to 7 (best quality).",
           "type": "integer",
           "format": "uint8",
+          "default": 3,
           "maximum": 255,
           "minimum": 0
         },
         "rate": {
           "description": "Rate control.",
-          "$ref": "#/$defs/RateControl"
+          "$ref": "#/$defs/RateControl",
+          "default": {
+            "MatchSource": {
+              "max_factor": 1.5
+            }
+          }
         },
         "smart_render": {
           "description": "Stream-copy GOPs without boxes (not available in v0.1).",
-          "type": "boolean"
+          "type": "boolean",
+          "default": false
         },
         "split_encode": {
           "description": "Split-frame encoding for HEVC and AV1.",
-          "$ref": "#/$defs/Toggle"
+          "$ref": "#/$defs/Toggle",
+          "default": "Auto"
         },
         "ten_bit": {
           "description": "10-bit output.",
-          "$ref": "#/$defs/Toggle"
+          "$ref": "#/$defs/Toggle",
+          "default": "Auto"
         },
         "trim": {
           "description": "Export only these frames, or the whole video.",
@@ -547,26 +570,10 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         }
-      },
-      "required": [
-        "codec",
-        "encoder",
-        "rate",
-        "preset",
-        "ten_bit",
-        "split_encode",
-        "nvenc_sessions",
-        "keyframes",
-        "smart_render",
-        "audio",
-        "copy_subtitles",
-        "metadata",
-        "container",
-        "moov",
-        "output"
-      ]
+      }
     },
     "FrameRange": {
       "description": "An inclusive range of presentation frame indices, written as `[f0, f1]`.",
@@ -773,22 +780,20 @@
       "properties": {
         "folder": {
           "description": "Output folder.",
-          "$ref": "#/$defs/OutputFolder"
+          "$ref": "#/$defs/OutputFolder",
+          "default": "NextToSource"
         },
         "on_conflict": {
           "description": "Behaviour when the file exists.",
-          "$ref": "#/$defs/ConflictPolicy"
+          "$ref": "#/$defs/ConflictPolicy",
+          "default": "AddNumber"
         },
         "template": {
           "description": "File name template without extension; `{name}` is the source's file\nstem.",
-          "type": "string"
+          "type": "string",
+          "default": "{name}_blurrd"
         }
-      },
-      "required": [
-        "folder",
-        "template",
-        "on_conflict"
-      ]
+      }
     },
     "PreviewQuality": {
       "description": "Resolution of the in-app preview.",

@@ -69,10 +69,24 @@ function readProcessing(value: unknown): Processing {
   return processingProblem(processing) === null ? processing : DEFAULT_PROCESSING;
 }
 
+/**
+ * The defaults section with missing fields (also of the export section and
+ * its output naming) filled in from the defaults, like the Rust types.
+ */
 function readDefaults(value: unknown): Defaults {
   const raw = object(value);
   if (!raw) return DEFAULT_DEFAULTS;
-  const defaults = { ...DEFAULT_DEFAULTS, ...raw } as Defaults;
+  const rawExport = object(raw.export);
+  const exportSettings = rawExport && {
+    ...DEFAULT_DEFAULTS.export,
+    ...rawExport,
+    output: { ...DEFAULT_DEFAULTS.export.output, ...object(rawExport.output) },
+  };
+  const defaults = {
+    ...DEFAULT_DEFAULTS,
+    ...raw,
+    ...(exportSettings ? { export: exportSettings } : {}),
+  } as Defaults;
   return defaultsProblem(defaults) === null ? defaults : DEFAULT_DEFAULTS;
 }
 
