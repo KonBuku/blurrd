@@ -218,6 +218,11 @@ blurrd render match.mp4 --plan match.blurrd.json -o match_blurrd.mp4
 blurrd audit match.mp4 --plan match.blurrd.json -o match_blurrd.mp4
 ```
 
+The command-line tool comes as `blurrd-cli_<version>_x64.zip` on the
+releases page, with the same FFmpeg, ONNX Runtime and OCR models as the
+app: unzip it and run `blurrd.exe` from that folder, or add the folder to
+`PATH`.
+
 When a result cannot be verified, the output is named
 `match_blurrd_UNVERIFIED.mp4` and the exit code is 3.
 [docs/cli.md](docs/cli.md) describes every command and option, the JSON

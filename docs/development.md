@@ -856,8 +856,10 @@ change is merged; the installer job runs only after a merge.
 | `bundle (windows)`      | Windows | pushes to `main` and manual runs only, after `frontend`, `screenshots (windows)` and `rust (windows)`: pinned FFmpeg with its build configuration check (`cargo xtask check-ffmpeg`), ONNX Runtime and the OCR models, third-party notices freshness (`pnpm notices:check`), `pnpm build` (release app + NSIS installer with the bundled files), `cargo xtask check-bundle` on the built app, uploaded as the `blurrd-windows-<sha>` artifact for 14 days |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
-(see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the
-workflows themselves:
+(see [FFmpeg](#ffmpeg)), and `.github/workflows/release.yml` builds and
+drafts a release for each version tag (see
+[Changelog and releases](#changelog-and-releases)). Two more workflows
+guard pull requests and the workflows themselves:
 
 - `.github/workflows/pr-title.yml` checks the pull request title with
   commitlint, because the title becomes the squashed commit header on
@@ -1074,3 +1076,30 @@ pnpm release              # bump, regenerate CHANGELOG.md, commit and tag
 `CHANGELOG.md`, and creates an unsigned commit `chore(release): vX.Y.Z` with
 an annotated, unsigned tag `vX.Y.Z`. It does not push; run
 `git push --follow-tags origin main` afterwards.
+
+Pushing the tag starts `.github/workflows/release.yml`, which builds the
+release from the tagged commit:
+
+1. `build (windows)` checks that the tag matches the workspace version,
+   installs the pinned FFmpeg, ONNX Runtime and OCR models (each checked
+   against its SHA-256), checks that the corresponding FFmpeg source
+   archive is published in its `deps-ffmpeg-*` release with the pinned
+   SHA-256 (the About dialog links it), runs `cargo xtask check-ffmpeg`
+   and `pnpm notices:check`, builds the installer (`pnpm build`) and the
+   CLI archive (`cargo build --profile dist-cli -p blurrd-cli` and
+   `cargo xtask package-cli`), runs `cargo xtask check-bundle` on the app,
+   and writes `SHA256SUMS` and the release notes: the tag's section from
+   git-cliff and how to check the download. Nothing is cached.
+2. `build provenance` signs a build provenance attestation for the
+   installer and the CLI archive (`actions/attest-build-provenance`).
+   GitHub offers attestations only for public repositories, so the job
+   runs only while the repository is public; until then releases go out
+   without one and the notes leave out `gh attestation verify`.
+3. `draft release` creates a draft GitHub release for the tag with the
+   notes, `blurrd_<version>_x64-setup.exe`,
+   `blurrd-cli_<version>_x64.zip` and `SHA256SUMS`. It is the only job
+   that can write to the repository.
+
+Install the draft's installer on a clean Windows user, check it, then
+publish the draft by hand. The CLI archive holds `blurrd.exe` with the
+same DLLs, models and licences as the installer; unzip it anywhere.

@@ -1,0 +1,210 @@
+# Release: on a version tag (vX.Y.Z, made by `pnpm release`), builds the
+# Windows installer and the CLI archive from the tagged commit with the
+# pinned FFmpeg, ONNX Runtime and OCR models, checks them, attests their
+# build provenance (only while the repository is public, plan 12.1) and
+# drafts a GitHub release with notes from git-cliff, the files and their
+# SHA256SUMS. Publishing the draft stays a manual step after checking the
+# installer (plan 13.5). See docs/development.md ("Changelog and
+# releases").
+#
+# Every action is pinned to a full commit SHA with its tag as a comment.
+# The workflow has no permissions by default; each job asks for what it
+# needs, and only the last one can write (the draft release). Nothing is
+# cached, so a release never builds from a cache another run wrote.
+
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_ABOUT_VERSION: "0.9.2"
+
+jobs:
+  build:
+    name: build (windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # git-cliff reads the history and the tags for the notes.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: rust toolchain
+        # Installs the toolchain, components and targets pinned in
+        # rust-toolchain.toml with the rustup that ships on the runner.
+        run: rustup toolchain install --no-self-update
+      - name: tag matches the version
+        # The single version lives in [workspace.package] of Cargo.toml.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $meta = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
+          $version = ($meta.packages | Where-Object name -eq 'blurrd-app').version
+          if ("v$version" -ne $env:TAG) {
+            Write-Output "::error::tag $env:TAG does not match the workspace version $version"
+            exit 1
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          # No dependency cache in a release build (see the header).
+          package-manager-cache: false
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
+      - name: pinned ffmpeg, onnx runtime and ocr models
+        # Each download is checked against the SHA-256 in
+        # third_party/ffmpeg.toml, third_party/ort.toml and models.toml.
+        run: |
+          cargo xtask fetch-ffmpeg
+          if ($LASTEXITCODE) { exit 1 }
+          cargo xtask fetch-ort
+          if ($LASTEXITCODE) { exit 1 }
+          cargo xtask fetch-models
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: ffmpeg source is published
+        # The About dialog and THIRD-PARTY-NOTICES.md link the corresponding
+        # source of the shipped FFmpeg (LGPL); it must exist with the
+        # pinned SHA-256 before an installer goes out.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $pin = Get-Content third_party/ffmpeg.toml -Raw
+          function Pin($key) { [regex]::Match($pin, "(?m)^$key = `"([^`"]+)`"").Groups[1].Value }
+          $tag = Pin 'tag'; $asset = Pin 'source_asset'; $sha = Pin 'source_sha256'
+          $digest = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" --jq ".assets[] | select(.name == `"$asset`") | .digest"
+          if ($LASTEXITCODE) { Write-Output "::error::the release $tag does not exist"; exit 1 }
+          if (-not $digest) {
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $asset --dir $env:RUNNER_TEMP
+            if ($LASTEXITCODE) { Write-Output "::error::$asset is not published in $tag"; exit 1 }
+            $digest = 'sha256:' + (Get-FileHash (Join-Path $env:RUNNER_TEMP $asset) -Algorithm SHA256).Hash.ToLower()
+          }
+          if ($digest -ne "sha256:$sha") {
+            Write-Output "::error::$asset in $tag has $digest, the pin says sha256:$sha"
+            exit 1
+          }
+          Write-Output "$asset in $tag matches the pin"
+      - name: ffmpeg build configuration
+        # The configure line and licence each FFmpeg DLL embeds: LGPL 2.1
+        # or later, no gpl/nonfree/version3/openh264, every required
+        # component.
+        run: cargo xtask check-ffmpeg
+      - name: third-party notices freshness
+        run: pnpm notices:check
+      - name: installer
+        # Release app and NSIS installer (unsigned, D3); stage-bundle
+        # collects and checks the bundled DLLs, models and licences.
+        run: pnpm build
+      - name: installed files import only shipped or system dlls
+        run: cargo xtask check-bundle --exe target/release/blurrd.exe
+      - name: cli archive
+        run: |
+          cargo build --profile dist-cli -p blurrd-cli --locked
+          if ($LASTEXITCODE) { exit 1 }
+          cargo xtask package-cli
+      - name: checksums and notes
+        env:
+          PUBLIC: ${{ github.event.repository.visibility == 'public' }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          $installer = "blurrd_${env:VERSION}_x64-setup.exe"
+          $cli = "blurrd-cli_${env:VERSION}_x64.zip"
+          Copy-Item "target/release/bundle/nsis/$installer" dist/
+          Copy-Item "target/dist/$cli" dist/
+          $lines = foreach ($name in $installer, $cli) {
+            '{0}  {1}' -f (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLower(), $name
+          }
+          [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS", ($lines -join "`n") + "`n")
+          $changes = pnpm exec git-cliff --current --strip header
+          if ($LASTEXITCODE) { exit 1 }
+          $verify = @(
+            '## Verify the download', '',
+            'The installer is not code-signed. Compare its SHA-256 with `SHA256SUMS`:', '',
+            '```powershell', "Get-FileHash .\$installer -Algorithm SHA256", '```'
+          )
+          if ($env:PUBLIC -eq 'true') {
+            $verify += @('', 'and check its build provenance with the GitHub CLI:', '',
+              '```powershell', "gh attestation verify .\$installer --repo $env:REPOSITORY", '```')
+          }
+          $notes = (($changes -join "`n").Trim(), '', ($verify -join "`n")) -join "`n"
+          [IO.File]::WriteAllText("$PWD/dist/notes.md", $notes + "`n")
+          Get-Content dist/SHA256SUMS
+          Get-ChildItem dist | Format-Table Name, Length
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  attest:
+    name: build provenance
+    needs: build
+    # Attestations need a public repository (or GitHub Enterprise Cloud);
+    # while the repository is private the release goes out without one.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # OIDC token that identifies this run to Sigstore
+      attestations: write # stores the signed attestation
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ github.ref_name }}
+          path: dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.exe
+            dist/*.zip
+
+  release:
+    name: draft release
+    needs: [build, attest]
+    # Runs after the attestation, or without it while the repository is
+    # private (the attest job is skipped then, never failed).
+    if: >-
+      always() && needs.build.result == 'success' &&
+      (needs.attest.result == 'success' || needs.attest.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # creates the draft release with its files
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ github.ref_name }}
+          path: dist
+      - name: draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --draft --verify-tag \
+            --title "blurrd ${TAG#v}" --notes-file dist/notes.md \
+            dist/*.exe dist/*.zip dist/SHA256SUMS

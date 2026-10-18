@@ -29,6 +29,10 @@ verification it also needs ONNX Runtime and the OCR models: it uses
 `models\` next to the executable. Without them every command still works,
 but analyses print "OCR cannot run" and their results are not verified.
 
+The release archive `blurrd-cli_<version>_x64.zip` holds `blurrd.exe`
+with all of these next to it (the same files the app's installer puts
+next to the app), so it runs from any folder it is unzipped to.
+
 In a checkout, `cargo run` sets both variables (`.cargo/config.toml`) once
 `cargo xtask fetch-ffmpeg`, `cargo xtask fetch-ort` and
 `cargo xtask fetch-models` have installed the pinned files:
