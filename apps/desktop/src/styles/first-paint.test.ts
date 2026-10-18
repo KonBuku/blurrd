@@ -58,4 +58,13 @@ describe("first paint", () => {
     );
     expect(bootJs).toContain('localStorage.getItem("blurrd.appearance")');
   });
+
+  it("serves the loading screen's logos from public/ (dev and release)", () => {
+    const logos = [...html.matchAll(/<img [^>]*src="([^"]+)"/g)].map((match) => match[1] ?? "");
+    expect(logos).toEqual(["/brand/blurrd-icon-light.svg", "/brand/blurrd-icon.svg"]);
+    for (const logo of logos) {
+      // Copies of the brand assets; a change there must reach them.
+      expect(read("public", logo)).toBe(read("..", "..", "assets", logo));
+    }
+  });
 });
