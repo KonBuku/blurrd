@@ -541,7 +541,8 @@ pub(crate) async fn save_defaults(
 ) -> Result<Defaults, AppError> {
     let state = state.inner().clone();
     blocking(move || {
-        let defaults = settings::checked_defaults(&state.paths, defaults)?;
+        let defaults =
+            settings::accepted_defaults(&state.paths, &state.chosen_folder_record, defaults)?;
         settings::save_defaults(&app, &defaults)?;
         Ok(defaults)
     })

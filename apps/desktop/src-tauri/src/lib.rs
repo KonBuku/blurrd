@@ -162,16 +162,20 @@ pub fn run() -> Result<(), tauri::Error> {
 /// The commands' state: the engine (with the stored processing settings),
 /// the project registry, the job queue and the stores, with paths checked
 /// against the asset protocol scope that the dialogs and the drop handler
-/// fill. The stored output folder of the defaults was chosen by the user
-/// in an earlier session and is allowed again.
+/// fill. The stored output folder of the defaults is allowed again when
+/// the backend recorded it as chosen by the user in an earlier session.
 fn app_state(app: &AppHandle, startup: &Startup) -> Result<AppState, Box<dyn std::error::Error>> {
     let config_dir = app.path().app_config_dir()?;
     let log_dir = app.path().app_log_dir()?;
     let paths = UserPaths::new(Box::new(app.asset_protocol_scope()));
-    if let Some(folder) = &startup.output_folder
-        && !paths.add_chosen_folder(folder)
+    let record = config_dir.join(settings::CHOSEN_FOLDER_FILE);
+    if startup.output_folder.is_some()
+        && !settings::restorable_folder(&record, startup.output_folder.as_deref())
+            .is_some_and(|folder| paths.add_chosen_folder(&folder))
     {
-        tauri_plugin_log::log::warn!("the stored output folder does not exist any more");
+        tauri_plugin_log::log::warn!(
+            "the stored output folder was not recorded as chosen or does not exist any more"
+        );
     }
     let origin = page_origin(app);
     tauri_plugin_log::log::info!("page origin {origin}");

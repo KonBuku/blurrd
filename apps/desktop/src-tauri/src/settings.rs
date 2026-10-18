@@ -10,8 +10,12 @@
 //! invalid reads as its default, like a missing field.
 //!
 //! Processing takes effect when the engine is created at start; the log
-//! level applies at once; the output folder of the defaults is a folder
-//! the user chose, so it is allowed again at start.
+//! level applies at once. The output folder of the defaults is a folder
+//! the user chose; `save_defaults` records it in a file of its own that
+//! the page cannot write ([`CHOSEN_FOLDER_FILE`]), and only a recorded
+//! folder that is still the stored one is allowed again at start (the
+//! page can write the settings file, so its folder alone proves
+//! nothing).
 
 use std::path::{Path, PathBuf};
 
@@ -32,6 +36,11 @@ use crate::paths::UserPaths;
 /// data directory (`%APPDATA%\io.github.konbuku.blurrd`). The frontend
 /// opens it with `getStore` under the same name.
 pub(crate) const SETTINGS_FILE: &str = "settings.json";
+
+/// The record of the output folder `save_defaults` accepted, relative to
+/// the app config directory. Only the backend writes it: the page may
+/// only reach the store files the backend opens (the settings file).
+pub(crate) const CHOSEN_FOLDER_FILE: &str = "chosen-output-folder.json";
 
 /// Keys of the sections the backend owns.
 const PROCESSING: &str = "processing";
@@ -179,6 +188,62 @@ pub(crate) fn checked_defaults(
         defaults.export.output.folder = OutputFolder::Folder(folder);
     }
     Ok(defaults)
+}
+
+/// Checks defaults like [`checked_defaults`] and records their output
+/// folder (or that there is none) in `record`, the backend's own file
+/// ([`CHOSEN_FOLDER_FILE`]), before the caller saves them.
+///
+/// # Errors
+///
+/// See [`checked_defaults`]; [`ErrorKind::Io`] when the record cannot be
+/// written.
+pub(crate) fn accepted_defaults(
+    paths: &UserPaths,
+    record: &Path,
+    defaults: Defaults,
+) -> Result<Defaults, AppError> {
+    let defaults = checked_defaults(paths, defaults)?;
+    let folder = match &defaults.export.output.folder {
+        OutputFolder::Folder(folder) => Some(folder.as_path()),
+        _ => None,
+    };
+    record_chosen_folder(record, folder)?;
+    Ok(defaults)
+}
+
+/// Writes the output folder the user chose to `record` (removes the
+/// record when there is none).
+fn record_chosen_folder(record: &Path, folder: Option<&Path>) -> Result<(), AppError> {
+    let not_saved = |error: std::io::Error| {
+        AppError::new(ErrorKind::Io, "The settings could not be saved.")
+            .with_detail(format!("{}: {error}", record.display()))
+    };
+    match folder {
+        Some(folder) => {
+            if let Some(parent) = record.parent() {
+                std::fs::create_dir_all(parent).map_err(not_saved)?;
+            }
+            let text = serde_json::json!({ "folder": folder }).to_string();
+            std::fs::write(record, text).map_err(not_saved)
+        }
+        None => match std::fs::remove_file(record) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(not_saved(error)),
+            _ => Ok(()),
+        },
+    }
+}
+
+/// The output folder to allow again at start: the folder recorded in
+/// `record` by [`accepted_defaults`], when it is also the `stored` output
+/// folder of the settings file. A folder only the settings file names is
+/// not allowed (the page can write that file).
+pub(crate) fn restorable_folder(record: &Path, stored: Option<&Path>) -> Option<PathBuf> {
+    let stored = stored?;
+    let text = std::fs::read_to_string(record).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    let recorded = PathBuf::from(value.get("folder")?.as_str()?);
+    (recorded == stored).then_some(recorded)
 }
 
 fn invalid(problem: impl Into<String>) -> AppError {
@@ -345,8 +410,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        Startup, checked_defaults, checked_processing, clear_projects, is_writable, level_filter,
-        project_usage, stored,
+        Startup, accepted_defaults, checked_defaults, checked_processing, clear_projects,
+        is_writable, level_filter, project_usage, restorable_folder, stored,
     };
     use crate::paths::tests::paths_below;
 
@@ -476,6 +541,54 @@ mod tests {
         let mut defaults = Defaults::default();
         defaults.export.preset = 0;
         assert!(checked_defaults(&paths, defaults).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn only_a_folder_saved_by_the_backend_is_allowed_again() {
+        let dir = std::env::temp_dir().join(format!("blurrd-record-{}", std::process::id()));
+        let chosen = dir.join("chosen");
+        let planted = dir.join("planted");
+        std::fs::create_dir_all(&chosen).unwrap();
+        std::fs::create_dir_all(&planted).unwrap();
+        let record = dir.join("config").join("chosen-output-folder.json");
+        let paths = paths_below(&chosen);
+        let stored_folder = |defaults: &Defaults| {
+            let get = file(json!({ "defaults": serde_json::to_value(defaults).unwrap() }));
+            Startup::read(get).output_folder
+        };
+
+        // A folder the page planted in the settings file: no record.
+        let mut planted_defaults = Defaults::default();
+        planted_defaults.export.output.folder = OutputFolder::Folder(planted.clone());
+        let stored = stored_folder(&planted_defaults);
+        assert_eq!(stored, Some(planted.clone()));
+        assert_eq!(restorable_folder(&record, stored.as_deref()), None);
+
+        // A folder saved through save_defaults is restored.
+        let mut defaults = Defaults::default();
+        defaults.export.output.folder = OutputFolder::Folder(chosen.clone());
+        let saved = accepted_defaults(&paths, &record, defaults).unwrap();
+        let canonical = crate::paths::simplified(&chosen.canonicalize().unwrap());
+        assert_eq!(
+            restorable_folder(&record, stored_folder(&saved).as_deref()),
+            Some(canonical)
+        );
+
+        // Planted over a saved one: the record does not match.
+        assert_eq!(restorable_folder(&record, stored.as_deref()), None);
+
+        // A folder the user did not choose is refused and not recorded.
+        assert!(accepted_defaults(&paths, &record, planted_defaults).is_err());
+        assert!(restorable_folder(&record, stored_folder(&saved).as_deref()).is_some());
+
+        // Back to "next to the recording": the record goes.
+        accepted_defaults(&paths, &record, Defaults::default()).unwrap();
+        assert!(!record.exists());
+        assert_eq!(
+            restorable_folder(&record, stored_folder(&saved).as_deref()),
+            None
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

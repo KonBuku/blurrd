@@ -15,6 +15,7 @@ use crate::presets::Presets;
 use crate::projects::Projects;
 use crate::scheme::{self, Pending, Workers};
 use crate::session::Session;
+use crate::settings::CHOSEN_FOLDER_FILE;
 
 /// File name of the user presets in the app config folder (plan 6.5).
 const PRESETS_FILE: &str = "presets.json";
@@ -46,6 +47,9 @@ pub(crate) struct AppState {
     pub(crate) processing: Arc<Processing>,
     /// The log folder.
     pub(crate) log_dir: Arc<Path>,
+    /// The backend's record of the chosen output folder
+    /// ([`CHOSEN_FOLDER_FILE`]).
+    pub(crate) chosen_folder_record: Arc<Path>,
 }
 
 impl AppState {
@@ -112,6 +116,7 @@ impl AppState {
             origin: Arc::from(origin),
             processing: Arc::new(processing),
             log_dir: Arc::from(log_dir),
+            chosen_folder_record: Arc::from(config_dir.join(CHOSEN_FOLDER_FILE)),
         })
     }
 
