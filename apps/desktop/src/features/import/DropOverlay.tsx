@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Hand } from "lucide-react";
+import { ArrowDownToLine } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { logWarning } from "@/lib/log";
@@ -22,9 +22,11 @@ export function dropHint(count: number): string {
 
 /**
  * The window-wide drop target (design 8.1): while files are dragged over
- * the window, an accent veil with a pill says how many items a drop adds;
- * dropping adds them to the queue. Files passed to a second start of the
- * app are added the same way.
+ * the window, the window dims behind a frosted veil of the shell colour,
+ * a dashed frame in the accent marks the whole window as the target and a
+ * card in the popover style says how many items a drop adds; dropping
+ * adds them to the queue. Files passed to a second start of the app are
+ * added the same way.
  */
 export function DropOverlay() {
   const [dragged, setDragged] = useState<number | null>(null);
@@ -73,11 +75,22 @@ export function DropOverlay() {
   return (
     <div
       data-testid="drop-overlay"
-      className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-accent/55 backdrop-blur-sm"
+      className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background-win-alt/75 backdrop-blur-sm duration-100 animate-in fade-in-0"
     >
-      <output className="flex items-center gap-2 rounded-full border border-border bg-accent px-4 py-2 text-ui-base text-foreground shadow-sm">
-        <Hand aria-hidden className="size-4" />
-        <span>{dropHint(dragged)}</span>
+      <div
+        aria-hidden
+        className="absolute inset-2 rounded-2xl border-2 border-dashed border-accent-strong/60"
+      />
+      <output className="flex flex-col items-center gap-3 rounded-2xl border border-popover-border bg-popover px-8 py-6 text-center text-popover-foreground shadow-md duration-150 animate-in zoom-in-95">
+        <span className="grid size-10 place-items-center rounded-xl bg-surface text-foreground">
+          <ArrowDownToLine aria-hidden className="size-5" />
+        </span>
+        <span className="flex flex-col gap-0.5">
+          <span className="text-ui-base font-medium">{dropHint(dragged)}</span>
+          <span className="text-ui-sm text-foreground-subtle">
+            MP4 · MOV · MKV — folders add the videos inside
+          </span>
+        </span>
       </output>
     </div>
   );
