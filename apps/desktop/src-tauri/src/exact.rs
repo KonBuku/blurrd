@@ -540,7 +540,6 @@ fn bounding(a: RectI, b: RectI) -> RectI {
     }
 }
 
-/// The JPEG of `rgb`.
 /// `rgb` as a JPEG of the preview quality.
 pub(crate) fn jpeg(rgb: &RgbImage) -> Result<Vec<u8>, AppError> {
     let (Ok(width), Ok(height)) = (u16::try_from(rgb.width), u16::try_from(rgb.height)) else {
