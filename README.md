@@ -43,7 +43,7 @@ colours or pixel positions, so custom highlight colours, colour filters,
 
 ### Checked by OCR before export
 
-<img src="docs/assets/showcase/verified.webp" alt="The verification report of a recording: 326 frames checked, 0 open, 2 fixed, every region read on the source" width="100%">
+<img src="docs/assets/showcase/verified.webp" alt="The verification report of a recording: 319 frames checked, 0 open, 0 fixed, every region read on the source" width="100%">
 
 During the analysis, OCR reads the names on the source and then the
 blurred frames exactly as the export will show them. A name that stays
@@ -61,7 +61,7 @@ are checked again before the export.
 
 ### Fast on your GPU
 
-<img src="docs/assets/showcase/fast.webp" alt="An export in progress at 885 frames per second, with the measured speed of blurrd for a 60-second 1080p60 recording" width="100%">
+<img src="docs/assets/showcase/fast.webp" alt="An export in progress at 770 frames per second, with the measured speed of blurrd for a 60-second 1080p60 recording" width="100%">
 
 About 10 seconds for a 60-second 1080p60 recording, analysis, OCR check
 and export included (RTX 4080 SUPER; see [Speed](#speed)). Exports keep
