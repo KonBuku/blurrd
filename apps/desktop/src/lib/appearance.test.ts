@@ -105,4 +105,17 @@ describe("appearance cache", () => {
     localStorage.setItem("blurrd.appearance", "{not json");
     expect(cachedAppearance()).toEqual(DEFAULT_APPEARANCE);
   });
+
+  it("takes the theme the window was created with over the cached one", () => {
+    const boot = window as { blurrdBootTheme?: unknown };
+    cacheAppearance({ ...DEFAULT_APPEARANCE, theme: "Light", ui_font_size: 15 });
+    boot.blurrdBootTheme = "Dark";
+    try {
+      expect(cachedAppearance()).toEqual({ ...DEFAULT_APPEARANCE, ui_font_size: 15 });
+      boot.blurrdBootTheme = "Blue";
+      expect(cachedAppearance().theme).toBe("Light");
+    } finally {
+      delete boot.blurrdBootTheme;
+    }
+  });
 });

@@ -244,6 +244,19 @@ fn stored_theme(appearance: Option<&serde_json::Value>) -> Theme {
         .unwrap_or_default()
 }
 
+/// Script that runs before the page's own scripts: it hands the window's
+/// theme to `public/boot.js` and the appearance code, so the first paint
+/// uses the theme of the window background even when the page's cached
+/// copy differs from the settings file.
+fn boot_theme_script(theme: Theme) -> String {
+    let name = match theme {
+        Theme::System => "System",
+        Theme::Light => "Light",
+        Theme::Dark => "Dark",
+    };
+    format!("window.blurrdBootTheme = \"{name}\";")
+}
+
 /// The shell colour of `theme`; `system_dark` tells what "System" follows.
 fn shell_color(theme: Theme, system_dark: bool) -> Color {
     match theme {
@@ -254,8 +267,9 @@ fn shell_color(theme: Theme, system_dark: bool) -> Color {
 }
 
 /// Creates the main window of `tauri.conf.json` (`create: false` there)
-/// with the background of `theme`. "System" starts dark and switches as
-/// soon as the window reports the Windows theme.
+/// with the background of `theme`. For "System" the window is created
+/// hidden, given the background of the Windows theme it reports and only
+/// then shown, so a light Windows never sees a dark frame.
 fn create_main_window(app: &AppHandle, theme: Theme) -> tauri::Result<()> {
     let Some(config) = app
         .config()
@@ -267,12 +281,16 @@ fn create_main_window(app: &AppHandle, theme: Theme) -> tauri::Result<()> {
     else {
         return Err(tauri::Error::WindowNotFound);
     };
+    let follows_system = theme == Theme::System;
     let window = WebviewWindowBuilder::from_config(app, &config)?
         .background_color(shell_color(theme, true))
+        .initialization_script(boot_theme_script(theme))
+        .visible(!follows_system)
         .build()?;
-    if theme == Theme::System {
+    if follows_system {
         let system_dark = window.theme().map_or(true, |os| os == tauri::Theme::Dark);
         window.set_background_color(Some(shell_color(theme, system_dark)))?;
+        window.show()?;
     }
     Ok(())
 }
@@ -343,8 +361,8 @@ mod tests {
     use blurrd_core::Theme;
 
     use super::{
-        DARK_SHELL, LIGHT_SHELL, configured_origin, file_arguments, shell_color, stored_theme,
-        window_origin,
+        DARK_SHELL, LIGHT_SHELL, boot_theme_script, configured_origin, file_arguments, shell_color,
+        stored_theme, window_origin,
     };
 
     fn strings(items: &[&str]) -> Vec<String> {
@@ -414,6 +432,16 @@ mod tests {
             stored_theme(Some(&serde_json::json!({ "theme": "System" }))),
             Theme::System
         );
+    }
+
+    #[test]
+    fn the_boot_script_names_the_stored_theme() {
+        assert_eq!(
+            boot_theme_script(Theme::Light),
+            r#"window.blurrdBootTheme = "Light";"#
+        );
+        assert!(boot_theme_script(Theme::System).contains("\"System\""));
+        assert!(boot_theme_script(Theme::Dark).contains("\"Dark\""));
     }
 
     #[test]

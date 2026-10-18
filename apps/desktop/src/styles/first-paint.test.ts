@@ -59,6 +59,13 @@ describe("first paint", () => {
     expect(bootJs).toContain('localStorage.getItem("blurrd.appearance")');
   });
 
+  it("prefers the window's theme from the Rust side over the cache", () => {
+    expect(rust).toContain("window.blurrdBootTheme = ");
+    expect(bootJs.indexOf("window.blurrdBootTheme")).toBeLessThan(
+      bootJs.indexOf("localStorage.getItem"),
+    );
+  });
+
   it("serves the loading screen's logos from public/ (dev and release)", () => {
     const logos = [...html.matchAll(/<img [^>]*src="([^"]+)"/g)].map((match) => match[1] ?? "");
     expect(logos).toEqual(["/brand/blurrd-icon-light.svg", "/brand/blurrd-icon.svg"]);

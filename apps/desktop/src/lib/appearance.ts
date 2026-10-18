@@ -87,14 +87,20 @@ export function applyAppearance(
 /**
  * The appearance cached for the first paint, read synchronously before the
  * settings file has loaded so the window does not flash the wrong theme.
+ * The theme the Rust side read from the settings file for the window
+ * (`window.blurrdBootTheme`, see `public/boot.js`) wins over the cached
+ * one, so the page and the window background agree.
  */
 export function cachedAppearance(): Appearance {
+  const boot = (window as { blurrdBootTheme?: unknown }).blurrdBootTheme;
+  const withBootTheme = (appearance: Appearance): Appearance =>
+    isTheme(boot) ? { ...appearance, theme: boot } : appearance;
   try {
     const text = localStorage.getItem(CACHE_KEY);
-    return text === null ? DEFAULT_APPEARANCE : parseAppearance(JSON.parse(text));
+    return withBootTheme(text === null ? DEFAULT_APPEARANCE : parseAppearance(JSON.parse(text)));
   } catch {
     // Missing, blocked or corrupt cache: the settings file still loads.
-    return DEFAULT_APPEARANCE;
+    return withBootTheme(DEFAULT_APPEARANCE);
   }
 }
 

@@ -331,9 +331,12 @@ stored choice wins). No start flashes white: the Rust side creates the
 window (`create: false` in `tauri.conf.json`) with the window shell colour
 of the stored theme as its and the WebView's background, and
 `public/boot.css` and `public/boot.js` paint the cached theme and the
-brand mark as a loading screen before the app's bundle has loaded; a copy
-of the appearance in local storage applies it before the settings file
-has loaded. index.html has no inline `<style>` or `<script>`: Tauri would
+brand mark as a loading screen before the app's bundle has loaded. The
+window hands its theme to the page (`window.blurrdBootTheme`, an
+initialization script), so the first paint matches the window even when
+the copy of the appearance in local storage is stale; the copy is used
+outside the app (dev server, mock). A "System" window stays hidden until
+it has the colour of the Windows theme. index.html has no inline `<style>` or `<script>`: Tauri would
 add a nonce to the CSP, which disables the `'unsafe-inline'` that React's
 style attributes need (`src/styles/first-paint.test.ts` keeps the colours
 and this in sync). A settings file of another schema major is read but
