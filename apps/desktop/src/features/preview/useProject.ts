@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import type { AppError } from "@/bindings/AppError";
 import type { ExactSettings } from "@/bindings/ExactSettings";
@@ -13,6 +13,7 @@ import { FrameClock } from "@/lib/frames";
 import { IntervalIndex } from "@/lib/interval-index";
 import { pathKey } from "@/lib/media";
 import { settingsOf, useJobSettingsStore } from "@/store/job-settings";
+import { useQueueStore } from "@/store/queue";
 
 import { useProjectEdits } from "@/features/editing/useProjectEdits";
 
@@ -58,6 +59,15 @@ export function useProject(path: string): ProjectState {
     enabled: id !== undefined,
   });
   const overrides = useProjectEdits(path, id, tracks.data);
+  // A file whose analysis is in the cache (an earlier session, the CLI)
+  // is ready to export: the queue says so instead of "Queued".
+  const analyzed = project.data?.analyzed === true;
+  useEffect(() => {
+    if (!analyzed) return;
+    const queue = useQueueStore.getState();
+    const item = queue.items.find((candidate) => candidate.id === pathKey(path));
+    if (item?.status.kind === "queued") queue.setStatus(item.id, { kind: "ready", boxes: null });
+  }, [analyzed, path]);
   const settings = useJobSettingsStore((state) => settingsOf(state, pathKey(path)));
   const { blur } = settings;
   const regions = settings.regions.enabled;
