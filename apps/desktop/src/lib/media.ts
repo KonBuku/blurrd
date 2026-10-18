@@ -30,6 +30,16 @@ export function baseName(path: string): string {
   return index === -1 ? trimmed : trimmed.slice(index + 1);
 }
 
+/** The folder part of a Windows or POSIX path (without the last separator). */
+export function dirName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const index = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
+  if (index === -1) return "";
+  const folder = trimmed.slice(0, index);
+  // Keep the separator of a drive root ("C:\").
+  return /^[a-z]:$/i.test(folder) ? trimmed.slice(0, index + 1) : folder;
+}
+
 /**
  * Whether `path` looks like a file (its name has an extension). Used only
  * for wording while a dropped path is read; the backend decides what the

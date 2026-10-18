@@ -6,7 +6,7 @@ import { useDebounced } from "@/hooks/useDebounced";
 import { getOutputPreview } from "@/ipc/commands";
 import { toAppError } from "@/ipc/errors";
 import { templateProblem } from "@/lib/export-options";
-import { baseName, formatBytes, formatDuration } from "@/lib/media";
+import { baseName, dirName, formatBytes, formatDuration } from "@/lib/media";
 
 import { InspectorRow, InspectorSection } from "./parts";
 
@@ -59,6 +59,25 @@ export function OutputEstimate({ project, settings }: OutputEstimateProps) {
               preview.data
                 ? `About ${formatBytes(preview.data.est_size)} · ${durationText(preview.data.est_seconds)}`
                 : "Estimating…"
+            }
+          />
+          <InspectorRow
+            label="Folder"
+            description={
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span
+                  data-testid="output-folder"
+                  className="block font-mono break-all text-foreground"
+                  title={preview.data ? dirName(preview.data.path) : undefined}
+                >
+                  {preview.data ? dirName(preview.data.path) : "…"}
+                </span>
+                <span>
+                  {typeof settings.output.folder === "string"
+                    ? "Next to the recording."
+                    : "The chosen export folder."}
+                </span>
+              </span>
             }
           />
         </div>
