@@ -83,7 +83,8 @@ export function ReportDialog({ open, onOpenChange, item, project, report }: Repo
           tabIndex={0}
           className="flex min-h-0 flex-col gap-5 overflow-y-auto pr-1"
         >
-          <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-card-border bg-border sm:grid-cols-6">
+          {/* shrink-0: the clipped grid would otherwise collapse in the scrolling column. */}
+          <dl className="grid shrink-0 grid-cols-3 gap-px overflow-hidden rounded-xl border border-card-border bg-border sm:grid-cols-6">
             <Stat label="Frames checked" value={report.frames_checked} />
             <Stat label="Open" value={summary.open} />
             <Stat label="Fixed" value={summary.fixed} />

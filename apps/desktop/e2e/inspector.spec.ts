@@ -191,6 +191,24 @@ test.describe("inspector", () => {
     expect(output).toBe("D:\\Recordings\\match_ascent_01_blurrd.mp4");
   });
 
+  // A report longer than the dialog scrolls; the stat tiles keep their
+  // height instead of collapsing to a line (seen with real reports).
+  test("report: the stat tiles keep their height when the report scrolls", async ({ page }) => {
+    // Shorter than any window, so the mock report overflows the dialog.
+    await page.setViewportSize({ width: 1180, height: 480 });
+    const panel = inspector(page);
+    await panel.getByRole("tab", { name: "Verify" }).click();
+    await panel.getByRole("button", { name: "Open full report" }).click();
+    const dialog = page.getByRole("dialog", { name: /Verification report/ });
+    const tiles = dialog.locator("dl").first();
+    await expect(tiles).toContainText("Frames checked");
+    const scroller = dialog.locator('[tabindex="0"]').first();
+    const overflow = await scroller.evaluate((node) => node.scrollHeight - node.clientHeight);
+    expect(overflow).toBeGreaterThan(0);
+    const box = await tiles.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThan(40);
+  });
+
   for (const theme of ["light", "dark"] as const) {
     test(`verify tab and report have no axe violations (${theme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
