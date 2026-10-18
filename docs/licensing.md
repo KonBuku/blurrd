@@ -125,6 +125,11 @@ DirectML, which is not, is covered by the linking permission in
   **DirectML** under the Microsoft redistributable licence.
 - **OCR models and dictionary** (PP-OCR, Apache-2.0) are bundled with a
   record of how they were converted.
+- **Microsoft Visual C++ runtime** (`vcruntime140*.dll`, `msvcp140*.dll`),
+  which the FFmpeg and ONNX Runtime DLLs and the CLI need, is installed
+  next to `blurrd.exe` as Distributable Code of Visual Studio 2022. It is
+  the runtime of the compiler, a System Library in the sense of
+  GPL-3.0 section 1.
 
 ## Trademarks
 

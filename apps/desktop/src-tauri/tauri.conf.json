@@ -1,11 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "blurrd",
+  "mainBinaryName": "blurrd",
   "identifier": "io.github.konbuku.blurrd",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "cargo xtask stage-bundle && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -39,6 +40,9 @@
     "copyright": "Copyright 2026 Konrad (KonBuku)",
     "category": "Video",
     "shortDescription": "Blur player names in gameplay recordings",
+    "resources": {
+      "../../../target/installer-files/": ""
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -51,7 +55,8 @@
         "type": "embedBootstrapper"
       },
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "installer-hooks.nsh"
       }
     }
   }

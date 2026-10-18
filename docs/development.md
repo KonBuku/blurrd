@@ -207,7 +207,7 @@ repository root:
 
 ```sh
 pnpm dev              # stage the FFmpeg DLLs, start Vite and open the app with hot reload
-pnpm build            # release build of the app and its NSIS installer
+pnpm build            # release build of the app and its NSIS installer (see Installer)
 pnpm typecheck        # tsc --noEmit (TypeScript 7)
 pnpm test             # Vitest unit tests (happy-dom)
 ```
@@ -216,7 +216,7 @@ pnpm test             # Vitest unit tests (happy-dom)
 FFmpeg build once with `cargo xtask fetch-ffmpeg`. Inside `apps/desktop`,
 `pnpm dev` and `pnpm build` start or build only the frontend (Vite on
 port 1420), and `pnpm tauri <command>` runs the Tauri CLI. The installer is
-written to `target/release/bundle/nsis/`.
+written to `target/release/bundle/nsis/` (see [Installer](#installer)).
 
 `pnpm dev:mock` (inside `apps/desktop`) serves the frontend for a plain
 browser: an in-memory mock backend (`src/ipc/mock`) answers the IPC calls
@@ -258,6 +258,72 @@ also print to stdout) and remembers the window size and position. Starting
 it a second time focuses the running window and hands the files on the
 second command line to it (event `second-instance`), which adds them to
 the queue.
+
+### Installer
+
+`pnpm build` (or `pnpm tauri build` inside `apps/desktop`) builds the
+release app and its NSIS installer,
+`target/release/bundle/nsis/blurrd_<version>_x64-setup.exe` (unsigned,
+see the README). It needs the pinned FFmpeg, ONNX Runtime and OCR models
+(`cargo xtask fetch-ffmpeg`, `fetch-ort`, `fetch-models`) and Visual
+Studio with the C++ tools. Before it compiles, Tauri runs
+`cargo xtask stage-bundle` (`beforeBuildCommand`), which collects
+everything the installer puts next to `blurrd.exe` into
+`target/installer-files/` (bundled by `bundle.resources` in
+`tauri.conf.json`):
+
+| Files                                                                      | Why                                                                                                                                                          |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `avcodec-*.dll`, `avformat-*.dll`, `avutil-*.dll`, `swresample-*.dll`      | the FFmpeg libraries blurrd links                                                                                                                            |
+| `dav1d.dll`, `libvpl.dll`, `z.dll`                                         | the DLLs of the same FFmpeg build that those import (read from their import tables; nothing else of the build ships, not `swscale` or `ffprobe`)             |
+| `onnxruntime.dll`, `DirectML.dll`                                          | OCR (`third_party/ort`)                                                                                                                                      |
+| `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`, `msvcp140_1.dll` | the Visual C++ runtime those DLLs import, copied from the newest Visual Studio (found with `vswhere`), so blurrd needs no Visual C++ Redistributable         |
+| `models\`                                                                  | the bundled OCR models of `models.toml`, checked against their pinned size and SHA-256                                                                       |
+| `LICENSE`, `NOTICE`, `THIRD-PARTY-NOTICES.md`, `licenses\`                 | the notices, the licence files of FFmpeg, ONNX Runtime and DirectML, FFmpeg's `BUILDINFO.txt` and `SOURCE.txt` (where its corresponding source is published) |
+
+`stage-bundle` then runs `cargo xtask check-bundle`: every DLL that a
+staged file imports must be staged too or be part of Windows (the Visual
+C++ runtime does not count as part of Windows). CI runs it once more on
+the built app (`cargo xtask check-bundle --exe target/release/blurrd.exe`)
+and checks the FFmpeg DLLs with `cargo xtask check-ffmpeg`: the configure
+line each library embeds (what `ffprobe -buildconf` prints) must have no
+`--enable-gpl`, `--enable-nonfree`, `--enable-version3` or
+`--enable-libopenh264` and every component `build.ps1` requires, and each
+library must report the LGPL 2.1 or later.
+
+The cargo binary of the app is `blurrd-app.exe`; Tauri renames it to
+`blurrd.exe` (`mainBinaryName`) after the build, which replaces the CLI's
+`target/release/blurrd.exe`. Any `cargo build` or `cargo run` of the CLI
+puts the CLI back.
+
+At startup the app and the CLI restrict where Windows looks for DLLs
+that are loaded at run time (ONNX Runtime, DirectML, drivers) to the
+folder of the executable and System32 (`SetDefaultDllDirectories`), so a
+DLL of the same name in the current directory or on `PATH` is never
+loaded. The FFmpeg DLLs are linked at load time, and Windows takes them
+from the executable's folder first.
+
+The installer installs for the current user, without administrator
+rights, into `%LOCALAPPDATA%\Programs\blurrd`: Tauri's per-user default,
+`%LOCALAPPDATA%\blurrd`, is blurrd's cache folder, so
+`src-tauri/installer-hooks.nsh` moves the default (and any install into
+that folder) to `Programs`. It adds a Start menu shortcut and an entry in
+Settings › Apps. The usual NSIS options work:
+
+```powershell
+.\blurrd_0.1.0_x64-setup.exe /S                          # silent install
+.\blurrd_0.1.0_x64-setup.exe /S /D=C:\Tools\blurrd       # another folder (/D last, no quotes)
+& "$env:LOCALAPPDATA\Programs\blurrd\uninstall.exe" /S   # silent uninstall
+```
+
+Uninstalling removes the program folder, the shortcut, the uninstall
+entry and the install location the installer recorded under
+`HKCU\Software\KonBuku\blurrd`. Settings, logs and cached projects stay
+unless "Delete the application data" is ticked in the uninstaller, which
+then also removes `%LOCALAPPDATA%\blurrd`; a silent uninstall keeps them.
+
+The 0.1.0 installer is 42.4 MiB (44.4 MB); installed, blurrd takes about
+96 MB.
 
 ### Engine commands
 
@@ -780,14 +846,14 @@ GitHub Actions runs `.github/workflows/ci.yml` on every push to `main`, on
 every pull request and on manual dispatch. All jobs must pass before a
 change is merged; the installer job runs only after a merge.
 
-| Job                     | Runner  | Checks                                                                                                                                                                                                                                                                 |
-| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`                  | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typography check, typos, gitleaks over the full history                                                                                                                                   |
-| `frontend`              | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, blur reference frames (`cargo run -p blurrd-blur --example reference_frames`), Playwright end-to-end tests in Chromium against the mock backend with FFmpeg-encoded fixture videos (report uploaded on failure) |
-| `screenshots (windows)` | Windows | Playwright screenshot comparison of the component gallery, the window shell and the floating layers in both themes (report uploaded on failure)                                                                                                                        |
-| `rust (windows)`        | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests                   |
-| `deny`                  | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                                             |
-| `bundle (windows)`      | Windows | pushes to `main` and manual runs only, after `frontend`, `screenshots (windows)` and `rust (windows)`: third-party notices freshness (`pnpm notices:check`), `pnpm build` (release app + NSIS installer), uploaded as the `blurrd-windows-<sha>` artifact for 14 days  |
+| Job                     | Runner  | Checks                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`                  | Ubuntu  | rustfmt, bindings and schema freshness, oxfmt, oxlint (warnings are errors), typography check, typos, gitleaks over the full history                                                                                                                                                                                                                                                                                                                      |
+| `frontend`              | Ubuntu  | `pnpm typecheck` (TypeScript 7), Vitest, `vite build`, blur reference frames (`cargo run -p blurrd-blur --example reference_frames`), Playwright end-to-end tests in Chromium against the mock backend with FFmpeg-encoded fixture videos (report uploaded on failure)                                                                                                                                                                                    |
+| `screenshots (windows)` | Windows | Playwright screenshot comparison of the component gallery, the window shell and the floating layers in both themes (report uploaded on failure)                                                                                                                                                                                                                                                                                                           |
+| `rust (windows)`        | Windows | pinned FFmpeg (`cargo xtask fetch-ffmpeg`, cached), fixture fonts (`cargo xtask fetch-fonts`, cached), ONNX Runtime and OCR models (`cargo xtask fetch-ort`, `cargo xtask fetch-models`, cached), clippy with `-D warnings`, cargo-nextest, doctests                                                                                                                                                                                                      |
+| `deny`                  | Ubuntu  | `cargo deny --locked check advisories bans licenses sources` (`deny.toml`)                                                                                                                                                                                                                                                                                                                                                                                |
+| `bundle (windows)`      | Windows | pushes to `main` and manual runs only, after `frontend`, `screenshots (windows)` and `rust (windows)`: pinned FFmpeg with its build configuration check (`cargo xtask check-ffmpeg`), ONNX Runtime and the OCR models, third-party notices freshness (`pnpm notices:check`), `pnpm build` (release app + NSIS installer with the bundled files), `cargo xtask check-bundle` on the built app, uploaded as the `blurrd-windows-<sha>` artifact for 14 days |
 
 `.github/workflows/ffmpeg.yml` builds the FFmpeg libraries blurrd ships
 (see [FFmpeg](#ffmpeg)). Two more workflows guard pull requests and the
@@ -972,7 +1038,10 @@ The script merges, in this order:
    `cargo xtask fetch-ffmpeg` first; a library without a reviewed licence in
    the script's `FFMPEG_PORTS` stops it), ONNX Runtime and DirectML
    (`third_party/ort.toml` and the licence files `cargo xtask fetch-ort`
-   copies) and the bundled OCR models (`models.toml`), once those pins exist.
+   copies), the Visual C++ runtime DLLs the installer ships next to them
+   (`scripts/license-texts/msvc-runtime.txt`; `cargo xtask stage-bundle`
+   stops when that notice does not name a DLL it ships) and the bundled
+   OCR models (`models.toml`).
 2. The Rust crates of `blurrd-app` and `blurrd-cli` from cargo-about
    (`about.toml`: Windows x64 target, no build or dev dependencies, no
    workspace crates; `--fail` when a licence cannot be identified). The

@@ -5,9 +5,10 @@
 //! Tasks are added by the milestones that need them: generating TypeScript
 //! bindings and JSON schemas, fetching the pinned FFmpeg and ONNX Runtime
 //! builds and staging their DLLs, fetching the OCR models and the fonts of
-//! the synthetic test fixtures and checking the local test recordings so
-//! far.
+//! the synthetic test fixtures, checking the local test recordings, and
+//! collecting and checking what the installer and the CLI archive ship.
 
+mod bundle;
 mod codegen;
 mod ffmpeg;
 mod fonts;
@@ -74,6 +75,30 @@ enum Task {
     /// other scripts for the synthetic HUD fixtures) into
     /// `tests/fonts/noto/`, verifying each SHA-256.
     FetchFonts,
+    /// Collect what the installer ships next to `blurrd.exe` into
+    /// `target/installer-files/`: the FFmpeg DLLs blurrd needs, ONNX
+    /// Runtime and DirectML, the Visual C++ runtime DLLs they import, the
+    /// bundled OCR models and the licences.
+    ///
+    /// `tauri build` runs it before building (`beforeBuildCommand`) and
+    /// bundles the folder. Needs the pinned FFmpeg, ONNX Runtime and
+    /// models (`fetch-ffmpeg`, `fetch-ort`, `fetch-models`) and Visual
+    /// Studio with the C++ tools.
+    StageBundle,
+    /// Check that the staged files, and the given executables, import only
+    /// DLLs that are staged or part of Windows.
+    CheckBundle {
+        /// An executable that ships with the staged files (repeatable).
+        #[arg(long, value_name = "EXE")]
+        exe: Vec<PathBuf>,
+    },
+    /// Check that the FFmpeg DLLs are the LGPL build: their embedded
+    /// configure line has no gpl, nonfree, version3 or openh264 flag and
+    /// every required component, and each reports the LGPL 2.1 or later.
+    CheckFfmpeg,
+    /// Zip the CLI (`target/dist-cli/blurrd.exe`) with the staged files
+    /// into `target/dist/blurrd-cli_<version>_x64.zip`.
+    PackageCli,
     /// Work with the local test recordings listed in
     /// `tests/media/manifest.toml`.
     Media {
@@ -112,6 +137,10 @@ fn main() -> ExitCode {
         }),
         Task::FetchModels { candidates } => models::fetch(&root, candidates),
         Task::FetchFonts => fonts::fetch(&root),
+        Task::StageBundle => bundle::stage(&root),
+        Task::CheckBundle { exe } => bundle::check(&root, &exe),
+        Task::CheckFfmpeg => bundle::check_ffmpeg(&root),
+        Task::PackageCli => bundle::package_cli(&root).map(drop),
         Task::Media {
             action: MediaAction::Verify { media },
         } => media::verify(media),

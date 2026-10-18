@@ -242,7 +242,8 @@ shows is decoded on request and kept in memory only for the session.
 Settings › Logs & privacy shows these folders, opens the log folder and
 clears the cached analyses of recordings that are not open. Delete
 `%LOCALAPPDATA%\blurrd` to remove every cached project; blurrd creates
-the folder again when needed.
+the folder again when needed. Uninstalling keeps these folders unless you
+tick "Delete the application data", which removes all of them.
 Names that you keep readable on purpose are stored in your settings and
 presets; an exported preset file leaves them out unless you tick the box.
 The report dialog builds leak crops from the recording when you open it

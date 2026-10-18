@@ -164,6 +164,26 @@ pub(crate) fn fetch(root: &Path, candidates: bool) -> Result<()> {
     Ok(())
 }
 
+/// The bundled model files in `models/`, after checking each against its
+/// pinned size and SHA-256.
+pub(crate) fn bundled_files(root: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let pin_path = root.join("models.toml");
+    let text =
+        fs::read_to_string(&pin_path).with_context(|| format!("reading {}", pin_path.display()))?;
+    let pins = Pins::parse(&text).with_context(|| format!("parsing {}", pin_path.display()))?;
+    let mut files = Vec::new();
+    for pin in pins.model.iter().filter(|m| m.bundled) {
+        let path = root.join("models").join(&pin.file);
+        ensure!(
+            is_current(&path, pin)?,
+            "{} is missing or differs from models.toml (run `cargo xtask fetch-models`)",
+            path.display()
+        );
+        files.push(path);
+    }
+    Ok(files)
+}
+
 /// Whether `path` exists with the pinned size and checksum.
 fn is_current(path: &Path, pin: &ModelPin) -> Result<bool> {
     match fs::metadata(path) {

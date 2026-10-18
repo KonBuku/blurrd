@@ -1,0 +1,11 @@
+Microsoft Visual C++ Runtime
+
+vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll and msvcp140_1.dll
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+These files are Distributable Code of Microsoft Visual Studio 2022
+(https://aka.ms/vs/17/redist.txt) and are redistributed with blurrd under
+the Microsoft Software License Terms for Microsoft Visual Studio 2022
+(https://visualstudio.microsoft.com/license-terms/). They are installed
+next to blurrd.exe so that the bundled FFmpeg and ONNX Runtime libraries
+run without the Microsoft Visual C++ Redistributable.

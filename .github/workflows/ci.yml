@@ -286,17 +286,34 @@ jobs:
         with:
           tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
       - name: ffmpeg
-        # The licence files of the shipped FFmpeg build, for the notices.
+        # The shipped FFmpeg DLLs and their licence files.
         run: cargo xtask fetch-ffmpeg
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: ffmpeg build configuration
+        # The configure line and licence each FFmpeg DLL embeds: LGPL 2.1
+        # or later, no gpl/nonfree/version3/openh264, every required
+        # component.
+        run: cargo xtask check-ffmpeg
+      - name: onnx runtime and ocr models
+        # Bundled by the installer, pinned by SHA-256 in
+        # third_party/ort.toml and models.toml.
+        run: |
+          cargo xtask fetch-ort
+          cargo xtask fetch-models
       - name: third-party notices freshness
         # THIRD-PARTY-NOTICES.md and the app's licences view must list
         # exactly what this installer ships.
         run: pnpm notices:check
       - name: tauri build
         # Release build of the app and its NSIS installer (unsigned, D3).
+        # `cargo xtask stage-bundle` (beforeBuildCommand) collects the
+        # DLLs, models and licences the installer ships and checks that
+        # every DLL they import is shipped or part of Windows.
         run: pnpm build
+      - name: installed files import only shipped or system dlls
+        # tauri build renames the app to blurrd.exe (mainBinaryName).
+        run: cargo xtask check-bundle --exe target/release/blurrd.exe
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: blurrd-windows-${{ github.sha }}

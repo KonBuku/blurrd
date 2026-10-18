@@ -26,3 +26,6 @@ ist = "ist"
 yoru = "yoru"
 # The HTMLMediaElement event fired after a seek (apps/desktop preview).
 seeked = "seeked"
+# NSIS string copy instruction (apps/desktop/src-tauri/installer-hooks.nsh).
+[default.extend-identifiers]
+StrCpy = "StrCpy"

@@ -90,6 +90,7 @@ wide = "=1.7.1"
 windows = { version = "=0.62.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dxgi",
+  "Win32_System_LibraryLoader",
   "Win32_System_Power",
   "Win32_System_Threading",
 ] }

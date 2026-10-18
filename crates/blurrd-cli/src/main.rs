@@ -84,6 +84,8 @@ impl Outcome {
 }
 
 fn main() -> ExitCode {
+    // Before anything loads a DLL at run time (ONNX Runtime, drivers).
+    blurrd_video::sys::dll::restrict_dll_search();
     let cli = Cli::parse();
     init_logging(&cli.global);
     match &cli.command {

@@ -75,7 +75,7 @@ impl Pin {
 
     /// The public download URL of an asset (works once the repository is
     /// public, and for anyone with access through the API path otherwise).
-    fn public_url(&self, asset: &str) -> String {
+    pub(crate) fn public_url(&self, asset: &str) -> String {
         format!(
             "https://github.com/{}/releases/download/{}/{asset}",
             self.repository, self.tag
@@ -346,6 +346,20 @@ fn unpack(archive: &Path, dest: &Path) -> Result<()> {
     fs::rename(&staging, dest)
         .with_context(|| format!("moving {} to {}", staging.display(), dest.display()))?;
     Ok(())
+}
+
+/// The installed FFmpeg folder (`third_party/ffmpeg/`), after checking
+/// that it was unpacked from the archive pinned in `third_party/ffmpeg.toml`.
+pub(crate) fn installed(root: &Path) -> Result<PathBuf> {
+    let pin = Pin::load(root)?;
+    let dir = root.join("third_party").join("ffmpeg");
+    let stamp = fs::read_to_string(dir.join(STAMP)).unwrap_or_default();
+    ensure!(
+        stamp.trim() == pin.sha256,
+        "{} is not the pinned FFmpeg build (run `cargo xtask fetch-ffmpeg` first)",
+        dir.display()
+    );
+    Ok(dir)
 }
 
 /// Cargo's target directory (`CARGO_TARGET_DIR` or `<root>/target`).

@@ -6,6 +6,8 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    // Before anything loads a DLL at run time (ONNX Runtime, drivers).
+    blurrd_video::sys::dll::restrict_dll_search();
     match blurrd_app::run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

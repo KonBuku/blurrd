@@ -164,8 +164,13 @@ verified or not verified and explains the limits of the OCR check.
 
 Download `blurrd_<version>_x64-setup.exe` from the
 [releases page](https://github.com/KonBuku/blurrd/releases) and run it.
-It installs blurrd for the current user and needs no administrator
-rights.
+It installs blurrd for the current user into
+`%LOCALAPPDATA%\Programs\blurrd` and needs no administrator rights. The
+installer contains everything blurrd needs (FFmpeg, ONNX Runtime with
+DirectML, the OCR models and the Visual C++ runtime), so nothing else is
+downloaded or installed. Uninstall blurrd in Settings › Apps; your
+settings and cached projects stay unless you tick "Delete the application
+data".
 
 The installer is not code-signed, so Windows SmartScreen shows "Windows
 protected your PC" when you start it. Check the file as described below,
