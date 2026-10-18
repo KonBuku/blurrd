@@ -145,6 +145,8 @@ export function ProcessingCard({ itemId }: ProcessingCardProps) {
           {line !== "" && (
             <p
               data-testid="processing-figures"
+              // The warnings themselves, on hover.
+              title={progress.warnings.length > 0 ? progress.warnings.join("\n") : undefined}
               className="truncate font-mono text-ui-sm text-foreground-subtle tabular-nums"
             >
               {line}
