@@ -648,8 +648,9 @@ regions from the shown file's settings.
 - **Blur:** "All regions" and one switch per region in the HUD and
   Screens groups (world-space name tags are out of scope and say so), the
   manual boxes of the shown file, the style, and the box fit (Tight or
-  Safe) with Re-analyze. An export analyses again when Safe is chosen for
-  a file analysed with Tight boxes.
+  Safe) with Re-analyze. Like the regions, the box fit applies to the
+  next analysis; an "Export N files" run analyses a file with Tight boxes
+  again when Safe is chosen.
 - **Export:** codec (disabled with the reason when this PC has no
   working encoder for it, read from `get_capabilities`), encoder, rate
   control, preset, 10-bit, NVENC sessions, audio, container, metadata,

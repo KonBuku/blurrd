@@ -17,8 +17,8 @@ export interface DetectionSectionProps {
 
 /**
  * Inspector › Blur › Advanced detection: the box fit. It takes effect
- * with the next analysis (an export analyses again when Safe is chosen
- * for a file analysed with Tight boxes).
+ * with the next analysis: Re-analyze, or an "Export N files" run, which
+ * analyses a file with Tight boxes again when Safe is chosen.
  */
 export function DetectionSection({ mode, onModeChange }: DetectionSectionProps) {
   const modeId = useId();
