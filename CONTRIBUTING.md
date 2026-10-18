@@ -102,7 +102,20 @@ blurrd follows [Conventional Commits 1.0.0](https://www.conventionalcommits.org/
 
 ## Licensing
 
-blurrd is licensed under the [GNU General Public License 3.0 only](LICENSE).
-By contributing, you agree that your contributions are licensed under the
-same license (GPL-3.0-only). There is no contributor license agreement and no
-sign-off requirement.
+blurrd is licensed under [GPL-3.0-only](LICENSE) with the additional terms
+in [NOTICE](NOTICE), and is also offered under a separate commercial
+licence (see [docs/licensing.md](docs/licensing.md)). Dual licensing only
+works if the author may license every part of blurrd both ways, so by
+submitting a contribution you confirm that you have the right to submit
+it and you agree that:
+
+- your contribution is licensed under GPL-3.0-only with the same
+  additional terms; and
+- you grant the author, KonBuku, a perpetual, worldwide, non-exclusive,
+  royalty-free and irrevocable licence to use, change, sublicense and
+  distribute your contribution as part of blurrd under other terms,
+  including commercial licences.
+
+You keep the copyright in your contribution. There is no separate
+contributor licence agreement to sign and no sign-off requirement;
+opening a pull request means you agree to these terms.

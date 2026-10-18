@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { installMockBackend, type MockBackend } from "@/ipc/mock";
 
-import { AboutContent, BUILD, TRADEMARKS } from "./AboutContent";
+import { AboutContent, BUILD, ATTRIBUTION, COPYRIGHT, TRADEMARKS } from "./AboutContent";
 import { AboutDialogs } from "./AboutDialogs";
 import {
   filterComponents,
@@ -81,13 +81,19 @@ describe("about", () => {
     useAboutStore.setState({ open: null });
   });
 
-  it("shows version, commit, FFmpeg and the trademark statements", async () => {
+  it("shows version, commit, FFmpeg, the licence and the trademark statements", async () => {
     render(withQuery(<AboutContent heading={<h2>blurrd</h2>} />));
     expect(BUILD.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(screen.getByText(BUILD.version)).toBeTruthy();
     expect(screen.getByText(BUILD.commit)).toBeTruthy();
     expect(screen.getByText(TRADEMARKS)).toBeTruthy();
     expect(TRADEMARKS).toContain("not affiliated with");
+    expect(screen.getByText(/GNU GPL 3\.0 only/)).toBeTruthy();
+    expect(screen.getByText(/commercial licences available/)).toBeTruthy();
+    // NOTICE, additional term 1: the attribution must stay in About.
+    expect(screen.getByText(`${ATTRIBUTION}. ${COPYRIGHT}.`)).toBeTruthy();
+    expect(ATTRIBUTION).toBe("blurrd by KonBuku (https://github.com/KonBuku/blurrd)");
+    expect(COPYRIGHT).toBe("Copyright 2026 Konrad (KonBuku)");
     expect(await screen.findByText(backend.capabilities.ffmpeg_version)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: /Source code/ }));
     fireEvent.click(screen.getByRole("button", { name: /GitHub/ }));

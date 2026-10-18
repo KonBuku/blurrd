@@ -204,10 +204,14 @@ as described in the [security policy](SECURITY.md).
 
 ## License
 
-blurrd is licensed under the [GNU General Public License 3.0 only](LICENSE). See
-[NOTICE](NOTICE) for attribution and
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the components it
-ships.
+blurrd is open source under the [GNU GPL 3.0 only](LICENSE), with
+additional terms in [NOTICE](NOTICE): every copy and modified version
+must keep the credit "blurrd by KonBuku
+(https://github.com/KonBuku/blurrd)" in its About screen and
+documentation, and modified versions must be marked as changed. A
+commercial licence is available for closed-source use; see
+[docs/licensing.md](docs/licensing.md). Third-party components keep their
+own licences ([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
 ## Legal
 

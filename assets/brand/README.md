@@ -71,7 +71,8 @@ diff.
 ## Licence
 
 The logo is original work made from geometric primitives and is part of
-blurrd, licensed under GPL-3.0-only. The wordmark and the
+blurrd, licensed under the GNU General Public License 3.0 only (see
+[LICENSE](../../LICENSE)). The wordmark and the
 social-preview text are set in [Geist](https://github.com/vercel/geist-font)
 by Vercel, licensed under the SIL Open Font License 1.1, and are embedded as
 outlines only. No font files are part of this repository.

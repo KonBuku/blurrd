@@ -35,8 +35,8 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "publisher": "The blurrd Authors",
-    "copyright": "Copyright 2026 The blurrd Authors",
+    "publisher": "KonBuku",
+    "copyright": "Copyright 2026 Konrad (KonBuku)",
     "category": "Video",
     "shortDescription": "Blur player names in gameplay recordings",
     "icon": [

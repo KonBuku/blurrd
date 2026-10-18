@@ -40,6 +40,13 @@ allow = [
   "Unicode-3.0",
   "Zlib",
 ]
+# blurrd's own crates (publish = false) are GPL-3.0-only with additional
+# terms (LICENSE, NOTICE). The allow list is for dependencies and stays
+# permissive, so the private workspace crates are skipped instead, as in
+# about.toml.
+[licenses.private]
+ignore = true
+
 # ffmpeg-the-third and ffmpeg-sys-the-third (the FFmpeg bindings) are
 # WTFPL, a permissive public-domain-like license. Allowed for those two
 # crates only.

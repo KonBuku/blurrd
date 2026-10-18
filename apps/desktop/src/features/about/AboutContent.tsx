@@ -17,6 +17,16 @@ export const BUILD = {
   commit: import.meta.env.APP_COMMIT,
 } as const;
 
+/**
+ * The author attribution that the additional terms of the licence (NOTICE,
+ * GPL-3.0 section 7(b)) require in the About screen of every copy and
+ * modified version.
+ */
+export const ATTRIBUTION = "blurrd by KonBuku (https://github.com/KonBuku/blurrd)";
+
+/** The copyright line of LICENSE and NOTICE. */
+export const COPYRIGHT = "Copyright 2026 Konrad (KonBuku)";
+
 /** Trademark statements (plan 14: README "Legal" and About). */
 export const TRADEMARKS =
   "blurrd is an independent open-source project and is not affiliated with, endorsed, sponsored or approved by Riot Games, Inc. VALORANT and Riot Games are trademarks or registered trademarks of Riot Games, Inc. NVIDIA and NVENC are trademarks of NVIDIA Corporation. FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.";
@@ -38,8 +48,8 @@ export interface AboutContentProps {
 /**
  * What the About dialog and Settings › About show (design 8.6): the mark,
  * version and commit, the FFmpeg the app runs with and where its source
- * is, the project links, the open-source licences and the trademark
- * statements.
+ * is, the licence and the author attribution, the project links, the
+ * third-party licences and the trademark statements.
  */
 export function AboutContent({ heading }: AboutContentProps) {
   const ffmpegVersion = useCapabilities().data?.ffmpeg_version ?? null;
@@ -70,7 +80,9 @@ export function AboutContent({ heading }: AboutContentProps) {
           <span className="font-mono">{ffmpegVersion ?? "Not detected yet"}</span>
           {source !== null && <SourceLink url={source}>Source code</SourceLink>}
         </Fact>
-        <Fact term="Licence">GNU GPL 3.0 only</Fact>
+        <Fact term="Licence">
+          GNU GPL 3.0 only, with additional terms; commercial licences available
+        </Fact>
       </dl>
       <p className="text-ui-base">
         Built with Tauri, React, FFmpeg and ONNX Runtime, and many other open-source projects.
@@ -95,6 +107,9 @@ export function AboutContent({ heading }: AboutContentProps) {
           Report an issue
         </Button>
       </div>
+      <p className="text-ui-sm text-foreground-subtle">
+        {ATTRIBUTION}. {COPYRIGHT}.
+      </p>
       <p className="text-ui-sm text-foreground-subtle">{TRADEMARKS}</p>
     </div>
   );

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright 2026 The blurrd Authors
+// Copyright 2026 Konrad (KonBuku)
 //
 // Rasterise SVG files to PNG with resvg (no system fonts: every brand SVG
 // contains outlined text only).

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright 2026 The blurrd Authors
+# Copyright 2026 Konrad (KonBuku)
 """Generate the blurrd brand assets (logo concept "Redact").
 
 The mark is a name-tag pill: its left part is crisp and its right part melts

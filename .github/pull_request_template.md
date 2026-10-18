@@ -15,3 +15,4 @@ here) and before/after numbers for performance changes. -->
 - [ ] Documentation (README, `docs/`) is updated if behaviour, flags or settings changed
 - [ ] No footage, frames, screenshots or OCR output with readable player names is added
 - [ ] Adapted third-party code carries a header and the notices are updated
+- [ ] I agree to the [licensing terms for contributions](https://github.com/KonBuku/blurrd/blob/main/CONTRIBUTING.md#licensing): GPL-3.0-only, and the author may also license my contribution commercially
