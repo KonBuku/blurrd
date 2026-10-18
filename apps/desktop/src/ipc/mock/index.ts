@@ -138,6 +138,21 @@ interface StoreArgs {
   readonly value?: unknown;
 }
 
+/** A file of the project cache of `path` (`%LOCALAPPDATA%\blurrd\projects`). */
+function cacheFile(path: string, name: string): string {
+  return [
+    "C:",
+    "Users",
+    "me",
+    "AppData",
+    "Local",
+    "blurrd",
+    "projects",
+    projectId(path),
+    name,
+  ].join("\\");
+}
+
 /** Pointer position reported in mocked drag events, in physical pixels. */
 const DRAG_POSITION = { x: 720, y: 450 };
 
@@ -330,7 +345,8 @@ export function installMockBackend(): MockBackend {
           return {
             frames,
             elapsed_ms: backend.jobs.durationMs,
-            output: null,
+            // Like the engine: an analysis names the project file it wrote.
+            output: cacheFile(path, "project.json"),
             verify: verify.enabled ? (report?.summary.state ?? null) : null,
             warnings: 0,
           };
@@ -358,11 +374,13 @@ export function installMockBackend(): MockBackend {
           .unverified.reduce((sum, [f0, f1]) => sum + Math.max(f1 - f0 + 1, 1), 0);
         return backend.jobs.start("ReverifyRanges", frames, onEvent, () => {
           backend.projects.reverify(path);
+          const { report } = backend.projects.state(path);
           return {
             frames,
             elapsed_ms: backend.jobs.durationMs,
-            output: null,
-            verify: backend.projects.state(path).report?.summary.state ?? null,
+            // Like the engine: a re-verification names the report it wrote.
+            output: cacheFile(path, `verify-${report?.plan_revision ?? 0}.json`),
+            verify: report?.summary.state ?? null,
             warnings: 0,
           };
         });

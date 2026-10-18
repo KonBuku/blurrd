@@ -188,17 +188,20 @@ export class MockProjects {
 
   /**
    * A finished analysis of the `enabled` regions: the fixture's tracks of
-   * those regions replace the stored ones, the edits are kept and rebound,
-   * the revision moves on. With `verified`, the whole video counts as
-   * verified again (no unverified ranges) and the report is renewed.
+   * those regions replace the stored ones, the edits are kept and rebound.
+   * Like the engine, a re-analysis moves the revision on, while the first
+   * analysis of a video keeps revision 0 (the empty project's). With
+   * `verified`, the whole video counts as verified again (no unverified
+   * ranges) and the report is renewed.
    */
   analyze(path: string, enabled: ReadonlySet<Region>, verified: boolean): void {
     const state = this.state(path);
     const tracks = mockTracks(path, true).tracks.filter((track) => enabled.has(track.region));
+    const revision = state.analyzed ? state.set.revision + 1 : state.set.revision;
     state.analyzed = true;
     state.set = {
       ...state.set,
-      revision: state.set.revision + 1,
+      revision,
       tracks,
       bindings: overrideBindings(tracks, state.set.overrides),
     };

@@ -229,7 +229,9 @@ function fail(item: JobItem, operation: Operation, message: string, detail: stri
 function succeed(item: JobItem, spec: OperationSpec, summary: JobSummary): void {
   const status = spec.finished(summary);
   const { text, review } = resultOf(status);
-  const { output } = summary;
+  // Only an export writes a file for the user; an analysis names the
+  // project file in the cache, which is not offered.
+  const output = spec.operation === "export" ? summary.output : null;
   end(
     item,
     { name: item.name, operation: spec.operation, result: "done", text, review, output },
@@ -342,11 +344,17 @@ async function runOperation(item: JobItem, spec: OperationSpec): Promise<void> {
   await startJob(item, spec, 0);
 }
 
-/** Reads a project, its tracks, its report and its output preview again after a job. */
+/**
+ * Reads a project, its tracks, its timeline density, its report and its
+ * output preview again after a job. The density is keyed by the project
+ * revision, which the first analysis of a video leaves at 0 (the empty
+ * project before it has revision 0 too), so it is read again explicitly.
+ */
 function reloadProject(queryClient: QueryClient, path: string, projectId: string): void {
   void Promise.all([
     queryClient.invalidateQueries({ queryKey: ["project", path] }),
     queryClient.invalidateQueries({ queryKey: ["tracks", projectId] }),
+    queryClient.invalidateQueries({ queryKey: ["density", projectId] }),
     queryClient.invalidateQueries({ queryKey: ["verify-report", projectId] }),
     queryClient.invalidateQueries({ queryKey: ["output-preview", projectId] }),
   ]);

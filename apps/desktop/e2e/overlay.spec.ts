@@ -193,6 +193,28 @@ test.describe("timeline", () => {
     await expect(timeline.locator("img")).toHaveCount(0);
   });
 
+  // The first analysis of a video keeps revision 0, the empty project's:
+  // the lanes must not stay the empty ones read before it.
+  test("shows the lanes of a first analysis", async ({ page }) => {
+    await openRecording(page, "D:\\Recordings\\fresh_haven_02.mp4");
+    const timeline = page.getByTestId("timeline");
+    await expect(timeline.locator("path[data-region]")).toHaveCount(0);
+    await page
+      .getByRole("region", { name: "Inspector" })
+      .getByRole("button", { name: "Analyze", exact: true })
+      .click();
+    await expect(page.getByRole("listbox", { name: "Recordings" })).toContainText("Ready", {
+      timeout: 15_000,
+    });
+    await expect(timeline.locator('path[data-region="KillFeed"]')).toHaveCount(1);
+    // The engine names its project file as the analysis output; the toast
+    // offers no cache file to the user.
+    const toast = page.locator("[data-sonner-toast]").filter({ hasText: "fresh_haven_02.mp4" });
+    await expect(toast).toContainText("fresh_haven_02.mp4 analyzed");
+    await expect(toast).not.toContainText("project.json");
+    await expect(toast.getByRole("button", { name: "Show in folder" })).toHaveCount(0);
+  });
+
   test("scrubs to the clicked frame and jumps to a leak", async ({ page }) => {
     const slider = page.getByRole("slider", { name: "Timeline" });
     const box = await slider.boundingBox();
