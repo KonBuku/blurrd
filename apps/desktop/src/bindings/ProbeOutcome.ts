@@ -15,7 +15,12 @@ path: string,
 /**
  * Its media facts (boxed: much larger than an error).
  */
-media: MediaInfo, } | { 
+media: MediaInfo, 
+/**
+ * Whether the cache already holds an analysis of this file (an
+ * earlier session or the CLI), so it is ready to export.
+ */
+analyzed: boolean, } | { 
 /**
  * The file.
  */

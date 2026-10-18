@@ -197,7 +197,9 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
         path: outcome.path,
         name: baseName(outcome.path),
         media: outcome.media,
-        status: { kind: "queued" },
+        // A file whose analysis is in the cache (an earlier session, the
+        // CLI) is ready to export.
+        status: outcome.analyzed ? { kind: "ready", boxes: null } : { kind: "queued" },
         output: null,
         added: order.get(id) ?? addedCounter,
       });
@@ -248,9 +250,13 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
       items: state.items.map((item) => {
         const outcome = byId.get(item.id);
         if (!outcome) return item;
-        return isProbed(outcome)
-          ? { ...item, media: outcome.media }
-          : { ...item, status: unreadable(outcome.error) };
+        if (!isProbed(outcome)) return { ...item, status: unreadable(outcome.error) };
+        const ready = outcome.analyzed && item.status.kind === "queued";
+        return {
+          ...item,
+          media: outcome.media,
+          status: ready ? { kind: "ready" as const, boxes: null } : item.status,
+        };
       }),
     }));
   },

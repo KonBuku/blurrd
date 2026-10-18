@@ -45,7 +45,7 @@ function queue(...paths: string[]): QueueItem[] {
   const pending = useQueueStore.getState().addPending(paths);
   useQueueStore.getState().resolvePending(
     pending,
-    pending.map((path) => ({ path, media: fakeMedia(path) })),
+    pending.map((path) => ({ path, media: fakeMedia(path), analyzed: false })),
   );
   return useQueueStore.getState().items.filter((queued) => paths.includes(queued.path));
 }

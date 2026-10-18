@@ -7,7 +7,7 @@ import { useQueueStore, visibleItems } from "./queue";
 
 /** A successful probe outcome. */
 function ok(path: string): ProbeOutcome {
-  return { path, media: fakeMedia(path) };
+  return { path, media: fakeMedia(path), analyzed: false };
 }
 
 /** Adds files as if the probe accepted all of them. */
@@ -28,6 +28,24 @@ function names() {
 describe("queue store", () => {
   beforeEach(() => {
     useQueueStore.setState(useQueueStore.getInitialState());
+  });
+
+  it("marks files whose analysis is in the cache as ready, also when restored", () => {
+    const queue = useQueueStore.getState();
+    const pending = queue.addPending(["D:\\cached.mp4", "D:\\new.mp4"]);
+    useQueueStore
+      .getState()
+      .resolvePending(pending, [{ ...ok("D:\\cached.mp4"), analyzed: true }, ok("D:\\new.mp4")]);
+    expect(useQueueStore.getState().items.map((item) => item.status.kind)).toEqual([
+      "ready",
+      "queued",
+    ]);
+
+    useQueueStore
+      .getState()
+      .restore([{ path: "D:\\old.mp4", status: { kind: "queued" }, output: null }]);
+    useQueueStore.getState().refresh([{ ...ok("D:\\old.mp4"), analyzed: true }]);
+    expect(useQueueStore.getState().items[0]?.status).toEqual({ kind: "ready", boxes: null });
   });
 
   it("shows new paths as being read, then replaces them with the probed videos", () => {

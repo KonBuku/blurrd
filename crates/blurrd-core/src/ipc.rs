@@ -36,6 +36,9 @@ pub enum ProbeOutcome {
         path: PathBuf,
         /// Its media facts (boxed: much larger than an error).
         media: Box<MediaInfo>,
+        /// Whether the cache already holds an analysis of this file (an
+        /// earlier session or the CLI), so it is ready to export.
+        analyzed: bool,
     },
     /// A file that is not a usable video.
     Error {

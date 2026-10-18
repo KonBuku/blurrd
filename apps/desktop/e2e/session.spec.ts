@@ -27,7 +27,8 @@ async function openFresh(page: Page) {
 
 /** Every status that can be saved, one recording each. */
 const SAVED = [
-  { path: "D:\\Recordings\\a_queued.mp4", status: { kind: "queued" }, output: null },
+  // "fresh": the mock has no cached analysis of it, so it stays queued.
+  { path: "D:\\Recordings\\a_queued_fresh.mp4", status: { kind: "queued" }, output: null },
   { path: "D:\\Recordings\\b_ready.mp4", status: { kind: "ready", boxes: 1284 }, output: null },
   {
     path: "D:\\Recordings\\c_done.mp4",
@@ -64,7 +65,8 @@ test.describe("session restore", () => {
     await page.reload();
     await expect(options(page)).toHaveCount(3);
     await expect(options(page).first()).toContainText("match_ascent_01.mp4");
-    await expect(options(page).first()).toContainText("Queued");
+    // The backend reports its cached analysis when the file is read again.
+    await expect(options(page).first()).toContainText("Ready");
     // The restored files are read again: their media facts come back.
     await expect(options(page).first()).toContainText(/\d+p[\d.]+ · \d+:\d\d · /);
   });

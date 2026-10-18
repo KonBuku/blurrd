@@ -287,7 +287,11 @@ export function installMockBackend(): MockBackend {
       case "probe_media":
         await delay(backend.probeDelayMs);
         if (backend.probeError) throw backend.probeError;
-        return probeMedia((args as { paths: string[] }).paths, backend.folders);
+        return probeMedia(
+          (args as { paths: string[] }).paths,
+          backend.folders,
+          (path) => backend.projects.state(path).analyzed,
+        );
       case "plugin:dialog|open": {
         // A single-choice dialog answers with one path, like the real plugin.
         const { options } = args as { options?: { multiple?: boolean } };

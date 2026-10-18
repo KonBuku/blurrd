@@ -101,6 +101,16 @@ test.describe("import", () => {
     await expect(page.getByText("thumbnail.png — not a supported video")).toBeVisible();
     await expect(page.getByLabel("3 recordings")).toBeVisible();
     await expect(options(page).first()).toContainText("match_ascent_01.mp4");
+    // Its analysis is in the (mocked) cache, so it is ready at once.
+    await expect(options(page).first()).toContainText("Ready");
+  });
+
+  test("lists a file without a cached analysis as queued", async ({ page }) => {
+    await page.evaluate(() => {
+      if (window.blurrdMock) window.blurrdMock.dialogResult = ["D:\\Recordings\\new_fresh.mp4"];
+    });
+    await page.getByRole("button", { name: "Add recordings" }).click();
+    await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText("Queued");
   });
 

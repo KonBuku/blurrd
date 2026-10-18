@@ -55,7 +55,7 @@ function queueAll() {
   const pending = useQueueStore.getState().addPending(PATHS);
   useQueueStore.getState().resolvePending(
     pending,
-    pending.map((path) => ({ path, media: fakeMedia(path) })),
+    pending.map((path) => ({ path, media: fakeMedia(path), analyzed: false })),
   );
   useQueueStore.getState().selectAll();
 }

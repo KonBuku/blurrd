@@ -67,6 +67,19 @@ impl Projects {
         Ok(project)
     }
 
+    /// Whether the cache holds an analysis of the video at `source` (an
+    /// absolute, checked path) that matches the file as it is now. Reads
+    /// the fingerprint and the cached project file; any error reads as
+    /// "not analysed".
+    pub(crate) fn is_analysed(&self, source: &Path) -> bool {
+        let Ok(fingerprint) = cache::fingerprint(source) else {
+            return false;
+        };
+        ProjectDir::new(&self.cache, &fingerprint)
+            .read_project()
+            .is_some_and(|project| cache::same_file(&project.media.fingerprint, &fingerprint))
+    }
+
     /// The open project `id`.
     ///
     /// # Errors
@@ -480,7 +493,19 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::verified_name;
+    use super::{Projects, verified_name};
+
+    #[test]
+    fn files_without_a_cached_analysis_are_not_analysed() {
+        let dir = std::env::temp_dir().join(format!("blurrd-analysed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("clip.mp4");
+        std::fs::write(&clip, vec![7_u8; 4096]).unwrap();
+        let projects = Projects::new(dir.join("cache"));
+        assert!(!projects.is_analysed(&clip));
+        assert!(!projects.is_analysed(&dir.join("missing.mp4")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn unverified_outputs_lose_their_suffix() {

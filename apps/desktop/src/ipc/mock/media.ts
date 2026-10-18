@@ -90,7 +90,7 @@ export function fakeMedia(path: string): MediaInfo {
 }
 
 /** Probes one file the way the real backend would answer. */
-function probeFile(path: string): ProbeOutcome {
+function probeFile(path: string, analyzed: (path: string) => boolean): ProbeOutcome {
   const name = baseName(path).toLowerCase();
   if (name.includes("missing"))
     return { path, error: error("NotFound", "The file does not exist.") };
@@ -100,24 +100,26 @@ function probeFile(path: string): ProbeOutcome {
   if (name.includes("corrupt")) {
     return { path, error: error("Decode", "The video stream could not be decoded.") };
   }
-  return { path, media: fakeMedia(path) };
+  return { path, media: fakeMedia(path), analyzed: analyzed(path) };
 }
 
 /**
  * `probe_media`: folders expand to the videos registered for them (other
- * files skipped, sorted by name); paths named directly get one outcome.
+ * files skipped, sorted by name); paths named directly get one outcome,
+ * with whether the cache holds an analysis of the file (`analyzed`).
  */
 export function probeMedia(
   paths: readonly string[],
   folders: ReadonlyMap<string, readonly string[]>,
+  analyzed: (path: string) => boolean = () => false,
 ): ProbeOutcome[] {
   const byKey = new Map([...folders].map(([folder, files]) => [pathKey(folder), files]));
   return paths.flatMap((path) => {
     const files = byKey.get(pathKey(path));
-    if (files === undefined) return [probeFile(path)];
+    if (files === undefined) return [probeFile(path, analyzed)];
     return files
       .filter((file) => VIDEO.test(file))
       .toSorted((a, b) => a.localeCompare(b))
-      .map(probeFile);
+      .map((file) => probeFile(file, analyzed));
   });
 }

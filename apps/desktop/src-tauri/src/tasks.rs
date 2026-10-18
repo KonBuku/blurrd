@@ -336,6 +336,9 @@ pub(crate) mod tests {
             Some((_, JobEvent::Finished { .. }))
         ));
 
+        // The probe of the queue now reports the file as analysed.
+        assert!(Projects::new(work.join("cache")).is_analysed(project.source()));
+
         // The project reads back from the cache; an edit saves at the
         // current revision only.
         let tracks = project.tracks();

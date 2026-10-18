@@ -60,7 +60,9 @@ describe("session", () => {
     const pending = queue.addPending(["D:\\a.mp4", "D:\\b.mp4"]);
     useQueueStore
       .getState()
-      .resolvePending(pending.slice(0, 1), [{ path: "D:\\a.mp4", media: fakeMedia("D:\\a.mp4") }]);
+      .resolvePending(pending.slice(0, 1), [
+        { path: "D:\\a.mp4", media: fakeMedia("D:\\a.mp4"), analyzed: false },
+      ]);
 
     expect(backend.sessionFile()).toBeNull();
     await vi.advanceTimersByTimeAsync(SAVE_DELAY_MS);
@@ -80,7 +82,10 @@ describe("session", () => {
     useQueueStore.getState().addPending(["D:\\x.mp4"]);
     useQueueStore
       .getState()
-      .resolvePending(["D:\\x.mp4"], [{ path: "D:\\x.mp4", media: fakeMedia("D:\\x.mp4") }]);
+      .resolvePending(
+        ["D:\\x.mp4"],
+        [{ path: "D:\\x.mp4", media: fakeMedia("D:\\x.mp4"), analyzed: false }],
+      );
     await vi.advanceTimersByTimeAsync(SAVE_DELAY_MS);
     expect(backend.sessionFile()).toEqual([]);
 
@@ -94,7 +99,9 @@ describe("session", () => {
     const pending = useQueueStore.getState().addPending(["D:\\a.mp4"]);
     useQueueStore
       .getState()
-      .resolvePending(pending, [{ path: "D:\\a.mp4", media: fakeMedia("D:\\a.mp4") }]);
+      .resolvePending(pending, [
+        { path: "D:\\a.mp4", media: fakeMedia("D:\\a.mp4"), analyzed: false },
+      ]);
     const [item] = useQueueStore.getState().items;
     if (!item) throw new Error("no item");
     const running = {

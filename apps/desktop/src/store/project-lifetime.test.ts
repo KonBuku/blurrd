@@ -11,7 +11,7 @@ import { closeRemovedProjects } from "./project-lifetime";
 import { useQueueStore } from "./queue";
 
 function ok(path: string): ProbeOutcome {
-  return { path, media: fakeMedia(path) };
+  return { path, media: fakeMedia(path), analyzed: false };
 }
 
 function add(...paths: string[]) {

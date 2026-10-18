@@ -37,7 +37,7 @@ function queue(...paths: string[]) {
   const pending = store.addPending(paths);
   useQueueStore.getState().resolvePending(
     pending,
-    pending.map((path) => ({ path, media: fakeMedia(path) })),
+    pending.map((path) => ({ path, media: fakeMedia(path), analyzed: false })),
   );
   useQueueStore.getState().select(pathKey(paths[0] ?? ""), "replace");
 }

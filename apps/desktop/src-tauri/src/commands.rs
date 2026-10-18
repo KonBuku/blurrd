@@ -78,7 +78,7 @@ fn probe_path(state: &AppState, path: &Path) -> Vec<ProbeOutcome> {
     };
     if checked.is_dir() {
         return match videos_in(&checked) {
-            Ok(files) => files.iter().map(|file| probe_file(file)).collect(),
+            Ok(files) => files.iter().map(|file| probe_file(state, file)).collect(),
             Err(e) => vec![error(path, e)],
         };
     }
@@ -91,14 +91,16 @@ fn probe_path(state: &AppState, path: &Path) -> Vec<ProbeOutcome> {
             ),
         )];
     }
-    vec![probe_file(&checked)]
+    vec![probe_file(state, &checked)]
 }
 
-fn probe_file(path: &Path) -> ProbeOutcome {
+/// The outcome of one video file, with whether its analysis is cached.
+fn probe_file(state: &AppState, path: &Path) -> ProbeOutcome {
     match blurrd_video::probe(path) {
         Ok(media) => ProbeOutcome::Media {
             path: path.to_path_buf(),
             media: Box::new(media),
+            analyzed: state.projects.is_analysed(path),
         },
         Err(e) => ProbeOutcome::Error {
             path: path.to_path_buf(),

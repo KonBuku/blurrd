@@ -13,7 +13,7 @@ function add(...paths: string[]) {
   const pending = useQueueStore.getState().addPending(paths);
   useQueueStore.getState().resolvePending(
     pending,
-    pending.map((path) => ({ path, media: fakeMedia(path) })),
+    pending.map((path) => ({ path, media: fakeMedia(path), analyzed: false })),
   );
 }
 
