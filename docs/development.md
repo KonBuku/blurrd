@@ -424,7 +424,8 @@ While the queue is empty, the preview frame shows the empty state
 (`src/features/empty/EmptyState.tsx`): Browse files and Add folder, the
 accepted formats, the GPU card and a dismissible getting-started checklist
 (dismissal kept in local storage). The GPU card
-(`src/features/gpu/GpuStatusCard.tsx`, also in the queue footer) renders
+(`src/features/gpu/GpuStatusCard.tsx`, also in the queue footer, where
+it is a button that opens Settings › Processing) renders
 at once with "Probing GPU…" and polls `get_capabilities` through TanStack
 Query (`src/lib/query.ts`) every 500 ms until the backend reports the
 probe as ready; `src/lib/gpu.ts` turns the capabilities into the GPU, CPU

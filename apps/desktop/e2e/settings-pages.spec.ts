@@ -85,6 +85,23 @@ test.describe("settings pages", () => {
     }
   });
 
+  test("the queue's GPU card opens the processing settings, by mouse and keyboard", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 680 });
+    await openFresh(page);
+    const card = page.getByRole("button", { name: /NVENC/ });
+    await expect(card).toHaveAccessibleDescription("Opens the processing settings.");
+    await card.click();
+    await expect(page.getByRole("heading", { level: 1, name: "Processing" })).toBeVisible();
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await openPage(page, "Appearance");
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await card.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { level: 1, name: "Processing" })).toBeVisible();
+  });
+
   test("open every page at its top", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 680 });
     await openFresh(page);

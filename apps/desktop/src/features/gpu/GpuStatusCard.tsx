@@ -1,9 +1,11 @@
 import { Loader } from "lucide-react";
+import { useId } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { summarizeGpu, type GpuHealth, type GpuSummary } from "@/lib/gpu";
 import { cn } from "@/lib/utils";
+import { useUiStore } from "@/store/ui";
 
 import { useCapabilities } from "./useCapabilities";
 
@@ -37,7 +39,10 @@ const PROBING = "Probing GPU…";
 const NO_BREAK_SPACE = String.fromCodePoint(0xa0);
 
 export interface GpuStatusCardProps {
-  /** `compact` for the queue footer, `full` for the empty state. */
+  /**
+   * `compact` for the queue footer (a button that opens Settings ›
+   * Processing), `full` for the empty state.
+   */
   readonly variant: "compact" | "full";
   readonly className?: string;
 }
@@ -65,41 +70,55 @@ function CompactCard({ state, className }: { state: CardState; className?: strin
           .map((part) => part.replaceAll(" ", NO_BREAK_SPACE))
           .join(" · ")
       : "";
+  const openSettings = useUiStore((ui) => ui.openSettings);
+  const hintId = useId();
   return (
     // Not a landmark: the empty state's card is the "GPU status" region.
-    <div
+    // The whole card opens the processing settings, where the GPU is chosen.
+    <button
+      type="button"
       aria-busy={state.kind === "probing"}
-      aria-live="polite"
-      className={cn("flex flex-col gap-0.5 rounded-lg px-2.5 py-2", className)}
+      aria-describedby={hintId}
+      onClick={() => openSettings("processing")}
+      className={cn(
+        "flex cursor-default flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover",
+        className,
+      )}
     >
-      {state.kind === "probing" && (
-        <p className="flex items-center gap-2 text-ui-sm text-foreground-subtle">
-          <Loader aria-hidden className="size-3 animate-spin motion-reduce:animate-none" />
-          {PROBING}
-        </p>
-      )}
-      {state.kind === "error" && (
-        <p className="text-ui-sm text-foreground-subtle">{state.message}</p>
-      )}
-      {state.kind === "ready" && (
-        <>
-          {/* Long names and chip lists wrap (at the separators) instead of
+      {/* Hidden: read as the description only, not as part of the name. */}
+      <span id={hintId} hidden>
+        Opens the processing settings.
+      </span>
+      <span aria-live="polite" className="flex flex-col gap-0.5">
+        {state.kind === "probing" && (
+          <span className="flex items-center gap-2 text-ui-sm text-foreground-subtle">
+            <Loader aria-hidden className="size-3 animate-spin motion-reduce:animate-none" />
+            {PROBING}
+          </span>
+        )}
+        {state.kind === "error" && (
+          <span className="text-ui-sm text-foreground-subtle">{state.message}</span>
+        )}
+        {state.kind === "ready" && (
+          <>
+            {/* Long names and chip lists wrap (at the separators) instead of
               running out of the narrow sidebar or hiding behind an ellipsis. */}
-          <p className="flex min-w-0 items-start gap-2 text-ui-sm font-medium">
-            <span className="flex h-[1lh] shrink-0 items-center">
-              <Dot health={state.summary.health} />
+            <span className="flex min-w-0 items-start gap-2 text-ui-sm font-medium">
+              <span className="flex h-[1lh] shrink-0 items-center">
+                <Dot health={state.summary.health} />
+              </span>
+              <span className="min-w-0 [overflow-wrap:anywhere]">{state.summary.device}</span>
             </span>
-            <span className="min-w-0 [overflow-wrap:anywhere]">{state.summary.device}</span>
-          </p>
-          <p
-            data-testid="gpu-details"
-            className="min-w-0 pl-4 text-ui-xs text-foreground-subtle [overflow-wrap:anywhere]"
-          >
-            {details}
-          </p>
-        </>
-      )}
-    </div>
+            <span
+              data-testid="gpu-details"
+              className="min-w-0 pl-4 text-ui-xs text-foreground-subtle [overflow-wrap:anywhere]"
+            >
+              {details}
+            </span>
+          </>
+        )}
+      </span>
+    </button>
   );
 }
 
