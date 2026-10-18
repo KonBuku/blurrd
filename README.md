@@ -75,14 +75,20 @@ from the `blurrd` command-line tool.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
-  <img src="docs/assets/how-it-works-light.svg" alt="How blurrd works: the recording is decoded once on the GPU (NVDEC), the HUD layout is calibrated, per-region detectors track the names in the kill feed, round banner, voice chat, text chat, scoreboard, death recap, spectating widget and match-end screens, blur boxes are applied and the video is encoded on the GPU (NVENC); OCR verification reads the blurred frames and adds fix boxes for missed names, up to three rounds, before the verified export. Everything runs on your PC." width="100%">
+  <img src="docs/assets/how-it-works-light.svg" alt="Architecture of blurrd: the desktop app and the command-line tool call the same engine jobs. Analysis: the recording is probed for its timestamps, the HUD layout is calibrated from sampled keyframes, one decoder (NVDEC, D3D11VA or software) feeds two to six crop and detect workers and one thread of temporal models, which produce the box tracks. Verification: up to four OCR readers (PP-OCRv5 on ONNX Runtime with DirectML or the CPU) read the protected zones during the analysis; afterwards uncovered name parts are blurred in memory and read again, and readable names get fix boxes, up to three rounds. Render: a second decoder trails the analysis, the boxes are blurred on the YUV planes, NVENC, AMF, Quick Sync or Media Foundation encode, the muxer copies audio and subtitles, and the export is named after the source once verified or marked UNVERIFIED. About 10 seconds for a 60-second 1080p60 recording on an RTX 4080 SUPER. Everything runs on your PC." width="100%">
 </picture>
 
-One decoder feeds every detector. A frame's boxes are final at most 240
-frames after it was decoded, and the render waits for them instead of
-ever blurring a frame early. The OCR models run through ONNX Runtime on
-DirectML or on the CPU. [docs/architecture.md](docs/architecture.md)
-describes the crates, the jobs and the data on disk.
+The analysis decodes the recording once and shares the frames between
+the detector workers and the OCR readers. A frame's boxes are final at
+most 240 frames after it was decoded; in a streamed run, the render
+decoder trails the analysis and waits for them instead of ever blurring
+a frame early. After the last frame, the verification blurs every name
+part the boxes do not fully cover in memory with the export's own blur
+and reads it again; a name that stays readable gets fix boxes, and a
+streamed export encodes only the GOPs with changed boxes again. The OCR
+models run through ONNX Runtime on DirectML or on the CPU.
+[docs/architecture.md](docs/architecture.md) describes the crates, the
+jobs and the data on disk.
 
 ## Speed
 

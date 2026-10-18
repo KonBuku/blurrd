@@ -2,13 +2,20 @@
 # Copyright 2026 Konrad (KonBuku)
 """Generate the "How it works" diagram (docs/assets/how-it-works-*.svg).
 
+The diagram follows docs/architecture.md: the front ends, the analysis
+pass, the verification with its fix loop and the render pass, each stage
+labelled with the crate that implements it, plus the speed measured for
+the README.
+
 The text is converted to outlines with HarfBuzz and fontTools, so the SVG
-looks the same in every browser and needs no font. Inter (OFL-1.1) is
-read from a local folder and never committed:
+looks the same in every browser and needs no font. Inter and JetBrains
+Mono (both OFL-1.1) are read from a local folder and never committed:
 
-    python docs/assets/src/how_it_works.py --fonts <folder with Inter-*.ttf>
+    python docs/assets/src/how_it_works.py --fonts <folder with the TTFs>
 
-Requires: fonttools, uharfbuzz. The output is deterministic.
+The folder needs Inter-{Regular,Medium,SemiBold}.ttf and
+JetBrainsMono-{Regular,Medium}.ttf. Requires: fonttools, uharfbuzz. The
+output is deterministic.
 """
 
 from __future__ import annotations
@@ -23,96 +30,60 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
 OUT = Path(__file__).resolve().parents[1]
-W, H = 1600, 768
+W = 1800
 
 THEMES = {
     "dark": dict(
-        bg="#121212",
-        bg2="#1b1b1b",
-        card="#202020",
-        card_hi="#262626",
-        border="rgba(255,255,255,0.10)",
-        border_hi="rgba(255,255,255,0.16)",
+        card="#1c1c1e",
+        border="rgba(255,255,255,0.12)",
         fg="#ededed",
-        sub="rgba(212,212,212,0.70)",
-        faint="rgba(212,212,212,0.42)",
-        line="rgba(255,255,255,0.28)",
-        accent="#4099ff",
-        accent_fg="#80beff",
-        accent_bg="#0b2440",
-        ok="#80beff",
-        ok_bg="#0b2440",
-        chip="rgba(255,255,255,0.04)",
+        sub="rgba(222,222,222,0.72)",
+        faint="rgba(222,222,222,0.56)",
+        line="rgba(222,222,222,0.50)",
+        accent="#4c9dff",
+        accent_fg="#8cc2ff",
+        chip="rgba(255,255,255,0.05)",
+        rule="rgba(255,255,255,0.12)",
     ),
     "light": dict(
-        bg="#f6f6f7",
-        bg2="#ffffff",
         card="#ffffff",
-        card_hi="#ffffff",
-        border="rgba(13,13,13,0.10)",
-        border_hi="rgba(13,13,13,0.14)",
+        border="rgba(13,13,13,0.14)",
         fg="#1f1f1f",
-        sub="rgba(38,38,38,0.72)",
-        faint="rgba(38,38,38,0.45)",
-        line="rgba(13,13,13,0.30)",
-        accent="#0b7fff",
-        accent_fg="#0066dd",
-        accent_bg="#ebf4ff",
-        ok="#0066dd",
-        ok_bg="#ebf4ff",
-        chip="rgba(13,13,13,0.025)",
+        sub="rgba(38,38,38,0.74)",
+        faint="rgba(38,38,38,0.58)",
+        line="rgba(38,38,38,0.52)",
+        accent="#0b6fe0",
+        accent_fg="#0a5fc2",
+        chip="rgba(13,13,13,0.035)",
+        rule="rgba(13,13,13,0.12)",
     ),
 }
 
-# Lucide icons (ISC licence), 24x24 grid, drawn with stroke width 1.5.
-ICONS = {
-    "film": [
-        '<rect x="3" y="3" width="18" height="18" rx="2"/>',
-        '<path d="M7 3v18M3 7.5h4M3 12h18M3 16.5h4M17 3v18M17 7.5h4M17 16.5h4"/>',
-    ],
-    "cpu": [
-        '<rect x="4" y="4" width="16" height="16" rx="2"/>',
-        '<rect x="9" y="9" width="6" height="6" rx="1"/>',
-        '<path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/>',
-    ],
-    "scan": [
-        '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>',
-        '<rect x="7" y="7" width="10" height="10" rx="1"/>',
-        '<path d="M7 12h10M12 7v10"/>',
-    ],
-    "crosshair": [
-        '<circle cx="12" cy="12" r="10"/>',
-        '<path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/>',
-    ],
-    "blur": [
-        '<rect x="3" y="5" width="18" height="14" rx="3"/>',
-        '<path d="M7 10h4M7 14h7M14 10h3" stroke-dasharray="1.5 2"/>',
-    ],
-    "scan-text": [
-        '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>',
-        '<path d="M7 8h8M7 12h10M7 16h6"/>',
-    ],
-    "badge-check": [
-        '<path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78'
-        " 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77"
-        ' 4 4 0 0 1 0-6.76Z"/>',
-        '<path d="m9 12 2 2 4-4"/>',
-    ],
-    "shield-check": [
-        '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6'
-        "a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5"
-        ' 19 5a1 1 0 0 1 1 1z"/>',
-        '<path d="m9 12 2 2 4-4"/>',
-    ],
-    "cloud-off": [
-        '<path d="m2 2 20 20M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193'
-        'M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07"/>',
-    ],
-    "refresh": [
-        '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5'
-        'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/>',
-    ],
+# Font keys: Inter regular, medium, semibold; JetBrains Mono regular, medium.
+FONT_FILES = {
+    "r": "Inter-Regular.ttf",
+    "m": "Inter-Medium.ttf",
+    "s": "Inter-SemiBold.ttf",
+    "c": "JetBrainsMono-Regular.ttf",
+    "cm": "JetBrainsMono-Medium.ttf",
 }
+
+# Layout grid: five columns.
+X0 = 40
+CW = 293
+GAP = (W - 2 * X0 - 5 * CW) / 4
+PAD = 20
+
+TITLE = 22
+BODY = 18.5
+MONO = 15.5
+LABEL = 15
+EDGE = 14
+LEAD = 25
+
+
+def col(i: float) -> float:
+    return X0 + i * (CW + GAP)
 
 
 @dataclass
@@ -131,7 +102,7 @@ class Font:
         buf = hb.Buffer()
         buf.add_str(text)
         buf.guess_segment_properties()
-        hb.shape(self.hb_font, buf, {"kern": True, "liga": True})
+        hb.shape(self.hb_font, buf, {"kern": True, "liga": False, "calt": False})
         return buf.glyph_infos, buf.glyph_positions
 
     def width(self, text: str, size: float, tracking: float = 0.0) -> float:
@@ -162,301 +133,440 @@ class Svg:
         self.f = fonts
         self.parts: list[str] = []
         self.glyphs: dict[str, str] = {}
+        self.overflow: list[str] = []
 
     def add(self, s: str) -> None:
         self.parts.append(s)
 
-    def text(self, s, x, y, size, weight="regular", fill=None, anchor="start", tracking=0.0):
+    def width(self, s: str, size: float, font: str = "r", tracking: float = 0.0) -> float:
+        return self.f[font].width(s, size, tracking)
+
+    def check(self, s: str, w: float, max_w: float | None) -> None:
+        if max_w is not None and w > max_w + 0.5:
+            self.overflow.append(f"{s!r}: {w:.0f} > {max_w:.0f}")
+
+    def text(self, s, x, y, size, font="r", fill=None, anchor="start", tracking=0.0, max_w=None):
         """Outlined text: each glyph is defined once and placed with <use>."""
-        font = self.f[weight]
+        f = self.f[font]
+        w = f.width(s, size, tracking)
+        self.check(s, w, max_w)
         if anchor != "start":
-            w = font.width(s, size, tracking)
             x = x - (w / 2 if anchor == "middle" else w)
-        scale = size / font.upem
+        scale = size / f.upem
         uses = []
-        for name, gx, gy in font.place(s, x, y, size, tracking):
-            gid = f"{weight[0]}-{name}".replace(".", "_")
+        for name, gx, gy in f.place(s, x, y, size, tracking):
+            gid = f"{font}-{name}".replace(".", "_")
             if gid not in self.glyphs:
-                d = font.glyph_d(name)
+                d = f.glyph_d(name)
                 if not d:
                     continue
                 self.glyphs[gid] = f'<path id="{gid}" d="{d}"/>'
             uses.append(f'<use href="#{gid}" x="{gx / scale:.0f}" y="{gy / scale:.0f}"/>')
-        self.add(f'<g fill="{fill or self.t["fg"]}" transform="scale({scale:.6f})">{"".join(uses)}</g>')
+        if uses:
+            self.add(f'<g fill="{fill or self.t["fg"]}" transform="scale({scale:.6f})">{"".join(uses)}</g>')
+        return w
 
-    def icon(self, name, x, y, size, color):
-        s = size / 24
-        body = "".join(ICONS[name])
-        self.add(
-            f'<g transform="translate({x} {y}) scale({s:.4f})" fill="none" stroke="{color}" '
-            f'stroke-width="{1.5:.2f}" stroke-linecap="round" stroke-linejoin="round">{body}</g>'
-        )
+    def rich(self, s, x, y, size, fill, max_w=None):
+        """A line in which `code` spans are set in the monospace font."""
+        cx = x
+        for i, part in enumerate(s.split("`")):
+            if part:
+                mono = i % 2 == 1
+                cx += self.text(part, cx, y, size * 0.9 if mono else size, "c" if mono else "r", fill)
+        self.check(s, cx - x, max_w)
+        return cx - x
 
 
-def card(svg: Svg, x, y, w, h, *, hi=False, stroke=None):
-    t = svg.t
+def rect(svg: Svg, x, y, w, h, *, stroke=None):
     svg.add(
-        f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="18" fill="{t["card_hi"] if hi else t["card"]}" '
-        f'stroke="{stroke or (t["border_hi"] if hi else t["border"])}"/>'
+        f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="12" '
+        f'fill="{svg.t["card"]}" stroke="{stroke or svg.t["border"]}" stroke-width="1.25"/>'
     )
 
 
-def tag(svg: Svg, x, y, label):
+def chip(svg: Svg, x_right, y, label):
+    """A small monospace pill, right-aligned at `x_right`, top at `y`."""
     t = svg.t
-    w = svg.f["medium"].width(label, 12.5) + 24
+    w = svg.width(label, EDGE, "c") + 18
     svg.add(
-        f'<rect x="{x:.1f}" y="{y}" width="{w:.1f}" height="26" rx="13" fill="{t["chip"]}" stroke="{t["border"]}"/>'
+        f'<rect x="{x_right - w:.1f}" y="{y}" width="{w:.1f}" height="26" rx="13" '
+        f'fill="{t["chip"]}" stroke="{t["border"]}" stroke-width="1"/>'
     )
-    svg.text(label, x + 12, y + 17.5, 12.5, "medium", t["sub"])
+    svg.text(label, x_right - w + 9, y + 18, EDGE, "c", t["sub"])
 
 
-def step(svg: Svg, x, y, w, h, num, icon, title, lines, *, tone="accent", detail=None):
-    """A pipeline card: icon tile, step number, title and two short lines."""
+def node(svg: Svg, x, y, w, h, crate, title, lines, *, out=None, badge=None, accent=False):
+    """A stage: crate (mono), optional badge, title, body and its output."""
     t = svg.t
-    card(svg, x, y, w, h)
-    fg, bg = (t["ok"], t["ok_bg"]) if tone == "ok" else (t["accent_fg"], t["accent_bg"])
-    svg.add(f'<rect x="{x + 22}" y="{y + 22}" width="44" height="44" rx="12" fill="{bg}"/>')
-    svg.icon(icon, x + 32, y + 32, 24, fg)
-    svg.text(f"{num:02d}", x + w - 24, y + 42, 13, "medium", t["faint"], anchor="end", tracking=0.06)
-    svg.text(title, x + 22, y + 100, 19, "semibold")
+    rect(svg, x, y, w, h, stroke=t["accent"] if accent else None)
+    room = w - 2 * PAD
+    if badge:
+        room -= svg.width(badge, EDGE, "c") + 24
+        chip(svg, x + w - 14, y + 14, badge)
+    svg.text(crate, x + PAD, y + 32, MONO, "c", t["accent_fg"] if accent else t["faint"], max_w=room)
+    svg.text(title, x + PAD, y + 66, TITLE, "s", max_w=w - 2 * PAD)
     for i, line in enumerate(lines):
-        svg.text(line, x + 22, y + 128 + i * 22, 14.5, "regular", t["sub"])
-    if detail:
-        tag(svg, x + 22, y + h - 48, detail)
+        svg.rich(line, x + PAD, y + 98 + i * LEAD, BODY, t["sub"], max_w=w - 2 * PAD)
+    if out:
+        ly = y + h - 46
+        svg.add(f'<line x1="{x + 1:.1f}" y1="{ly}" x2="{x + w - 1:.1f}" y2="{ly}" stroke="{t["border"]}"/>')
+        arrow_w = svg.text("→ ", x + PAD, y + h - 17, MONO, "c", t["faint"])
+        svg.text(out, x + PAD + arrow_w, y + h - 17, MONO, "cm", t["fg"], max_w=w - 2 * PAD - arrow_w)
 
 
-def arrow(svg: Svg, d: str, end: tuple[float, float], direction: str, *, color=None, dash=False):
-    """A connector with a chevron head at `end`, pointing right, down or up."""
+def section(svg: Svg, x, y, label, note=None, *, anchor="start"):
     t = svg.t
-    c = color or t["line"]
-    da = ' stroke-dasharray="5 6"' if dash else ""
-    style = f'fill="none" stroke="{c}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"'
-    svg.add(f'<path d="{d}" {style}{da}/>')
-    x, y = end
-    k = 6
-    head = {
-        "right": f"M{x - k:.1f} {y - k:.1f}L{x:.1f} {y:.1f}L{x - k:.1f} {y + k:.1f}",
-        "down": f"M{x - k:.1f} {y - k:.1f}L{x:.1f} {y:.1f}L{x + k:.1f} {y - k:.1f}",
-        "up": f"M{x - k:.1f} {y + k:.1f}L{x:.1f} {y:.1f}L{x + k:.1f} {y + k:.1f}",
-    }[direction]
-    svg.add(f'<path d="{head}" {style}/>')
+    w = svg.width(label, LABEL, "s", 0.09)
+    total = w + (12 + svg.width(note, LABEL + 0.5) if note else 0)
+    if anchor == "end":
+        x -= total
+    svg.text(label, x, y, LABEL, "s", t["fg"], tracking=0.09)
+    if note:
+        svg.text(note, x + w + 12, y, LABEL + 0.5, "r", t["faint"])
 
 
-def build(theme_name: str, fonts: dict[str, Font]) -> str:
+def arrow(svg: Svg, pts, *, color=None, r=10):
+    """An orthogonal connector through `pts`, rounded corners, filled head."""
+    c = color or svg.t["line"]
+    (xa, ya), (xb, yb) = pts[-2], pts[-1]
+    dx, dy = (xb > xa) - (xb < xa), (yb > ya) - (yb < ya)
+    k = 9
+    body = pts[:-1] + [(xb - dx * k * 0.7, yb - dy * k * 0.7)]
+    d = f"M{body[0][0]:.1f} {body[0][1]:.1f}"
+    for i in range(1, len(body) - 1):
+        (px, py), (cx, cy), (nx, ny) = body[i - 1], body[i], body[i + 1]
+        ux, uy = (cx > px) - (cx < px), (cy > py) - (cy < py)
+        vx, vy = (nx > cx) - (nx < cx), (ny > cy) - (ny < cy)
+        d += f"L{cx - ux * r:.1f} {cy - uy * r:.1f}Q{cx:.1f} {cy:.1f} {cx + vx * r:.1f} {cy + vy * r:.1f}"
+    d += f"L{body[-1][0]:.1f} {body[-1][1]:.1f}"
+    svg.add(f'<path d="{d}" fill="none" stroke="{c}" stroke-width="1.5" stroke-linejoin="round"/>')
+    px, py = -dy, dx
+    hw = 4.5
+    bx, by = xb - dx * k, yb - dy * k
+    svg.add(
+        f'<path d="M{xb:.1f} {yb:.1f}L{bx + px * hw:.1f} {by + py * hw:.1f}'
+        f'L{bx - px * hw:.1f} {by - py * hw:.1f}Z" fill="{c}"/>'
+    )
+
+
+def edge_label(svg: Svg, x, y, s, *, anchor="middle", color=None, pill=False):
+    t = svg.t
+    w = svg.width(s, EDGE, "c")
+    x0 = x - (w / 2 if anchor == "middle" else (w if anchor == "end" else 0))
+    if pill:
+        svg.add(
+            f'<rect x="{x0 - 10:.1f}" y="{y - 16:.1f}" width="{w + 20:.1f}" height="24" rx="12" '
+            f'fill="{t["card"]}" stroke="{color or t["border"]}" stroke-width="1"/>'
+        )
+    svg.text(s, x0, y, EDGE, "c", color or t["faint"])
+
+
+def build(theme_name: str, fonts: dict[str, Font]) -> tuple[str, list[str]]:
     t = THEMES[theme_name]
     svg = Svg(t, fonts)
+    span2 = 2 * CW + GAP
 
-    # Row 1: recording -> decode -> calibration -> detectors.
-    y1, h1 = 24, 248
-    cw = 262
-    gap = 48
-    x = 64
-    step(
+    # Band 0: both front ends call the engine's jobs.
+    y0, h0 = 50, 132
+    section(svg, X0, y0 - 22, "FRONT ENDS", "both run the same jobs and report the same JobEvent stream")
+    node(
         svg,
-        x,
-        y1,
-        cw,
-        h1,
-        1,
-        "film",
-        "Your recording",
-        ["MP4, MOV or MKV, 720p to 4K,", "H.264, HEVC or AV1"],
-        detail="Read once, never changed",
+        col(0),
+        y0,
+        span2,
+        h0,
+        "apps/desktop/src-tauri (blurrd-app)",
+        "Desktop app: Tauri 2, React 19",
+        [
+            "Tauri commands with ts-rs typed payloads, `Channel<JobEvent>`;",
+            "loopback media server and `blurrd://` for previews and patches",
+        ],
     )
-    x2 = x + cw + gap
-    step(
+    node(svg, col(2), y0, CW, h0, "blurrd-engine", "Jobs", ["`analyze` `run` `render`", "`reverify_ranges` `audit`"])
+    node(
         svg,
-        x2,
-        y1,
-        cw,
-        h1,
-        2,
-        "cpu",
-        "GPU decode",
-        ["NVDEC, frames decoded once", "and shared by every worker"],
-        detail="Fallback: D3D11VA, software",
+        col(3),
+        y0,
+        span2,
+        h0,
+        "blurrd-cli",
+        "Command-line tool",
+        [
+            "`blurrd probe | analyze | render | run | audit`",
+            "`--json` prints the events the app gets on its job channel",
+        ],
     )
-    x3 = x2 + cw + gap
-    step(
+    my = y0 + 48
+    arrow(svg, [(col(0) + span2, my), (col(2), my)])
+    arrow(svg, [(col(3), my), (col(2) + CW, my)])
+
+    # Row 1: analysis, left to right.
+    y1, h1 = 244, 208
+    section(svg, X0, y1 - 22, "ANALYSIS", "Engine::analyze · bounded channels between all threads")
+    node(
         svg,
-        x3,
+        col(0),
         y1,
-        cw,
+        CW,
         h1,
-        3,
-        "scan",
-        "HUD calibration",
-        ["Finds the layout: 16:9, 4:3,", "16:10, stretched or boxed"],
-        detail="Structure, not pixel positions",
+        "input",
+        "Recording",
+        ["MP4, MOV or MKV;", "H.264, HEVC or AV1;", "720p to 4K, SDR or HDR"],
+        out="read, never changed",
     )
-    x4 = x3 + cw + gap
-    w4 = W - 64 - x4
-    card(svg, x4, y1, w4, h1)
-    svg.add(f'<rect x="{x4 + 22}" y="{y1 + 22}" width="44" height="44" rx="12" fill="{t["accent_bg"]}"/>')
-    svg.icon("crosshair", x4 + 32, y1 + 32, 24, t["accent_fg"])
-    svg.text("04", x4 + w4 - 24, y1 + 42, 13, "medium", t["faint"], anchor="end", tracking=0.06)
-    svg.text("Per-region detectors", x4 + 84, y1 + 42, 19, "semibold")
-    svg.text("Track every name from its first to its last frame", x4 + 84, y1 + 64, 14.5, "regular", t["sub"])
-    chips = [
-        ("Kill feed", t["faint"]),
-        ("Round banner", t["faint"]),
-        ("Voice chat", t["faint"]),
-        ("Text chat", t["faint"]),
-        ("Scoreboard", t["faint"]),
-        ("Death recap", t["faint"]),
-        ("Spectating", t["faint"]),
-        ("Match end", t["faint"]),
+    node(
+        svg,
+        col(1),
+        y1,
+        CW,
+        h1,
+        "blurrd-video, -detect",
+        "Probe + calibrate",
+        ["packet scan for timestamps;", "keyframe seek, 1 per 4 s;", "16:9, 4:3, 16:10, letterbox"],
+        out="PTS table, HudLayout",
+    )
+    node(
+        svg,
+        col(2),
+        y1,
+        CW,
+        h1,
+        "blurrd-video",
+        "Decode once",
+        ["NVDEC, D3D11VA, software;", "reference-counted frames", "shared by workers and OCR"],
+        out="NV12 / P010 frames",
+        badge="1 decoder",
+    )
+    node(
+        svg,
+        col(3),
+        y1,
+        CW,
+        h1,
+        "blurrd-detect",
+        "Crop + detect",
+        ["YUV crops of HUD regions", "→ RGB; detectors on pixel", "classes and morphology"],
+        out="per-frame detections",
+        badge="2–6 workers",
+    )
+    node(
+        svg,
+        col(4),
+        y1,
+        CW,
+        h1,
+        "blurrd-detect",
+        "Temporal models",
+        ["kill feed, banner, voice,", "chat, 4 screens; scene cuts;", "boxes final in ≤ 240 frames"],
+        out="box tracks",
+        badge="1 thread",
+    )
+    ay = y1 + 48
+    for i in range(4):
+        arrow(svg, [(col(i) + CW, ay), (col(i + 1), ay)])
+
+    # Row 2: project cache, OCR pass 0, verification, box tracks.
+    y2, h2 = 544, 184
+    section(svg, col(3), y2 - 22, "VERIFICATION", "pass 0 runs live, the check after the last frame")
+    rect(svg, col(0), y2, span2, h2)
+    svg.text("%LOCALAPPDATA%\\blurrd\\projects\\<fingerprint>\\", col(0) + PAD, y2 + 32, MONO, "c", t["faint"])
+    svg.text("Project cache", col(0) + PAD, y2 + 66, TITLE, "s")
+    files = [
+        ("project.json", "tracks, edits, verify state"),
+        ("pts.bin", "timestamp of every frame"),
+        ("structure.bin", "HUD signals, zones pass 0 read"),
+        ("verify-<rev>.json", "boxes and counts, never text"),
     ]
-    cols = 2
-    chip_w = (w4 - 44 - 12) / cols
-    chip_h = 30
-    for i, (label, color) in enumerate(chips):
-        cx = x4 + 22 + (i % cols) * (chip_w + 12)
-        cy = y1 + 94 + (i // cols) * (chip_h + 8)
-        svg.add(
-            f'<rect x="{cx:.1f}" y="{cy}" width="{chip_w:.1f}" height="{chip_h}" rx="8" '
-            f'fill="{t["chip"]}" stroke="{t["border"]}"/>'
-        )
-        svg.add(f'<rect x="{cx + 12:.1f}" y="{cy + 9}" width="12" height="12" rx="3" fill="{color}"/>')
-        svg.text(label, cx + 34, cy + 20, 14, "medium", t["fg"])
-
-    mid1 = y1 + 46
-    for xa in (x + cw, x2 + cw, x3 + cw):
-        arrow(svg, f"M{xa + 8} {mid1}H{xa + gap - 10}", (xa + gap - 10, mid1), "right")
-
-    # Row 2: blur boxes -> encode -> OCR verification -> export.
-    y2, h2 = 360, 232
-    cw2 = (W - 128 - 3 * gap) / 4
-    xs = [64 + i * (cw2 + gap) for i in range(4)]
-    step(
+    for i, (name, what) in enumerate(files):
+        cx = col(0) + PAD + (i % 2) * (span2 / 2)
+        cy = y2 + 102 + (i // 2) * 44
+        svg.text(name, cx, cy, MONO, "cm", t["fg"])
+        svg.text(what, cx, cy + 21, 15.5, "r", t["sub"], max_w=span2 / 2 - PAD - 8)
+    node(
         svg,
-        xs[0],
+        col(2),
         y2,
-        cw2,
+        CW,
         h2,
-        5,
-        "blur",
-        "Blur boxes",
-        ["Soft-edged, tight to each row,", "only inside the boxes"],
-        detail="YUV planes, microseconds per box",
+        "blurrd-ocr",
+        "OCR pass 0",
+        ["PP-OCRv5 det + rec, ONNX", "Runtime on DirectML or CPU"],
+        out="zone reads, names",
+        badge="≤ 4 readers",
     )
-    step(
+    node(
         svg,
-        xs[1],
+        col(3),
         y2,
-        cw2,
+        CW,
         h2,
-        6,
-        "cpu",
-        "GPU encode",
-        ["NVENC, same resolution, fps,", "timestamps and audio"],
-        detail="Fallback: AMF, Quick Sync, MF",
+        "blurrd-engine, -ocr",
+        "Verify + fix",
+        ["blur uncovered name parts", "in memory, read them again"],
+        out="OcrFix boxes, ≤ 3 rounds",
+        accent=True,
     )
-    step(
+    node(
         svg,
-        xs[2],
+        col(4),
         y2,
-        cw2,
+        CW,
         h2,
-        7,
-        "scan-text",
-        "OCR verification",
-        ["Reads the blurred frames as", "exported, adds missed boxes"],
-        detail="PP-OCRv5 on DirectML or CPU",
+        "blurrd-core",
+        "Box tracks",
+        ["tight boxes when tracked,", "slot boxes when unsure"],
+        out="BlurBox list per frame",
     )
-    step(
+    px1 = col(1) + CW / 2
+    arrow(svg, [(px1, y1 + h1), (px1, y2)])
+    edge_label(svg, px1 + 12, (y1 + h1 + y2) / 2 + 5, "pts.bin", anchor="start")
+    dx = col(2) + CW / 2
+    arrow(svg, [(dx, y1 + h1), (dx, y2)])
+    edge_label(svg, dx + 12, (y1 + h1 + y2) / 2 + 5, "frames", anchor="start")
+    bx = col(4) + CW / 2
+    arrow(svg, [(bx, y1 + h1), (bx, y2)])
+    oy = y2 + 48
+    arrow(svg, [(col(2), oy), (col(0) + span2, oy)])
+    edge_label(svg, (col(0) + span2 + col(2)) / 2, oy - 10, "zones")
+    arrow(svg, [(col(2) + CW, oy), (col(3), oy)])
+    edge_label(svg, (col(2) + CW + col(3)) / 2, oy - 10, "reads")
+    arrow(svg, [(col(4), oy), (col(3) + CW, oy)])
+    edge_label(svg, (col(3) + CW + col(4)) / 2, oy - 10, "boxes")
+    fy = y2 + 104
+    arrow(svg, [(col(3) + CW, fy), (col(4), fy)], color=t["accent"])
+    edge_label(svg, (col(3) + CW + col(4)) / 2, fy - 10, "fixes", color=t["accent_fg"])
+
+    # Row 3: render, right to left under the box tracks.
+    y3, h3 = 820, 184
+    section(svg, col(1), y3 - 22, "RENDER", "streams behind the analysis; same bytes as analyze + render")
+    node(
         svg,
-        xs[3],
-        y2,
-        cw2,
-        h2,
-        8,
-        "badge-check",
-        "Verified export",
-        ["Clean, or named *_UNVERIFIED", "until you have checked it"],
-        tone="ok",
-        detail="Audio copied packet for packet",
+        col(4),
+        y3,
+        CW,
+        h3,
+        "blurrd-video",
+        "Render decode",
+        ["trails the analysis, waits", "for final boxes; PTS check"],
+        out="frames + boxes",
     )
-    mid2 = y2 + 46
-    for i in range(3):
-        xa = xs[i] + cw2
-        color = t["ok"] if i == 2 else None
-        arrow(svg, f"M{xa + 8:.1f} {mid2}H{xa + gap - 10:.1f}", (xa + gap - 10, mid2), "right", color=color)
-
-    # Elbow from the detectors down to the blur boxes.
-    sx = x4 + w4 / 2
-    by = (y1 + h1 + y2) / 2
-    tx = xs[0] + cw2 / 2
-    rr = 16
-    arrow(
+    node(
         svg,
-        f"M{sx:.1f} {y1 + h1 + 8}V{by - rr:.1f}Q{sx:.1f} {by:.1f} {sx - rr:.1f} {by:.1f}"
-        f"H{tx + rr:.1f}Q{tx:.1f} {by:.1f} {tx:.1f} {by + rr:.1f}V{y2 - 10}",
-        (tx, y2 - 10),
-        "down",
+        col(3),
+        y3,
+        CW,
+        h3,
+        "blurrd-blur",
+        "Blur inside boxes",
+        ["`CpuBlur` on YUV 4:2:0,", "only inside padded boxes"],
+        out="blurred frames",
     )
-
-    # Fix loop: verification -> blur boxes, under row 2.
-    lx0 = xs[2] + cw2 / 2
-    lx1 = xs[0] + cw2 / 2
-    ly = y2 + h2 + 44
-    arrow(
+    node(
         svg,
-        f"M{lx0:.1f} {y2 + h2 + 8}V{ly - rr:.1f}Q{lx0:.1f} {ly} {lx0 - rr:.1f} {ly}"
-        f"H{lx1 + rr:.1f}Q{lx1:.1f} {ly} {lx1:.1f} {ly - rr:.1f}V{y2 + h2 + 10}",
-        (lx1, y2 + h2 + 10),
-        "up",
-        color=t["accent"],
-        dash=True,
+        col(2),
+        y3,
+        CW,
+        h3,
+        "blurrd-video",
+        "Encode",
+        ["NVENC (H.264: 2 sessions),", "AMF, Quick Sync or MF"],
+        out="packets, source GOPs",
     )
-    label = "Readable name found: fix boxes, read again (up to 3 rounds)"
-    lw = fonts["medium"].width(label, 14) + 56
-    lcx = (lx0 + lx1) / 2
-    svg.add(
-        f'<rect x="{lcx - lw / 2:.1f}" y="{ly - 17}" width="{lw:.1f}" height="34" rx="17" '
-        f'fill="{t["card"]}" stroke="{t["accent"]}" stroke-opacity="0.55"/>'
+    node(
+        svg,
+        col(1),
+        y3,
+        CW,
+        h3,
+        "blurrd-video",
+        "Mux",
+        ["audio, subtitles copied;", "recorder metadata removed"],
+        out="<name>.tmp.<ext>",
     )
-    svg.icon("refresh", lcx - lw / 2 + 16, ly - 9, 18, t["accent_fg"])
-    svg.text(label, lcx - lw / 2 + 42, ly + 5, 14, "medium", t["accent_fg"])
+    node(
+        svg,
+        col(0),
+        y3,
+        CW,
+        h3,
+        "output",
+        "Export",
+        ["`<name>.mp4` once verified,", "else `<name>_UNVERIFIED.mp4`"],
+        out="size, fps, PTS kept",
+        accent=True,
+    )
+    ry = y3 + 48
+    for i in range(4, 0, -1):
+        arrow(svg, [(col(i), ry), (col(i - 1) + CW, ry)])
+    mid23 = (y2 + h2 + y3) / 2
+    arrow(svg, [(bx, y2 + h2), (bx, y3)])
+    edge_label(svg, bx + 12, mid23 + 5, "box store", anchor="start")
+    sx = col(3) + 64
+    ex = col(0) + CW / 2
+    gy = mid23 - 8
+    arrow(svg, [(sx, y2 + h2), (sx, gy), (ex, gy), (ex, y3)], color=t["accent"])
+    edge_label(
+        svg,
+        (col(1) + col(2) + CW) / 2,
+        gy + 5,
+        "clean: rename · fixes: re-encode only GOPs with changed boxes",
+        color=t["accent_fg"],
+        pill=True,
+    )
 
-    # Footer: privacy band.
-    fy = 728
-    svg.add(f'<line x1="64" y1="{fy - 30}" x2="{W - 64}" y2="{fy - 30}" stroke="{t["border"]}"/>')
-    svg.icon("cloud-off", 64, fy - 6, 22, t["sub"])
-    svg.text(
-        "100 % local: no upload, no account, no telemetry. Reports and logs never contain the names OCR read.",
-        98,
-        fy + 11,
-        15,
-        "regular",
-        t["sub"],
-    )
+    # Footer: measured speed, hardware and the privacy note.
+    sy = 1070
+    svg.add(f'<line x1="{X0}" y1="{sy - 40}" x2="{W - X0}" y2="{sy - 40}" stroke="{t["rule"]}"/>')
+    stats = [
+        ("≈ 10 s", "60 s 1080p60: analysis, OCR, export"),
+        ("800–890 fps", "analysis without OCR"),
+        ("450–500 fps", "analysis with OCR"),
+        ("830–870 fps", "H.264 render, 2 NVENC sessions"),
+    ]
+    for i, (num, what) in enumerate(stats):
+        svg.text(num, col(i), sy, 25, "s", t["fg"])
+        svg.text(what, col(i), sy + 27, 15.5, "r", t["sub"], max_w=CW + GAP - 12)
+    svg.text("RTX 4080 SUPER, Ryzen 7 7800X3D", col(4), sy - 6, 15.5, "m", t["fg"], max_w=CW)
+    svg.text("release build, 2026-10-17", col(4), sy + 15, 15.5, "r", t["sub"])
+    svg.text("Everything runs locally.", col(4), sy + 36, 15.5, "r", t["sub"], max_w=CW)
 
+    height = sy + 50
     head = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W - 124}" height="{H - 34}" viewBox="62 22 {W - 124} {H - 34}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{height}" viewBox="0 0 {W} {height}" '
         f'role="img" aria-labelledby="title desc">'
         f'<title id="title">How blurrd works</title>'
-        f'<desc id="desc">Recording, GPU decode with NVDEC, HUD layout calibration, per-region '
-        f"detectors for kill feed, round banner, voice chat, text chat, scoreboard, death recap, "
-        f"spectating and match end, blur boxes, GPU encode with NVENC, OCR verification that "
-        f"re-reads the blurred frames and adds fix boxes, verified export. Everything runs locally."
-        f"</desc><defs>{''.join(svg.glyphs.values())}</defs>"
+        f'<desc id="desc">{DESC}</desc><defs>{"".join(svg.glyphs.values())}</defs>'
     )
-    return head + "".join(svg.parts) + "</svg>\n"
+    return head + "".join(svg.parts) + "</svg>\n", svg.overflow
+
+
+DESC = (
+    "Architecture of blurrd. The desktop app and the command-line tool call the same engine jobs. "
+    "Analysis: blurrd-video probes the recording and builds the timestamp table, blurrd-detect "
+    "calibrates the HUD layout from sampled keyframes, one decoder (NVDEC, D3D11VA or software) "
+    "feeds two to six crop and detect workers and one thread of temporal models, which turn the "
+    "detections into box tracks. Verification: up to four OCR readers (PP-OCRv5 on ONNX Runtime "
+    "with DirectML or the CPU) read the protected zones during the analysis; afterwards uncovered "
+    "name parts are blurred in memory and read again, and readable names get OcrFix boxes, up to "
+    "three rounds. Render: a second decoder trails the analysis, blurrd-blur blurs the YUV planes "
+    "inside the boxes, NVENC, AMF, Quick Sync or Media Foundation encode, the muxer copies audio, "
+    "and the export keeps the source name once verified or is marked UNVERIFIED. Measured on an "
+    "RTX 4080 SUPER: about 10 seconds for a 60-second 1080p60 recording. Everything runs locally."
+)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--fonts", type=Path, required=True, help="folder with Inter-*.ttf (OFL-1.1)")
+    ap.add_argument("--fonts", type=Path, required=True, help="folder with the Inter and JetBrains Mono TTFs")
     args = ap.parse_args()
-    fonts = {
-        w: Font.load(args.fonts / f"Inter-{n}.ttf")
-        for w, n in (("regular", "Regular"), ("medium", "Medium"), ("semibold", "SemiBold"))
-    }
+    fonts = {k: Font.load(args.fonts / name) for k, name in FONT_FILES.items()}
     for name in THEMES:
+        svg, overflow = build(name, fonts)
+        for o in overflow:
+            print("overflow:", o)
         out = OUT / f"how-it-works-{name}.svg"
-        out.write_text(build(name, fonts), encoding="utf-8", newline="\n")
-        print(out)
+        out.write_text(svg, encoding="utf-8", newline="\n")
+        print(out, f"{len(svg.encode()) / 1024:.0f} KB")
 
 
 if __name__ == "__main__":
