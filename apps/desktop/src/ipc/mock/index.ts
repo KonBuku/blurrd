@@ -257,6 +257,7 @@ export function installMockBackend(): MockBackend {
       return backend.backendSettings.invoke(cmd, args, {
         openPaths: [...projects.values()],
         idle: backend.jobs.isIdle(),
+        probing: performance.now() - installedAt < backend.capabilitiesDelayMs,
         reprobe: () => {
           installedAt = performance.now();
         },

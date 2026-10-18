@@ -142,10 +142,15 @@ impl AppState {
         self.capabilities.start(self.cache_dir().join(CAPS_FOLDER));
     }
 
-    /// Clears the cached capability probes and probes again.
-    pub(crate) fn reprobe_capabilities(&self) {
+    /// Clears the cached capability probes and probes again, unless a
+    /// probe runs or a job runs or waits.
+    ///
+    /// # Errors
+    ///
+    /// See [`CapabilityProbe::restart`].
+    pub(crate) fn reprobe_capabilities(&self) -> Result<(), AppError> {
         self.capabilities
-            .restart(self.cache_dir().join(CAPS_FOLDER));
+            .restart(self.cache_dir().join(CAPS_FOLDER), || self.jobs.is_idle())
     }
 }
 

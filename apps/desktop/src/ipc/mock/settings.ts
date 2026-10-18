@@ -126,6 +126,8 @@ export interface SettingsContext {
   readonly openPaths: readonly string[];
   /** Whether no job runs or waits. */
   readonly idle: boolean;
+  /** Whether the capability probe runs. */
+  readonly probing: boolean;
   /** Starts the capability probe again. */
   readonly reprobe: () => void;
 }
@@ -262,6 +264,13 @@ export class MockSettings {
         this.logDirOpened += 1;
         return null;
       case "refresh_capabilities":
+        if (context.probing) {
+          throw {
+            kind: "Internal",
+            message: "blurrd is already measuring this PC.",
+            detail: null,
+          } satisfies AppError;
+        }
         if (!context.idle) {
           throw {
             kind: "Internal",

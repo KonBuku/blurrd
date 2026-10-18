@@ -363,7 +363,9 @@ pub(crate) fn start_analysis(
     let engine = state.engine()?;
     let project = project(&state, &project_id)?;
     let job = new_job();
-    let work = tasks::analysis(engine, project, regions, verify);
+    let work = state
+        .capabilities
+        .after_probe(tasks::analysis(engine, project, regions, verify));
     state.jobs.enqueue(job, Arc::new(on_event), work);
     Ok(job)
 }
@@ -387,11 +389,10 @@ pub(crate) fn start_render(
         enabled,
     };
     let job = new_job();
-    state.jobs.enqueue(
-        job,
-        Arc::new(on_event),
-        tasks::render(engine, project, request),
-    );
+    let work = state
+        .capabilities
+        .after_probe(tasks::render(engine, project, request));
+    state.jobs.enqueue(job, Arc::new(on_event), work);
     Ok(job)
 }
 
@@ -405,9 +406,10 @@ pub(crate) fn start_reverify(
     let engine = state.engine()?;
     let project = project(&state, &project_id)?;
     let job = new_job();
-    state
-        .jobs
-        .enqueue(job, Arc::new(on_event), tasks::reverify(engine, project));
+    let work = state
+        .capabilities
+        .after_probe(tasks::reverify(engine, project));
+    state.jobs.enqueue(job, Arc::new(on_event), work);
     Ok(job)
 }
 
@@ -436,6 +438,7 @@ pub(crate) fn start_run(
         .map(|(project, request, regions, verify)| {
             let job = new_job();
             let work = tasks::run(Arc::clone(&engine), project, request, regions, verify);
+            let work = state.capabilities.after_probe(work);
             state.jobs.enqueue(job, Arc::clone(&out), work);
             job
         })
@@ -619,18 +622,11 @@ pub(crate) fn open_log_dir(app: AppHandle, state: State<'_, AppState>) -> Result
 }
 
 /// Forgets the cached decoder benchmark and encoder probe and probes this
-/// PC again; refused while a job runs or waits (the probe encodes on the
-/// GPU).
+/// PC again; refused while a probe runs or a job runs or waits (the probe
+/// encodes on the GPU).
 #[tauri::command]
 pub(crate) fn refresh_capabilities(state: State<'_, AppState>) -> Result<(), AppError> {
-    if !state.jobs.is_idle() {
-        return Err(AppError::new(
-            ErrorKind::Internal,
-            "Wait until the running jobs are done.",
-        ));
-    }
-    state.reprobe_capabilities();
-    Ok(())
+    state.reprobe_capabilities()
 }
 
 #[cfg(test)]

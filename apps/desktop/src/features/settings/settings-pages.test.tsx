@@ -179,6 +179,26 @@ describe("settings pages", () => {
     expect(await screen.findByText(/here the NVIDIA GeForce RTX 4080 SUPER/)).toBeTruthy();
   });
 
+  it("reads a partial export section with the other defaults, like the backend", () => {
+    seedSettingsFile({
+      defaults: { export: { container: "Mkv", output: { template: "{name}_x" } } },
+    });
+    const { defaults } = installMockBackend().backendSettings.stored();
+    expect(defaults.export).toEqual({
+      ...DEFAULT_DEFAULTS.export,
+      container: "Mkv",
+      output: { ...DEFAULT_DEFAULTS.export.output, template: "{name}_x" },
+    });
+  });
+
+  it("refuses a second hardware measurement while one runs", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    backend.capabilitiesDelayMs = 60_000;
+    await expect(invoke("refresh_capabilities")).rejects.toMatchObject({
+      message: "blurrd is already measuring this PC.",
+    });
+  });
+
   it("measures the hardware again only while no job runs", async () => {
     renderPage(<ProcessingSettings />);
     const button = await screen.findByRole("button", { name: "Measure again" });
